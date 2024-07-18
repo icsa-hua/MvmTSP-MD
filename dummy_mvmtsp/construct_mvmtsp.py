@@ -1,4 +1,14 @@
-from formulation_module import MvmTSP
+
+try : 
+    import sys 
+    sys.path.append('/Matlab Projects/Swarms (Refined)/interface')
+except: 
+    print("Cannot import project.")
+    exit(-1)
+import os 
+print(os.getcwd())
+
+from interface.formulation_module import MvmTSP
 import pulp as pl  
 from pulp import LpProblem, LpMinimize, lpSum, LpVariable 
 import pandas as pd 
@@ -221,12 +231,13 @@ class ConstrainedMVMTSP(MvmTSP):
                         cost_d[self.depots_for_agents[k]] = self.distances.loc[self.depots_for_agents[k]].to_numpy()
                         cost_e[self.depots_for_agents[k]] = self.energy.loc[self.depots_for_agents[k]].to_numpy()
                         R_points[self.depots_for_agents[k]] = self.R_points[self.depots_for_agents[k]]
+                    if self.depots_for_agents[k] not in virtual_nodes:
                         virtual_nodes.append(self.depots_for_agents[k])
-                virtual_nodes = set(virtual_nodes)
+
+                # virtual_nodes = set(virtual_nodes)
                 if len(R_points)!=len(cost_d) or len(R_points)!=len(cost_e) or len(cost_d)!=len(cost_e):
                     warnings.warn("Sizes of area atribute arrays do not match.")
                     break
-                
                 
                 # V = {V_nodes[i]:nodes[1][i] for i in range(len(nodes[1]))}
                 V = {agent:{} for agent in self.agents}
@@ -237,7 +248,7 @@ class ConstrainedMVMTSP(MvmTSP):
                         for k in self.agents: 
                             V_nodes = list(range(len(nodes[k])))
                             V[k] = {V_nodes[i]:nodes[k][i] for i in range(len(nodes[k]))}
-                            pdb.set_trace()
+                            # pdb.set_trace()
                             self.initial_population[k] = self.call_genetic_algorithm(V[k],cost_d,k)
                         V_nodes = list(range(len(virtual_nodes)))    
                         
@@ -437,8 +448,6 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += self.x[d,ind,k] + self.x[ind,d,k] <= 0, f"No_travel_{i}_at_{d}_for_{k}"
 
 
-
-
     def add_constraint_7(self, V_nodes, cost_d, cost_e, R_points): 
 
         for k in self.agents: 
@@ -467,7 +476,7 @@ class ConstrainedMVMTSP(MvmTSP):
                 for a in range(len(self.initial_population)): 
                         for i in range(len(self.initial_population[a])-1): 
                             self.x[self.initial_population[a][i],self.initial_population[a][i+1],a+1].setInitialValue(1)
-                pdb.set_trace()
+                # pdb.set_trace()
 
 
     def add_constraint_8_dict(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points):
@@ -563,9 +572,9 @@ class ConstrainedMVMTSP(MvmTSP):
         print(f" Program Completion Time: {execution_time}s")
 
 
-dist_path = '../distance_cost.csv'
-energy_path = '../energy_cost.csv'
-nodes_path = '../areas.csv'
+dist_path = 'swarms/distance_cost.csv'
+energy_path = 'swarms/energy_cost.csv'
+nodes_path = 'swarms/areas.csv'
 agents = 5
 
 problem = ConstrainedMVMTSP(data=None, use_GA=True, regionalization=True, dictionary_flag=True)

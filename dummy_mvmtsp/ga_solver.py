@@ -1,4 +1,4 @@
-from genetic_algorithm import GA
+from interface.genetic_algorithm import GA
 from deap import base, creator, tools, algorithms 
 import pandas as pd 
 import random 
@@ -7,6 +7,7 @@ import numpy as np
 import networkx as nx
 from typing import Tuple
 import pdb
+import warnings
 
 class GASOL(GA): 
     def __init__(self, population_size, generations, nodes, agents,D):
@@ -19,8 +20,6 @@ class GASOL(GA):
         creator.create("FitnessMin", base.Fitness,weights=(-1.0,))
         creator.create("Individual", list, fitness=creator.FitnessMin)  
         self.toolbox = base.Toolbox()
-        
-
 
     def create_graph(self,cost):
         graph = nx.Graph()
@@ -31,12 +30,12 @@ class GASOL(GA):
     
     def create_graph_dict(self,cost):
         graph = nx.Graph()
-        for enter in self.nodes.values(): 
-            for ex in self.nodes.values():
+        for enter in self.nodes.keys(): 
+            for ex in self.nodes.keys():
                 try:
-                    graph.add_edge(enter, ex, cost=cost[enter][ex-1])
+                    graph.add_edge(enter, ex, cost=cost[self.nodes[enter]][self.nodes[ex]-1])
                 except:
-                    pdb.set_trace()
+                    warnings.warn(f"No edge between {enter} and {ex} with corresponding cost")
         return graph 
     
     def initialize_tours(self):
@@ -61,12 +60,15 @@ class GASOL(GA):
 
     def initialize_tours_dict(self):
         # all_nodes = [self.nodes[k] for k in self.nodes]
-        all_nodes = list(range(len(self.nodes.values())))
-        tmp_dict = {value:key for key,value in self.nodes.items()}
+        # all_nodes = list(range(len(self.nodes.values())))
+        
+        all_nodes = list(self.nodes.keys())   
+        tmp_dict = {v:k for k,v in self.nodes.items()}
+        d = [tmp_dict[self.depots]]
+        all_nodes.remove(*d)
         random.shuffle(all_nodes)
         tour = [] 
-        d = tmp_dict[self.depots]
-        tour.extend([d] + all_nodes + [d])
+        tour.extend(d + all_nodes + d)
         return tour 
 
     def initialize_population(self):
@@ -126,9 +128,7 @@ class GASOL(GA):
         for i in range(0, len(individual), 2*(len(self.nodes)//self.m+1)): 
             tour = individual[i:i + 2*(len(self.nodes)//self.m+1)]
             # tour = individual
-            print(len(tour))
             for j in range(len(tour)): 
-                
                 
                 try: 
                     total_distance += cost[tour[j-1]][tour[j]]
@@ -141,13 +141,14 @@ class GASOL(GA):
     
     def fitness_evaluation_dict(self,individual, cost: np.ndarray) -> Tuple:
         total_distance = 0 
-        for i in range(0, len(individual)): 
-            
-            total_distance += cost[self.nodes[individual[i-1]]][self.nodes[individual[i]]]
-            
+        for i in range(0, len(individual)-1): 
+            try: 
+                total_distance += cost[self.nodes[individual[i]]][self.nodes[individual[i+1]]-1]
+            except: 
+                warnings.warn(f"IndexError: {i}")
+        
         return (total_distance,)
         
-
     def toolbox_config(self): 
         self.toolbox.register("individual", tools.initIterate, creator.Individual, self.initialize_tours)
         self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
@@ -180,19 +181,24 @@ class GASOL(GA):
             for i, path in enumerate(paths): 
                 print(f"Path for agent {i+1}: {path}")
             return paths, HOF
-        self.graph = self.create_graph_dict(cost)
-        self.toolbox_config_dict()
-        self.toolbox.register("evaluate", self.fitness_evaluation_dict, cost=cost)
-        HOF = tools.ParetoFront()
-        stats = tools.Statistics(lambda ind: ind.fitness.values)
-        stats.register("avg", numpy.mean, axis=0)
-        stats.register("std", numpy.std, axis=0)
-        stats.register("min", numpy.min, axis=0)
-        stats.register("max", numpy.max, axis=0)
-        population = self.toolbox.population(n=self.population_size)
-        algorithms.eaSimple(population, self.toolbox, cxpb=cthr, mutpb=mthr, ngen=self.generations, stats=stats, halloffame=HOF, verbose=False)
-        paths =  tools.selBest(population,1)
-        return paths, HOF
+        
+        else:
+            self.graph = self.create_graph_dict(cost)
+            self.toolbox_config_dict()
+            self.toolbox.register("evaluate", self.fitness_evaluation_dict, cost=cost)
+            # pdb.set_trace()
+
+            HOF = tools.ParetoFront()
+            stats = tools.Statistics(lambda ind: ind.fitness.values)
+            stats.register("avg", numpy.mean, axis=0)
+            stats.register("std", numpy.std, axis=0)
+            stats.register("min", numpy.min, axis=0)
+            stats.register("max", numpy.max, axis=0)
+            population = self.toolbox.population(n=self.population_size)
+            algorithms.eaSimple(population, self.toolbox, cxpb=cthr, mutpb=mthr, ngen=self.generations, stats=stats, halloffame=HOF, verbose=False)
+            paths =  tools.selBest(population,1)
+
+            return paths, HOF
 
     def set_tours(self,paths,agents): 
         unique_paths = dict() 
