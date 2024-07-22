@@ -7,7 +7,7 @@ from typing import Tuple
 class GA(ABC): 
 
     @abstractmethod
-    def __init__(self, population_size: int, generations: int, nodes: list): 
+    def __init__(self, population_size: int, generations: int, nodes: list, agents:list, depots:dict): 
         """
         Initialize the GA heuristic with the given parameters
         """
