@@ -6,6 +6,7 @@
 * [Introduction](#introduction)
 * [Technologies](#technologies)
 * [SetUp](#setup)
+* [Usage](#usage)
 * [License](#license)
 
 ## Introduction
@@ -44,6 +45,13 @@ cd MvmTSP-MD
 ```sh
 pip install -r requirements.txt
 ```
+
+Make sure you have the GLPK library installed: 
+* For Windows system follow the guide: https://winglpk.sourceforge.net/. Or Use WSL2.
+* For Linux system use: `sudo apt-get install glpk-utils`
+
+## Usage 
+Launch the application: `python3 main.py`
 
 #### Data Initialization
 Every major data is provided through csv files. Consider the following format: 
