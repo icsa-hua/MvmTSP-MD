@@ -45,8 +45,9 @@ class GASOL(GA):
         """
                 
         graph = nx.Graph()
-        for enter in self.nodes: 
-            for exit in self.nodes: 
+        for enter in self.nodes.keys(): 
+            for exit in self.nodes.keys(): 
+                
                 graph.add_edge(enter, exit, cost=cost[enter][exit])
         return graph 
     
@@ -64,10 +65,10 @@ class GASOL(GA):
                 
         graph = nx.Graph()
         for enter in self.nodes.keys(): 
-            for ex in self.nodes.keys():
+            for ex in self.nodes.keys(): 
                 try:
                     graph.add_edge(enter, ex, cost=cost[self.nodes[enter]][self.nodes[ex]-1])
-                except:
+                except: 
                     warnings.warn(f"No edge between {enter} and {ex} with corresponding cost")
         return graph 
     
@@ -87,12 +88,12 @@ class GASOL(GA):
         """
 
         all_nodes = list(self.nodes.keys())
-        tmp_dict = {v:k for k,v in self.nodes.items()}
-        random.shuffle(all_nodes)
+        tmp_dict = {v:k for k,v in self.nodes.items()} 
+        random.shuffle(all_nodes) 
         
-        size_per_agent = len(all_nodes) // self.m
+        size_per_agent = len(all_nodes) // self.m 
         tours = [] 
-        visited = []
+        visited = [] 
         index = 0 
         
         for k in range(1, self.m + 1): 
@@ -226,15 +227,24 @@ class GASOL(GA):
             Tuple[float]: A tuple containing the total distance of the tour.
         """
                 
+        # total_distance = 0 
+        # for i in range(0, len(individual), 2*(len(self.nodes)//self.m+1)): 
+        #     tour = individual[i:i + 2*(len(self.nodes)//self.m+1)]
+        #     for j in range(len(tour)-1): 
+        #         try: 
+        #             total_distance += cost[tour[j]][tour[j+1]]
+        #         except IndexError:
+        #             warnings.warn(f"IndexError: {j}")
+
         total_distance = 0 
-        for i in range(0, len(individual), 2*(len(self.nodes)//self.m+1)): 
-            tour = individual[i:i + 2*(len(self.nodes)//self.m+1)]
+        met = len(set(self.depots.values()))
+        for i in range(0, len(individual), len(individual)//met):
+            tour = individual[i:i + len(individual)//met]
             for j in range(len(tour)-1): 
-                try: 
-                    total_distance += cost[tour[j]][tour[j+1]]
+                try:
+                    total_distance += cost[tour[j]][tour[j+1]-1]
                 except IndexError:
                     warnings.warn(f"IndexError: {j}")
-
         return (total_distance,)
     
     def fitness_evaluation_dict(self,individual, cost: dict) -> Tuple:
@@ -327,7 +337,7 @@ class GASOL(GA):
             population = self.toolbox.population(n=self.population_size)
             algorithms.eaSimple(population, self.toolbox, cxpb=cthr, mutpb=mthr, ngen=self.generations, stats=stats, halloffame=HOF, verbose=False)
             paths =  tools.selBest(population,1)
-
+            
             return paths, HOF
 
     def set_tours(self,paths,agents): 
@@ -350,13 +360,14 @@ class GASOL(GA):
         for path in paths: 
             if path[0] in values: 
                 path = tuple(path[0:len(self.nodes.keys())+1])
-                if path not in unique_paths:
-                    unique_paths[path] = path_id
-                    path_id += 1
-                    if path_id > agents:
-                        break
-                    
-        return unique_paths
+                if path not in unique_paths.keys(): 
+                    unique_paths[path] = path_id 
+                    path_id += 1 
+                    if path_id > agents: 
+                        break 
+
+        paths_list = [list(k) for k in unique_paths.keys()]
+        return paths_list
 
 
 
