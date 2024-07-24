@@ -32,13 +32,13 @@ def call_mvmtsp_constructor(*,enable_dictionary:bool = False, useGA:bool = True 
 
 def main(): 
     
-    # try: 
-    #     with warnings.catch_warnings():
-    #         warnings.simplefilter("ignore", RuntimeWarning)
+    try: 
+         with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
             max_memory = 2 * 1024 *1024 *1024
             call_mvmtsp_constructor(enable_dictionary=False, useGA=False, number_of_agents=3, max_battery=1500,max_memory=max_memory)
-    # except: 
-    #     print("Calling the constructor failed!")
+    except: 
+        print("Calling the constructor failed!")
 
 
 if __name__ == "__main__":
