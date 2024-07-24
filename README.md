@@ -1,6 +1,7 @@
 # Many-Visits Multi-Travelling Salesman Problem with Multiple-Depots (MvmTSP-MD) 
 
 ![License](https://img.shields.io/badge/license-GPL-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)
 
 ## Table of Contents 
 * [Introduction](#introduction)
