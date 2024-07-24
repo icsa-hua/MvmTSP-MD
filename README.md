@@ -45,5 +45,12 @@ cd MvmTSP-MD
 pip install -r requirements.txt
 ```
 
+#### Data Initialization
+Every major data is provided through csv files. Consider the following format: 
+* Areas -> Columns of DataFrame X_coords, Y_coords, ID
+* Distances -> A NxN array with distance between every pair of nodes
+* Energy -> A NxN array with distance between every pair of nodes
+* Customers -> Area IDs that containt users 
+
 ## License 
 This project is licensed under the GPL License. See the [LICENSE](LICENSE) file for details.
