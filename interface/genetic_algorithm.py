@@ -50,7 +50,7 @@ class GA(ABC):
         pass
 
     @abstractmethod
-    def fitness_evaluation(self,individual,cost:np.ndarray) -> Tuple: 
+    def fitness_evaluation(self, individual, cost:np.ndarray) -> Tuple: 
         """
         Calculation of the objective to optimize (e.g. distance, energy consumption). 
         """
@@ -61,15 +61,11 @@ class GA(ABC):
         """
         Create the configuration about population, crossover, mutation
         """
-        # toolbox.register("indices", random.sample, list(range(v)), v)
-        # toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
-        # toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-        # toolbox.register("mate", tools.cxPartialyMatched) 
-        # toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.05)
+        
         pass 
 
     @abstractmethod
-    def run(self, cthr: float, mthr: float)->list: 
+    def run(self, cthr: float, mthr: float, enable_ind_fit:bool)->list: 
 
         """
         Execute the GA to find the optimal path

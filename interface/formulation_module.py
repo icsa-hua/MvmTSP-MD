@@ -55,7 +55,9 @@ class MvmTSP(ABC):
         pass 
 
     @abstractmethod
-    def preprocess(self, distance: str, energy: str, areas: str, num_agents:int) -> pd.DataFrame: 
+    #def preprocess(self, cost_1_path,cost_2_path, nodes_path, agents,customers_path, max_battery): 
+
+    def preprocess(self, cost_path_1: str, cost_path_2: str, nodes_path: str, agents:int, customers_path:str, max_battery:int) -> pd.DataFrame: 
         """
         Initialize the main entities for the optimization problem, 
         such as nodes, agents, and the distance matrix. 
@@ -73,7 +75,7 @@ class MvmTSP(ABC):
         pass
 
     @abstractmethod
-    def call_genetic_algorithm(self, nodes:list, cost:list) -> list: 
+    def call_genetic_algorithm(self, V_nodes:list, cost:list ) -> list: 
         """
         Call the Genetic algorithm class to create the object. 
         """
@@ -95,14 +97,14 @@ class MvmTSP(ABC):
         pass
     
     @abstractmethod
-    def run_model(self):
+    def run_model(self, data: pd.DataFrame, enabled_constraints: list):
         """
         Execute the problem constructor. 
         """
         pass
 
     @abstractmethod
-    def create_solution(self, nodes: list, Cities: dict)->list:
+    def create_solution(self, nodes: list, V: dict):
         """
         Process and validate the solution returned by the solver.
         """
@@ -119,5 +121,12 @@ class MvmTSP(ABC):
     def get_performance(self):
         """
         Return the computational time in seconds.
+        """
+        pass
+
+    @classmethod
+    def get_memory_usage(self): 
+        """
+        Return the memory usage in MegaBytes.
         """
         pass

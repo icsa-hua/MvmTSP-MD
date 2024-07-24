@@ -1,98 +1,194 @@
-import deap 
-from deap import base, creator, tools, algorithms 
-import pandas as pd 
-import random 
-import time 
-import numpy
-import pdb
-import numpy as np
+
+    ### ---ALL CONSTRAINTS---###
+    #Constraint 1: Each node must be entered and exitted once by each agent 
+    # for k in agents: 
+    #     d = depots_for_agents[k]
+    #     for j in V_nodes: 
+    #         if j != d:
+    #             model += lpSum(x[i,j,k] for i in V_nodes if i != j) == 1, f"Enter_{j}_by_{k}"
+    #             model += lpSum(x[j,i,k] for i in V_nodes if i != j) == 1, f"Exit_{j}_by_{k}"
+
+    #Constraint 2: Subtour elimination constraints SEC 
+    # for k in agents: 
+    #     d = depots_for_agents[k]
+    #     for i in V_nodes[1:]: 
+    #         model += x[i, d, k] + x[d,i,k] <=1 
+
+    # for k in agents:
+    #     d = depots_for_agents[k]
+    #     for i in V_nodes: 
+    #         for j in V_nodes: 
+    #             if i!=j and i != d and j != d : 
+    #                 model +=  u[i, k] - u[j, k] + v * x[i, j, k] <= v - 1 
+
+    # for k in agents: 
+    #     for i in V_nodes: 
+    #         if i != V_nodes: 
+    #             model += u[i,k] >= 1 
+    #             model += u[i,k] <= v - 1
+
+    #Constraint 3: Many visits for each city 
+    # for j in V_nodes : 
+    #     model += lpSum(x[i,j,k] for i in V_nodes if i!=j for k in agents) <= R_points[j-1] , f'Min_visits_{j}_{k}' #Constraint 2 For Visits
+
+    # Constraint 4: Allow only a single agent to be on top of a city. 
+    # for step in TS:
+    #     d = depots_for_agents[k]
+    #     model += lpSum(t[i,j,k,step] for k in agents for i in V_nodes for j in V_nodes if i!=j and j !=d) <= 1,f"Single_Agent_at_at_time_{step}"
+    
+    # Constraint 5: Each agents begins its journey at full energy 
+    # for k in agents:
+    #     d = depots_for_agents[k] 
+    #     model += e[d,k] >= theta - M * (lpSum(z[d,k])), f"EnergyFull_at_start_{d}_{k}"
+
+    # Constraint 6: Travel corresponds to energy 
+    # for k in agents: 
+    #         d = depots_for_agents[k]
+    #         for i in V_nodes: 
+    #             for j in V_nodes: 
+    #                 if i!=j: 
+    #                     model += e[j,k] >= e[i,k] - (cost_e[i-1][j-1] * x[i,j,k]),f"Update_remaining_energy_{i}_{j}_{k}"
+    #                     model += e[i,k] >= cost_e[i-1][j-1] * x[i,j,k],f"No_travel_if_low_energy{i}_{j}_for_{k}"
+    #             if i == d: 
+    #                 model += e[j,k] == theta - M * (lpSum(z[d,k])), f"EnergyFull_at_end_{i}_{k}"
+                        
+
+    #Constraint 7: Start and finish at the same depot. 
+    # for k in agents: 
+    #     d = depots_for_agents[k]
+    #     model += lpSum(x[d,j,k] for j in V_nodes if j not in depots_for_agents) ==1, f"Start_at_depot_{k}"
+    #     model += lpSum(x[j,d,k] for j in V_nodes if j not in depots_for_agents) ==1, f"Finish_at_depot_{k}"
+    #     model += x[d,d,k] == 0, f"No_loop_at_depot_{k}_{d}"
+    #     for i in depot_values:
+    #         if i != d: 
+    #             model += x[d,i,k] == 0, f"No_travel_from_{i}_at_depot_{d}_for_{k}"
+    #             model += x[i,d,k] == 0, f"No_travel_to_{i}_at_depot_{d}_for_{k}"
+    #             model += x[d,i,k] + x[i,d,k] <= 0, f"No_travel_{i}_at_{d}_for_{k}"
+
+
+    # #Constraint 9: Prevent loops and unecessarry visits at depots. 
+    # for k in agents: 
+    #     for step in TS[:-1]: 
+    #             d = depots_for_agents[k]
+    #             model += t[d,d,k,step] == 0 
+    #             model += t[d,d,k,step] + t[d,d,k,step+1] <= 1, f"No_loop_at_depot_{d}_{step}_{k}"
+    #             model += lpSum(t[d,j,k,step] for j in depots_for_agents ) == 0, f"No_unnecessary_visits_at_depot_{d}_{step}_{k}"
+
+    #Constraint 10: Ensure that a customer/city is served by an agent. 
+    # for i in C[0:10] : 
+    #     a = i.item()
+    #     model += lpSum(x[j,a,k] for j in V_nodes for k in agents) >= z[a,k], f"ServiceConstraint_{a}_{k}"
+    
+
+    #Set initial solution based on the GA 
+    # for a in range(len(initial_population)): 
+    #     for i in range(len(initial_population[a])-1): 
+    #         x[initial_population[a][i],initial_population[a][i+1],a+1].setInitialValue(1)
+
+    
 
 
 
-V_nodes = list(range(36))
-v = len(V_nodes)
-agents = [1,2,3]
-m = len(agents)
-population_size = 100 
-generations = 50 
-D = [V_nodes[8],V_nodes[9]] 
-
-
-def evaluate(individual, c_ij,m):
-    total_distance = 0 
-    tours = split_tours(individual, m, D)
-    for tour in tours: 
-        distance = 0
+        # for k in agents:
+        #     d = depots_for_agents[k]
+        #     sum_start = sum(x[d, j, k].varValue for j in V_nodes if j != d)
+        #     sum_finish = sum(x[j, d, k].varValue for j in V_nodes if j != d)
+        #     print(f"Agent {k} starts from depot {d}: {sum_start}")
+        #     print(f"Agent {k} returns to depot {d}: {sum_finish}")
+        # Retrieve the paths
         
-        for i in range(len(tour)-1):
-            distance += c_ij[tour[i]][tour[i+1]]
-        distance += c_ij[tour[-1]][tour[0]]
-        total_distance += distance 
-    return (total_distance,) 
-
-def initialization_GA():
-    creator.create("FitnessMin", base.Fitness,weights=(-1.0,))
-    creator.create("Individual", list, fitness=creator.FitnessMin)
-
-def split_tours(individual, m, D ): 
-    size_per_agent = len(individual) // m
-    tours = []
-    d = D[np.random.randint(2)]
-    for i in range(m):
-        start = i * size_per_agent
-        end = len(individual) if i == m - 1 else (i + 1) * size_per_agent
-        tour = [d] + individual[start:end] + [d]
-        tours.append(tour)
-    return tours
-
-def toolbox_config(v,distances,m,): 
-    toolbox = base.Toolbox() 
-    toolbox.register("indices", random.sample, list(range(v)), v)
-    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    pdb.set_trace()
-    for ind in toolbox.population:
-        if ind[0] not in D or ind[-1] not in D: 
-            toolbox.population.pop(ind)
-    toolbox.register("mate", tools.cxPartialyMatched)
-    toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.05)
-    toolbox.register("select", tools.selTournament, tournsize=3)
-    toolbox.register("evaluate", evaluate, c_ij=distances,m=m)
-    return toolbox 
-
-def ga_execution(population_size, generations, toolbox,distances,m): 
-    hof   = tools.ParetoFront()
-    stats = tools.Statistics(lambda ind: ind.fitness.values)
-    stats.register("avg", numpy.mean, axis=0)
-    stats.register("std", numpy.std, axis=0)
-    stats.register("min", numpy.min, axis=0)
-    stats.register("max", numpy.max, axis=0)
-    population = toolbox.population(n=population_size)
-    algorithms.eaSimple(population, toolbox, cxpb=0.7, mutpb=0.2, ngen=generations, stats=stats, halloffame=hof, verbose=True)
-
-    best_paths = tools.selBest(population, m*m)
-    for i, path in enumerate(best_paths): 
-        print(f"Path for agent {i+1}: {path}")
-
-    return best_paths, hof
-
-
-distances = pd.read_csv('../distance_cost.csv')
-distances = distances.to_numpy().astype(int)
-
-initialization_GA()
-toolbox = toolbox_config(v,distances,m=m)
-_, hof = ga_execution(population_size=population_size, generations=generations, toolbox=toolbox,distances=distances,m=m)
-print(hof)
 
 
 
+# ### ---ALL CONSTRAINTS---###
+# #Constraint 1: Each node must be entered and exitted once by each agent 
+# for k in agents: 
+#     d = depots[k]
+#     for j in V_nodes: 
+#         if j != d:
+#             model += lpSum(x[i,j,k] for i in V_nodes if i != j) == 1, f"Enter_{j}_by_{k}"
+#             model += lpSum(x[j,i,k] for i in V_nodes if i != j) == 1, f"Exit_{j}_by_{k}"
 
+# #Constraint 2: Subtour elimination constraints SEC 
+# for k in agents: 
+#     d = depots[k]
+#     for i in V_nodes[1:]: 
+#         model += x[i, d, k] + x[d,i,k] <=1 
 
+# for k in agents:
+#     d = depots[k]
+#     for i in V_nodes: 
+#         for j in V_nodes: 
+#             if i!=j and i != d and j != d : 
+#                 model +=  u[i, k] - u[j, k] + v * x[i, j, k] <= v - 1 
 
+# for k in agents: 
+#     for i in V_nodes: 
+#         if i != V_nodes: 
+#             model += u[i,k] >= 1 
+#             model += u[i,k] <= v - 1
 
+# #Constraint 3: Many visits for each city 
+# for j in V_nodes : 
+#     model += lpSum(x[i,j,k] for i in V_nodes if i!=j for k in agents) <= required_visits[j-1] , f'Min_visits_{j}_{k}' #Constraint 2 For Visits
 
+# # Constraint 4: Allow only a single agent to be on top of a city. 
+# for step in TS:
+#     d = depots[k]
+#     model += lpSum(t[i,j,k,step] for k in agents for i in V_nodes for j in V_nodes if i!=j and j !=d) <= 1,f"Single_Agent_at_at_time_{step}"
+    
+# # Constraint 5: Each agents begins its journey at full energy 
+# for k in agents:
+#     d = depots[k] 
+#     model += e[d,k] >= theta - M * (lpSum(z[d,k])), f"EnergyFull_at_start_{d}_{k}"
 
+# # Constraint 6: Travel corresponds to energy 
+# for k in agents: 
+#         d = depots[k]
+#         for i in V_nodes: 
+#             for j in V_nodes: 
+#                 if i!=j: 
+#                     model += e[j,k] >= e[i,k] - (energy[i-1][j-1] * x[i,j,k]),f"Update_remaining_energy_{i}_{j}_{k}"
+#                     model += e[i,k] >= energy[i-1][j-1] * x[i,j,k],f"No_travel_if_low_energy{i}_{j}_for_{k}"
+#             if i == d: 
+#                 model += e[j,k] == theta - M * (lpSum(z[d,k])), f"EnergyFull_at_end_{i}_{k}"
+                    
 
+# #Constraint 7: Start and finish at the same depot. 
+# for k in agents: 
+#     d = depots[k]
+#     model += lpSum(x[d,j,k] for j in V_nodes if j not in depots) >=1, f"Start_at_depot_{k}"
+#     model += lpSum(x[j,d,k] for j in V_nodes if j not in depots) >=1, f"Finish_at_depot_{k}"
+#     model += x[d,d,k] == 0, f"No_loop_at_depot_{k}_{d}"
+#     for i in depot_values:
+#         if i != d: 
+#             model += x[d,i,k] == 0, f"No_travel_from_{i}_at_depot_{d}_for_{k}"
+#             model += x[i,d,k] == 0, f"No_travel_to_{i}_at_depot_{d}_for_{k}"
+#             model += x[d,i,k] + x[i,d,k] <= 0, f"No_travel_{i}_at_{d}_for_{k}"
 
+# # # Contraint 8: Balancing enter and exits from a city for agent k.  
+# # for k in agents:
+# #     d = depots[k]
+# #     for j in V_nodes:
+# #         if j != d: 
+# #             model += lpSum(x[j,i,k] for i in V_nodes if i != d) == lpSum(x[i,j,k] for i in V_nodes if i != d), f"Flow_conservation_{j}_{i}_by_{k}"
+    
+
+# # #Constraint 9: Prevent loops and unecessarry visits at depots. 
+# for k in agents: 
+#     for step in TS[:-1]: 
+#             d = depots[k]
+#             model += t[d,d,k,step] == 0 
+#             model += t[d,d,k,step] + t[d,d,k,step+1] <= 1, f"No_loop_at_depot_{d}_{step}_{k}"
+#             model += lpSum(t[d,j,k,step] for j in depots ) == 0, f"No_unnecessary_visits_at_depot_{d}_{step}_{k}"
+
+# #Constraint 10: Ensure that a customer/city is served by an agent. 
+# for i in C[0:10] : 
+#     a = i.item()
+#     model += lpSum(x[j,a,k] for j in V_nodes for k in agents) >= z[a,k], f"ServiceConstraint_{a}_{k}"
+ 
+# #Set initial solution based on the GA 
+# for a in range(len(initial_population)): 
+#     for i in range(len(initial_population[a])-1): 
+#         x[initial_population[a][i],initial_population[a][i+1],a+1].setInitialValue(1)
 

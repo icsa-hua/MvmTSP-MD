@@ -1,7 +1,6 @@
 from interface.genetic_algorithm import GA
 from deap import base, creator, tools, algorithms 
 import random 
-import numpy
 import numpy as np
 import networkx as nx
 from typing import Tuple
@@ -33,7 +32,7 @@ class GASOL(GA):
         creator.create("Individual", list, fitness=creator.FitnessMin)  
         self.toolbox = base.Toolbox()
 
-    def create_graph(self,cost):
+    def create_graph(self, weights):
         """
         Creates a graph representation of the problem using the provided cost matrix.
         
@@ -48,10 +47,10 @@ class GASOL(GA):
         for enter in self.nodes.keys(): 
             for exit in self.nodes.keys(): 
                 
-                graph.add_edge(enter, exit, cost=cost[enter][exit])
+                graph.add_edge(enter, exit, cost=weights[enter][exit])
         return graph 
     
-    def create_graph_dict(self,cost):
+    def create_graph_dict(self,weights):
         
         """ 
         Creates a graph representation of the problem using the provided cost matrix.
@@ -67,7 +66,7 @@ class GASOL(GA):
         for enter in self.nodes.keys(): 
             for ex in self.nodes.keys(): 
                 try:
-                    graph.add_edge(enter, ex, cost=cost[self.nodes[enter]][self.nodes[ex]-1])
+                    graph.add_edge(enter, ex, cost=weights[self.nodes[enter]][self.nodes[ex]-1])
                 except: 
                     warnings.warn(f"No edge between {enter} and {ex} with corresponding cost")
         return graph 
@@ -226,16 +225,7 @@ class GASOL(GA):
         Returns:
             Tuple[float]: A tuple containing the total distance of the tour.
         """
-                
-        # total_distance = 0 
-        # for i in range(0, len(individual), 2*(len(self.nodes)//self.m+1)): 
-        #     tour = individual[i:i + 2*(len(self.nodes)//self.m+1)]
-        #     for j in range(len(tour)-1): 
-        #         try: 
-        #             total_distance += cost[tour[j]][tour[j+1]]
-        #         except IndexError:
-        #             warnings.warn(f"IndexError: {j}")
-
+        
         total_distance = 0 
         met = len(set(self.depots.values()))
         for i in range(0, len(individual), len(individual)//met):
@@ -312,10 +302,10 @@ class GASOL(GA):
                 
         HOF   = tools.ParetoFront()
         stats = tools.Statistics(lambda ind: ind.fitness.values)
-        stats.register("avg", numpy.mean, axis=0)
-        stats.register("std", numpy.std, axis=0)
-        stats.register("min", numpy.min, axis=0)
-        stats.register("max", numpy.max, axis=0)
+        stats.register("avg", np.mean, axis=0)
+        stats.register("std", np.std, axis=0)
+        stats.register("min", np.min, axis=0)
+        stats.register("max", np.max, axis=0)
         
         if not enable_individual_fitness: 
             self.graph = self.create_graph(cost)

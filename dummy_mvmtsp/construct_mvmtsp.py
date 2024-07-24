@@ -1,27 +1,25 @@
 
 import sys 
-sys.path.append('/Matlab Projects/Swarms (Refined)/interface')
-
-from interface.formulation_module import MvmTSP
-import pulp as pl  
-from pulp import LpProblem, LpMinimize, lpSum, LpVariable 
-import pandas as pd 
-import numpy as np 
-import resource 
-import timeout_decorator 
-from ga_solver import GASOL 
-import matplotlib.pyplot as plt
-import geopandas 
-from sklearn.preprocessing import robust_scale 
-from k_means_constrained import KMeansConstrained 
-import pdb
-import time 
-import warnings
+import resource
+import geopandas
 import psutil
 import os 
 import time
-
-
+import pdb #For debugging 
+import time 
+import warnings
+import pulp as pl
+import numpy as np 
+import pandas as pd
+sys.path.append('/Matlab Projects/Swarms (Refined)/interface')
+import matplotlib.pyplot as plt
+import timeout_decorator 
+from sklearn.preprocessing import robust_scale 
+from k_means_constrained import KMeansConstrained
+from pulp import LpProblem, LpMinimize, lpSum, LpVariable 
+from interface.formulation_module import MvmTSP
+from dummy_mvmtsp.ga_solver import GASOL 
+  
 class ConstrainedMVMTSP(MvmTSP): 
 
     def __init__(self, data, use_GA, regionalization, dictionary_flag=False, max_memory=None): 
@@ -195,7 +193,7 @@ class ConstrainedMVMTSP(MvmTSP):
         resource.setrlimit(resource.RLIMIT_AS, (max_memory, max_memory))
 
 
-    def preprocess(self, cost_1_path,cost_2_path, nodes_path, agents,customers_path, max_battery): 
+    def preprocess(self, cost_path_1:str, cost_path_2:str, nodes_path:str, agents:int, customers_path:str, max_battery:int): 
         """
         Preprocesses the data required for the constrained multi-vehicle multi-TSP (MVMTSP) problem.
         
@@ -204,11 +202,12 @@ class ConstrainedMVMTSP(MvmTSP):
         variables and data structures for the optimization problem.
         
         Args:
-            cost_1_path (str): The file path for the distance matrix.
-            cost_2_path (str): The file path for the energy consumption matrix.
+            cost_path_1 (str): The file path for the distance matrix.
+            cost_path_1 (str): The file path for the energy consumption matrix.
             nodes_path (str): The file path for the node locations.
             agents (int): The number of agents to be used in the optimization.
-            max_battery (float): The maximum battery capacity for the agents.
+            customers_path (str): The file path for the customers locations.
+            max_battery (int): The maximum battery capacity for the agents.
         
         Returns:
             pandas.DataFrame: The preprocessed data, including the distance matrix, energy consumption matrix, and other relevant information.
@@ -217,11 +216,11 @@ class ConstrainedMVMTSP(MvmTSP):
         self.V = pd.read_csv(nodes_path)
         self.v = len(self.V)
         
-        self.distances = pd.read_csv(cost_1_path)
+        self.distances = pd.read_csv(cost_path_1)
         dist_columns = [f'dist_{i}' for i in range(1,self.v+1)]
         self.distances.columns = dist_columns
 
-        self.energy = pd.read_csv(cost_2_path)
+        self.energy = pd.read_csv(cost_path_2)
         ee_columns = [f'ee_{i}' for i in range(1,self.v+1)]
         self.energy.columns = ee_columns
 
@@ -297,12 +296,12 @@ class ConstrainedMVMTSP(MvmTSP):
             return initial_population
 
     
-    def regionOptimize(self, gdf): 
+    def regionOptimize(self, GDF): 
     
         cluster_variables=[self.dist_columns + self.energy_columns + list(self.R_column)]
         max_nodes = int(self.max_battery/np.average(self.energy))
         charge_points = int(np.floor(len(self.V)/max_nodes))
-        db_scaled = robust_scale(gdf[cluster_variables[0]])
+        db_scaled = robust_scale(GDF[cluster_variables[0]])
         kmeans = KMeansConstrained(n_clusters=charge_points+1, 
                                    size_min=charge_points, 
                                    size_max=max_nodes-3, 
@@ -310,8 +309,8 @@ class ConstrainedMVMTSP(MvmTSP):
         
         np.random.seed(1234)
         k5cls = kmeans.fit_predict(db_scaled)
-        gdf['k5cls'] = k5cls 
-        clusters = gdf.groupby("k5cls")
+        GDF['k5cls'] = k5cls 
+        clusters = GDF.groupby("k5cls")
         return clusters
 
     
@@ -333,13 +332,16 @@ class ConstrainedMVMTSP(MvmTSP):
                     R_points = dict(zip(area_ids,Rs))
                     nodes = {agent : np.copy(area_ids.astype(int)) for agent in self.agents}
                     virtual_nodes = list(area_ids.astype(int))
+                    
                     for k in self.agents: 
                         depot = self.depots_for_agents[k]
+
                         if depot not in nodes[k]:
                             nodes[k] = np.append(nodes[k],depot)
                             cost_d[depot] = self.distances.loc[depot].to_numpy()
                             cost_e[depot] = self.energy.loc[depot].to_numpy()   
                             R_points[depot] = self.R_points[depot]
+
                         if depot not in virtual_nodes:
                             virtual_nodes.append(depot)
 
@@ -352,8 +354,10 @@ class ConstrainedMVMTSP(MvmTSP):
                     V = {agent: {i: nodes[agent][i] for i in range(len(nodes[agent]))} for agent in self.agents}                    # cost_d = {area_id : dists for area_id, dists in zip(cluster[1]['Area_id'], cluster[1][self.dist_columns].to_numpy().astype(float))}
                     
                     if self.use_GA:
+                       
                         for k in self.agents:
                             self.initial_population[k] = self.call_genetic_algorithm(V[k], cost_d, k)
+                        
                         print(self.initial_population)
 
                     V_nodes = list(range(len(virtual_nodes)))
@@ -366,6 +370,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     except timeout_decorator.TimeoutError:
                         print("Time limit exceeded")
                         exit(0)
+                    
                     self.create_solution_dict(V_nodes, nodes_dict)
 
                 else: 
@@ -374,7 +379,9 @@ class ConstrainedMVMTSP(MvmTSP):
                     cost_d = dists
                     cost_e = ees
                     R_points = list(Rs)
+                   
                     for k in self.depots_for_agents:
+                        
                         if self.depots_for_agents[k] not in nodes: 
                             nodes.append(self.depots_for_agents[k])
                             cost_d = np.append(cost_d, self.distances.loc[self.depots_for_agents[k]].to_numpy().reshape(1, -1), axis=0)
@@ -401,6 +408,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     except timeout_decorator.TimeoutError:
                         print("Time limit exceeded")
                         exit(0)
+                    
                     self.create_solution(V_nodes, V)
 
                         
@@ -482,28 +490,7 @@ class ConstrainedMVMTSP(MvmTSP):
         for k1 in self.agents:
             for k2 in self.agents: 
                 if k1 < k2 : 
-                    self.model += lpSum(self.x[i,j,k1] - self.x[i,j,k2] for i in V_nodes for j in V_nodes if i != j ) != 0
-
-
-        # for k in self.agents: 
-        #     axx = [i for i,value in enumerate(ordered_nodes.values()) if value == self.depots_for_agents[k]]
-        #     d = axx[0]
-        #     for i in V_nodes[1:]: 
-        #         self.model += self.x[i, d, k] + self.x[d,i,k] <=1
-
-        # for k in self.agents:
-        #     axx = [i for i,value in enumerate(ordered_nodes.values()) if value == self.depots_for_agents[k]]
-        #     d = axx[0]
-        #     for i in V_nodes: 
-        #         for j in V_nodes: 
-        #             if i!=j and i != d and j != d : 
-        #                 self.model +=  self.u[i, k] - self.u[j, k] + len(V_nodes) * self.x[i, j, k] <= len(V_nodes) - 1 
-
-        # for k in self.agents: 
-        #     for i in V_nodes: 
-        #         if i != V_nodes: 
-        #             self.model += self.u[i,k] >= 1 
-        #             self.model += self.u[i,k] <= len(V_nodes) - 1
+                    self.model += lpSum(self.x[i,j,k1] - self.x[i,j,k2] for i in V_nodes for j in V_nodes if i != j ) != 0, f"Agent_order_{k1}_{k2}"
     
     def add_constraint_3(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
         for j in V_nodes : 
@@ -536,21 +523,6 @@ class ConstrainedMVMTSP(MvmTSP):
                     if i!=j: 
                         for k in self.agents: 
                                 self.model += self.u[j,k] >= self.u[i,k] + 1 -len(V_nodes)*(1 - self.t[i,j,k,step])
-
-        # for k in self.agents:
-        #     axx = [i for i,value in enumerate(ordered_nodes.values()) if value == self.depots_for_agents[k]]
-        #     d = axx[0] 
-        #     self.model += lpSum(self.t[d,j,k,1] for j in V_nodes if j != d) == 1, f"Every_Agent_start_{d}_by_{k}"
-        #     self.model += lpSum(self.t[j,d,k,self.TimeFrame[self.moment+len(V_nodes)]] for i in V_nodes if i!=d) == 1, f"Every_Agent_end_{d}_by_{k}"
-
-        
-        # for j in V_nodes: 
-        #     self.model += lpSum(self.x[i,j,k,t] for i in V_nodes for k in self.agents for t in self.TimeFrame[self.moment:self.moment + len(V_nodes)]) <= 1,f"Single_Agent_at_at_time_{j}"
-        
-        # for i in V_nodes: 
-        #     self.model += lpSum(self.x[i,j,k,t] for j in V_nodes for k in self.agents for t in self.TimeFrame[self.moment:self.moment + len(V_nodes)]) <= 1,f"Single_time_{i}"
-
-        
 
     def add_constraint_5(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
 
@@ -690,8 +662,7 @@ class ConstrainedMVMTSP(MvmTSP):
                 if j[0] in ordered_nodes.values():
                     self.model += lpSum(self.x[i,reverse_nodes[j[0]],k] for i in V_nodes ) >= self.z[reverse_nodes[j[0]],k], f"Service_constraint{j[0]}_for_{k}"
 
-
-    def create_solution(self, V_nodes, V)->list: 
+    def create_solution(self, V_nodes, V): 
         reverse_dict = {v: k for k, v in V.items()}
 
         if pl.LpStatus[self.model.status] == 'Optimal':
@@ -722,7 +693,7 @@ class ConstrainedMVMTSP(MvmTSP):
             memory_usage = self.get_memory_usage()
             print(f"Memory Usage: {memory_usage:.2f} MB")
             
-    def create_solution_dict(self, V_nodes, V)->list: 
+    def create_solution_dict(self, V_nodes, V): 
         reverse_dict = {v: k for k, v in V.items()}
         if pl.LpStatus[self.model.status] == 'Optimal':
             for k in self.agents: 
@@ -752,7 +723,7 @@ class ConstrainedMVMTSP(MvmTSP):
             print(f"Memory Usage: {memory_usage:.2f} MB")
             
 
-    def get_solution(self): 
+    def get_solution(self) -> list: 
 
         for k in self.paths.keys():
                 tmp = [] 
@@ -782,23 +753,3 @@ class ConstrainedMVMTSP(MvmTSP):
         process = psutil.Process(os.getpid())
         mem_info = process.memory_info()
         return mem_info.rss / (1024 ** 2) 
-
-# dist_path = 'swarms/distance_cost.csv'
-# energy_path = 'swarms/energy_cost.csv'
-# nodes_path = 'swarms/areas.csv'
-# agents = 5
-
-# problem = ConstrainedMVMTSP(data=None, use_GA=True, regionalization=True, dictionary_flag=False)
-# data = problem.preprocess(cost_1_path=dist_path, 
-#                    cost_2_path=energy_path, 
-#                    nodes_path=nodes_path, 
-#                    agents=agents,
-#                    max_battery=1500)
-# enabled_constraints = ["const_1", "const_2", "const_3",
-#                        "const_4", "const_5", "const_6",
-#                        "const_7", "const_8"]
-# problem.run_model(data=data, enabled_constraints=enabled_constraints)
-# print("Problem solved! Extracting paths...")
-# time.sleep(5)
-# problem.get_solution()
-# problem.get_performance()
