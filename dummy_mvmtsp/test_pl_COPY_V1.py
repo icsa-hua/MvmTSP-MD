@@ -51,17 +51,17 @@ M = 25 # Sufficient large integer to add to some constraint as a stable factor.
 V_nodes = list(range(22)) #The vertices set
 v = len(V_nodes) #The number of vertices. 
 
-C = pd.read_csv('../customers.csv') #The cities set (only areas that contain customers)
+C = pd.read_csv('swarms/customers.csv') #The cities set (only areas that contain customers)
 C = C.to_numpy().astype(np.int8)
 
 required_visits = m * np.ones(v).astype(int) #The number of required visits for every single area. 
 
 theta = 2000 #Maximum energy capacity. 
 
-distances = pd.read_csv('../distance_cost.csv') #The cost of each edge in the graph. 
+distances = pd.read_csv('swarms/distance_cost.csv') #The cost of each edge in the graph. 
 distances = distances.to_numpy().astype(int) 
 
-energy  = pd.read_csv('../energy_cost.csv') #Cost of energy between every pair of nodes. 
+energy  = pd.read_csv('swarms/energy_cost.csv') #Cost of energy between every pair of nodes. 
 energy = energy.to_numpy().astype(int)
 
 TS = [range(1,146,1)] #The time set containing every step of the simulation (146 steps where 1 step = 10 mins)
@@ -75,18 +75,18 @@ depots = assign_agents_to_areas(m,D) #Each agent will have its own depot only a 
 population_size = 200
 generations = 100 
 
-ga = GASOL(population_size, generations, V_nodes,agents,depots) #Create the GA heuristic
-best_paths, hof = ga.run(cthr=0.7, mthr=0.05, cost=distances) #Run the heuristic based on distance 
+# ga = GASOL(population_size, generations, V_nodes,agents,depots) #Create the GA heuristic
+# best_paths, hof = ga.run(cthr=0.7, mthr=0.05, cost=distances) #Run the heuristic based on distance 
 
-#Create the initial solution set for the solver. 
+# #Create the initial solution set for the solver. 
 initial_population = [] 
-if len(best_paths) < len(agents): #if the GA return less paths than the number of agents, take the best path and fill it to the initial population. 
-    initial_population = list(best_paths.keys())
-    additional_path = next(iter(best_paths.keys()))
-    for _ in range(len(agents)-len(best_paths)):
-        initial_population.append(additional_path)
-else: 
-    initial_population = list(best_paths.keys())
+# if len(best_paths) < len(agents): #if the GA return less paths than the number of agents, take the best path and fill it to the initial population. 
+#     initial_population = list(best_paths.keys())
+#     additional_path = next(iter(best_paths.keys()))
+#     for _ in range(len(agents)-len(best_paths)):
+#         initial_population.append(additional_path)
+# else: 
+#     initial_population = list(best_paths.keys())
 
 depot_values = [depots[key] for key in depots.keys()]
 depot_values = set(depot_values)
@@ -213,7 +213,10 @@ exit_time = time.time()
 execution_time = exit_time - start_time 
 print(f" Program Completion Time: {execution_time}s")
 
+print(f"Number of Variables: {len(model.variables())}")
+print(f"Number of Constraints: {len(model.constraints)}")
 
+pdb.set_trace()
 if pl.LpStatus[model.status] == "Optimal":
     # Retrieve the paths
     paths = {k: [] for k in agents}

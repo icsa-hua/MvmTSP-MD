@@ -7,6 +7,7 @@ import os
 import time
 import pdb #For debugging 
 import time 
+import gc
 import warnings
 import pulp as pl
 import numpy as np 
@@ -19,10 +20,12 @@ from k_means_constrained import KMeansConstrained
 from pulp import LpProblem, LpMinimize, lpSum, LpVariable 
 from interface.formulation_module import MvmTSP
 from dummy_mvmtsp.ga_solver import GASOL 
-  
+from memory_profiler import profile
+
+
 class ConstrainedMVMTSP(MvmTSP): 
 
-    def __init__(self, data, use_GA, regionalization, dictionary_flag=False, max_memory=None): 
+    def __init__(self, data, config, max_memory=None): 
         
         """
         Initializes the ConstrainedMVMTSP class, which is a subclass of the MvmTSP class. This class is responsible for creating and solving a constrained multi-vehicle multi-depot traveling salesman problem (MVMTSP).
@@ -36,11 +39,16 @@ class ConstrainedMVMTSP(MvmTSP):
         The method sets up the optimization problem, including the objective function and the constraints. It also sets a memory limit for the problem.
         """
                 
-        super().__init__(data, use_GA, regionalization)
+        super().__init__(data, config['genetic_algorithm'], config['regionalization'])
         self.model = LpProblem("ConstrainedMvmTSP",LpMinimize)
         self.start_time = time.time()
-        self.dictionary_flag = dictionary_flag
-        if self.dictionary_flag: 
+        self.config = config
+
+        if not self.regionalization:
+            self.config['individual_solution'] = False
+        
+
+        if self.config['individual_solution']: 
             self.constraints = {
                         "const_1": self.add_constraint_1_dict,
                         "const_2": self.add_constraint_2_dict,
@@ -233,7 +241,7 @@ class ConstrainedMVMTSP(MvmTSP):
         self.R_points = agents * np.ones(self.v).astype(int)
         rv = pd.DataFrame({"R": self.R_points[:]})
 
-        if self.regionalization:
+        if self.config['regionalization']:
             self.dist_columns = dist_columns
             self.energy_columns = ee_columns
             self.R_column = "R"
@@ -277,7 +285,7 @@ class ConstrainedMVMTSP(MvmTSP):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
            
-            if self.dictionary_flag and isinstance(self.initial_population,dict):
+            if self.config['individual_solution'] and isinstance(self.initial_population,dict):
                 ga = GASOL(population_size,generations,V_nodes,self.agents,self.depots_for_agents[agent])
                 best_paths, hof = ga.run(cthr=0.7, mthr=0.05, cost=cost, enable_individual_fitness=True)
                 return best_paths 
@@ -313,103 +321,169 @@ class ConstrainedMVMTSP(MvmTSP):
         clusters = GDF.groupby("k5cls")
         return clusters
 
-    
-    def run_model(self,data,enabled_constraints): 
 
-        if self.regionalization:
+    def process_with_dictionary(self, context):
+        
+        cost_d = dict(zip(context['area_ids'],context['dists']))
+        cost_e = dict(zip(context['area_ids'],context['ees']))
+        R_points = dict(zip(context['area_ids'],context['R']))
+        nodes = {agent : np.copy(context['area_ids'].astype(int)) for agent in self.agents}
+        virtual_nodes = list(context['area_ids'].astype(int))
+        for k in self.agents: 
+            depot = self.depots_for_agents[k]
+
+            if depot not in nodes[k]:
+                nodes[k] = np.append(nodes[k],depot)
+                cost_d[depot] = self.distances.loc[depot].to_numpy()
+                cost_e[depot] = self.energy.loc[depot].to_numpy()   
+                R_points[depot] = self.R_points[depot]
+
+            if depot not in virtual_nodes:
+                virtual_nodes.append(depot)
+
+        if any(len(R_points) != len(dictionary) for dictionary in (cost_d, cost_e)):
+            warnings.warn("Sizes of area attribute arrays do not match.")
+            return
+
+        self.initial_population = {agent: [] for agent in self.agents}
+        nodes_dict = {i: n for i, n in enumerate(virtual_nodes)}
+        V = {agent: {i: nodes[agent][i] for i in range(len(nodes[agent]))} for agent in self.agents}                    # cost_d = {area_id : dists for area_id, dists in zip(cluster[1]['Area_id'], cluster[1][self.dist_columns].to_numpy().astype(float))}
+        
+        if self.config['genetic_algorithm']:
+            
+            for k in self.agents:
+                self.initial_population[k] = self.call_genetic_algorithm(V[k], cost_d, k)
+            # print(self.initial_population)
+
+        V_nodes = list(range(len(virtual_nodes)))
+        return cost_d, cost_e, R_points, V_nodes, nodes_dict
+
+
+    def process_without_dictionary(self,context): 
+        nodes = list(context['area_ids'].astype(int))
+        cost_d = context['dists']
+        cost_e = context['ees']
+        R_points = list(context['R'])
+        
+        for k in self.depots_for_agents:
+            
+            if self.depots_for_agents[k] not in nodes: 
+                nodes.append(self.depots_for_agents[k])
+                cost_d = np.append(cost_d, self.distances.loc[self.depots_for_agents[k]].to_numpy().reshape(1, -1), axis=0)
+                cost_e = np.append(cost_e, self.energy.loc[self.depots_for_agents[k]].to_numpy().reshape(1, -1), axis=0)
+                R_points.append(self.R_points[self.depots_for_agents[k]])
+
+        if any(len(R_points) != len(dictionary) for dictionary in (cost_d, cost_e)):
+            warnings.warn("Sizes of area attribute arrays do not match.")
+            return
+
+        V_nodes = list(range(len(nodes)))
+        V = {V_nodes[i] : nodes[i] for i in range(len(nodes))}
+            
+        if self.config['genetic_algorithm']:
+            self.initial_population = self.call_genetic_algorithm(V, cost_d)
+            # print(self.initial_population)
+        
+        return cost_d, cost_e, R_points, V_nodes, V
+    
+
+    def extract_content(self): 
+        return {
+            "dists": self.distances.to_numpy().astype(float),
+            "ees": self.energy.to_numpy().astype(float),
+            "R": self.R_points,
+            "area_ids": self.V,
+        }
+
+
+    def extract_context_cluster(self, cluster):
+        return {
+            "dists": cluster[1][self.dist_columns].to_numpy().astype(float),
+            "ees": cluster[1][self.energy_columns].to_numpy().astype(float),
+            "R": cluster[1][self.R_column].to_numpy().astype(int),
+            "area_ids": cluster[1]['Area_id'].to_numpy(),
+        }
+
+
+    def clustering(self, cluster): 
+        context = self.extract_context_cluster(cluster)
+        
+        if self.config['individual_solution']: 
+            
+            cost_d, cost_e, R_points, V_nodes, nodes_dict = self.process_with_dictionary(context)
+            self.createProblem_dict(V_nodes)
+            self.set_objective_dict(cost_d, cost_e, V_nodes, nodes_dict)
+            self.apply_constraints_dict(self.config['enabled_constraints'], V_nodes, nodes_dict, cost_d, cost_e, R_points)
+            self.run()
+            self.create_solution_dict(V_nodes, nodes_dict)
+        
+        else: 
+
+            cost_d, cost_e, R_points, V_nodes, V = self.process_without_dictionary(context)
+            self.createProblem(V_nodes)
+            self.set_objective(cost_d, cost_e, V_nodes,V)
+            self.apply_constraints(self.config['enabled_constraints'], V_nodes,V, cost_d, cost_e, R_points)
+            self.run()
+            self.create_solution(V_nodes, V)
+
+
+    def validation(self): 
+        context = self.extract_content()
+
+        nodes = context['area_ids']
+        cost_d = context['dists']
+        cost_e = context['ees'] 
+        R_points = list(context['R'])
+        
+        V_nodes = list(range(len(nodes)))
+        V = {V_nodes[i] : nodes[i] for i in range(len(nodes))}
+
+        if self.config['genetic_algorithm']: 
+            self.initial_population = self.call_genetic_algorithm(V, cost_d)
+        
+        self.createProblem(V_nodes)
+        self.set_objective(cost_d, cost_e, V_nodes,V)
+        
+        self.apply_constraints(self.config['enabled_constraints'], V_nodes, V, cost_d, cost_e, R_points)
+        self.get_statistics()
+
+        memory_usage = self.get_memory_usage()
+        print(f"Memory Usage: {memory_usage:.2f} MB")
+            
+        pdb.set_trace()
+        gc.collect()
+        self.run()
+        self.create_solution(V_nodes, V)
+        pdb.set_trace()
+
+
+    def run(self): 
+        try:
+            self.solve_problem()
+        except timeout_decorator.TimeoutError:
+            print("Time limit exceeded")
+            exit(0)
+        
+    @profile
+    def run_model(self,data): 
+        """
+        Runs the optimization model based on the provided data.
+        
+        If the 'regionalization' configuration is enabled,
+        the method creates a GeoDataset from the data,
+        optimizes the regions, and then runs the optimization for each cluster.
+        
+        If the 'regionalization' configuration is disabled,
+        the method calls the 'validation' method to run the optimization.
+        """
+                
+        if self.config['regionalization']:
             gdf = self.createGeoDataset(data)
             clusters = self.regionOptimize(gdf)
-            for cluster in clusters:
-                area_ids = cluster[1]['Area_id'].to_numpy() 
-                dists = cluster[1][self.dist_columns].to_numpy().astype(float)
-                ees = cluster[1][self.energy_columns].to_numpy().astype(float)
-                Rs = cluster[1][self.R_column].to_numpy().astype(int)   
-                
-                if self.dictionary_flag:
-                    
-                    cost_d = dict(zip(area_ids,dists))
-                    cost_e = dict(zip(area_ids,ees))
-                    R_points = dict(zip(area_ids,Rs))
-                    nodes = {agent : np.copy(area_ids.astype(int)) for agent in self.agents}
-                    virtual_nodes = list(area_ids.astype(int))
-                    
-                    for k in self.agents: 
-                        depot = self.depots_for_agents[k]
-
-                        if depot not in nodes[k]:
-                            nodes[k] = np.append(nodes[k],depot)
-                            cost_d[depot] = self.distances.loc[depot].to_numpy()
-                            cost_e[depot] = self.energy.loc[depot].to_numpy()   
-                            R_points[depot] = self.R_points[depot]
-
-                        if depot not in virtual_nodes:
-                            virtual_nodes.append(depot)
-
-                    if any(len(R_points) != len(dictionary) for dictionary in (cost_d, cost_e)):
-                        warnings.warn("Sizes of area attribute arrays do not match.")
-                        continue
-                        
-                    self.initial_population = {agent: [] for agent in self.agents}
-                    nodes_dict = {i: n for i, n in enumerate(virtual_nodes)}
-                    V = {agent: {i: nodes[agent][i] for i in range(len(nodes[agent]))} for agent in self.agents}                    # cost_d = {area_id : dists for area_id, dists in zip(cluster[1]['Area_id'], cluster[1][self.dist_columns].to_numpy().astype(float))}
-                    
-                    if self.use_GA:
-                       
-                        for k in self.agents:
-                            self.initial_population[k] = self.call_genetic_algorithm(V[k], cost_d, k)
-                        
-                        print(self.initial_population)
-
-                    V_nodes = list(range(len(virtual_nodes)))
-                    self.createProblem_dict(V_nodes)
-                    self.set_objective_dict(cost_d, cost_e, V_nodes, nodes_dict)
-                    self.apply_constraints_dict(enabled_constraints, V_nodes, nodes_dict, cost_d, cost_e, R_points)
-
-                    try:
-                        self.solve_problem()
-                    except timeout_decorator.TimeoutError:
-                        print("Time limit exceeded")
-                        exit(0)
-                    
-                    self.create_solution_dict(V_nodes, nodes_dict)
-
-                else: 
-
-                    nodes = list(area_ids.astype(int))
-                    cost_d = dists
-                    cost_e = ees
-                    R_points = list(Rs)
-                   
-                    for k in self.depots_for_agents:
-                        
-                        if self.depots_for_agents[k] not in nodes: 
-                            nodes.append(self.depots_for_agents[k])
-                            cost_d = np.append(cost_d, self.distances.loc[self.depots_for_agents[k]].to_numpy().reshape(1, -1), axis=0)
-                            cost_e = np.append(cost_e, self.energy.loc[self.depots_for_agents[k]].to_numpy().reshape(1, -1), axis=0)
-                            R_points.append(self.R_points[self.depots_for_agents[k]])
-
-                    if any(len(R_points) != len(dictionary) for dictionary in (cost_d, cost_e)):
-                        warnings.warn("Sizes of area attribute arrays do not match.")
-                        continue
-
-                    V_nodes = list(range(len(nodes)))
-                    V = {V_nodes[i] : nodes[i] for i in range(len(nodes))}
-                        
-                    if self.use_GA:
-                        self.initial_population = self.call_genetic_algorithm(V, cost_d)
-                        print(self.initial_population)
-
-                    self.createProblem(V_nodes)
-                    self.set_objective(cost_d, cost_e, V_nodes,V)
-                    self.apply_constraints(enabled_constraints, V_nodes,V, cost_d, cost_e, R_points)
-
-                    try:
-                        self.solve_problem()
-                    except timeout_decorator.TimeoutError:
-                        print("Time limit exceeded")
-                        exit(0)
-                    
-                    self.create_solution(V_nodes, V)
+            for cluster in clusters: 
+                self.clustering(cluster)
+        else: 
+            self.validation()
 
                         
     def apply_constraints(self, constraints_to_apply, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
@@ -418,11 +492,13 @@ class ConstrainedMVMTSP(MvmTSP):
             if key in self.constraints:
                 self.constraints[key](V_nodes,ordered_nodes, cost_d, cost_e, R_points)  # Calling the constraint method directly
 
+
     def apply_constraints_dict(self, constraints_to_apply, V_nodes, ordered_nodes, cost_d, cost_e, R_points): 
 
         for key in constraints_to_apply:
             if key in self.constraints:
                 self.constraints[key](V_nodes,ordered_nodes, cost_d, cost_e, R_points)  # Calling the constraint method directly
+
 
     def add_constraint_1(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
 
@@ -434,6 +510,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += lpSum(self.x[i,j,k] for i in V_nodes if i != j) == 1, f"Enter_{j}_by_{k}"
                     self.model += lpSum(self.x[j,i,k] for i in V_nodes if i != j) == 1, f"Exit_{j}_by_{k}"
 
+
     def add_constraint_1_dict(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points): 
         for k in self.agents: 
             axx = [i for i,value in enumerate(ordered_nodes.values()) if value == self.depots_for_agents[k]]
@@ -444,6 +521,7 @@ class ConstrainedMVMTSP(MvmTSP):
             for i in V_nodes: 
                 if i != d:
                     self.model += lpSum(self.x[i,j,k] for j in V_nodes if i != j) == 1, f"Exit_{i}_by_{k}"
+
 
     def add_constraint_2(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
 
@@ -467,6 +545,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += self.u[i,k] >= 1 
                     self.model += self.u[i,k] <= len(V_nodes) - 1
     
+
     def add_constraint_2_dict(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points): 
 
 
@@ -492,10 +571,12 @@ class ConstrainedMVMTSP(MvmTSP):
                 if k1 < k2 : 
                     self.model += lpSum(self.x[i,j,k1] - self.x[i,j,k2] for i in V_nodes for j in V_nodes if i != j ) != 0, f"Agent_order_{k1}_{k2}"
     
+
     def add_constraint_3(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
         for j in V_nodes : 
             self.model += lpSum(self.x[i,j,k] for i in V_nodes if i!=j for k in self.agents) <= R_points[j] , f'Min_visits_{j}' #Constraint 2 For Visits
     
+
     def add_constraint_3_dict(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points): 
         for j in V_nodes : 
             self.model += lpSum(self.x[i,j,k] for i in V_nodes if i!=j for k in self.agents) <= R_points[ordered_nodes[j]] , f'Min_visits_{j}' #Constraint 2 For Visits
@@ -506,6 +587,7 @@ class ConstrainedMVMTSP(MvmTSP):
         for step in self.TimeFrame:
             self.model += lpSum(self.t[i,j,k,step] for k in self.agents for i in V_nodes for j in V_nodes if i!=j and j != reverse_dict[self.depots_for_agents[k]]) <= 1,f"Single_Agent_at_at_time_{step}"
     
+
     def add_constraint_4_dict(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points): 
         reverse_dict = {v:k for k,v in ordered_nodes.items()}
         
@@ -523,6 +605,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     if i!=j: 
                         for k in self.agents: 
                                 self.model += self.u[j,k] >= self.u[i,k] + 1 -len(V_nodes)*(1 - self.t[i,j,k,step])
+
 
     def add_constraint_5(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
 
@@ -542,6 +625,7 @@ class ConstrainedMVMTSP(MvmTSP):
                         self.model += self.e[i,k] >= cost_e[i][ordered_nodes[j]-1] * self.x[i,j,k],f"No_travel_if_low_energy{i}_{j}_for_{k}"
                 if i == d: 
                     self.model += self.e[j,k] == self.max_battery - M * (lpSum(self.z[d,k])), f"EnergyFull_at_end_{i}_{k}"
+
 
     def add_constraint_5_dict(self, V_nodes,  ordered_nodes,cost_d, cost_e, R_points): 
 
@@ -563,6 +647,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += self.e[j,k] == self.max_battery - M * (lpSum(self.z[d,k])), f"EnergyFull_at_end_{i}_{k}"
 
 
+
     def add_constraint_6(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points): 
 
         depot_values = [self.depots_for_agents[key] for key in self.depots_for_agents.keys()]
@@ -580,6 +665,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += self.x[d,ind,k] == 0, f"No_travel_from_{i}_at_depot_{d}_for_{k}"
                     self.model += self.x[ind,d,k] == 0, f"No_travel_to_{i}_at_depot_{d}_for_{k}"
                     self.model += self.x[d,ind,k] + self.x[ind,d,k] <= 0, f"No_travel_{i}_at_{d}_for_{k}"
+
 
 
     def add_constraint_6_dict(self, V_nodes,  ordered_nodes,cost_d, cost_e, R_points): 
@@ -601,6 +687,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += self.x[d,ind,k] + self.x[ind,d,k] <= 0, f"No_travel_{i}_at_{d}_for_{k}"
 
 
+
     def add_constraint_7(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points): 
         depot_values = [self.depots_for_agents[key] for key in self.depots_for_agents.keys()]
         depot_values = set(depot_values)
@@ -616,6 +703,7 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += lpSum(self.t[d,j,k,step] for j in reverse) == 0, f"No_unnecessary_visits_at_depot_{d}_{step}_{k}"
         self.moment += len(V_nodes)
 
+
     def add_constraint_7_dict(self, V_nodes,  ordered_nodes, cost_d, cost_e, R_points): 
         depot_values = [self.depots_for_agents[key] for key in self.depots_for_agents.keys()]
         depot_values = set(depot_values)
@@ -630,23 +718,26 @@ class ConstrainedMVMTSP(MvmTSP):
                     self.model += lpSum(self.t[d,j,k,step] for j in reverse ) == 0, f"No_unnecessary_visits_at_depot_{d}_{step}_{k}"
         self.moment += len(V_nodes)
 
+
     def add_constraint_8(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points):
 
-        if self.use_GA:
+        if self.config['genetic_algorithm']:
             if self.initial_population is not None:
                 #Set initial solution based on the GA 
                 for a in range(len(self.initial_population)): 
                         for i in range(len(self.initial_population[a])-1): 
                             self.x[self.initial_population[a][i],self.initial_population[a][i+1],a+1].setInitialValue(1)
 
+
     def add_constraint_8_dict(self, V_nodes, ordered_nodes, cost_d, cost_e, R_points):
 
-        if self.use_GA:
+        if self.config['genetic_algorithm']:
             if self.initial_population is not None:
                 #Set initial solution based on the GA 
                 for a in self.agents: 
                         for i in range(len(*self.initial_population[a])-1): 
                             self.x[self.initial_population[a][0][i],self.initial_population[a][0][i+1],a].setInitialValue(1)
+
 
     def add_constraint_9(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points):
         reverse_nodes = {v:k for k,v in ordered_nodes.items()}
@@ -655,12 +746,14 @@ class ConstrainedMVMTSP(MvmTSP):
                 if j[0] in ordered_nodes.values():
                     self.model += lpSum(self.x[i,reverse_nodes[j[0]],k] for i in V_nodes ) >= self.z[reverse_nodes[j[0]],k], f"Service_constraint{j[0]}_for_{k}"
  
+
     def add_constraint_9_dict(self, V_nodes,ordered_nodes, cost_d, cost_e, R_points):
         reverse_nodes = {v:k for k,v in ordered_nodes.items()}
         for k in self.agents: 
             for j in self.customers:
                 if j[0] in ordered_nodes.values():
                     self.model += lpSum(self.x[i,reverse_nodes[j[0]],k] for i in V_nodes ) >= self.z[reverse_nodes[j[0]],k], f"Service_constraint{j[0]}_for_{k}"
+
 
     def create_solution(self, V_nodes, V): 
         reverse_dict = {v: k for k, v in V.items()}
@@ -693,6 +786,7 @@ class ConstrainedMVMTSP(MvmTSP):
             memory_usage = self.get_memory_usage()
             print(f"Memory Usage: {memory_usage:.2f} MB")
             
+
     def create_solution_dict(self, V_nodes, V): 
         reverse_dict = {v: k for k, v in V.items()}
         if pl.LpStatus[self.model.status] == 'Optimal':
@@ -750,6 +844,13 @@ class ConstrainedMVMTSP(MvmTSP):
 
 
     def get_memory_usage(self): 
+
         process = psutil.Process(os.getpid())
         mem_info = process.memory_info()
         return mem_info.rss / (1024 ** 2) 
+
+
+    def get_statistics(self): 
+        
+        print(f"Number of Variables: {len(self.model.variables())}")
+        print(f"Number of Constraints: {len(self.model.constraints)}") 
