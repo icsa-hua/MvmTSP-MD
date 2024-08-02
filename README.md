@@ -34,9 +34,9 @@ The main technologies used for this project are:
 * DEAP version: 1.4.1
  
 ## SetUp
-1. Clone the repository:
+1. Clone the repository from the mvmtsp branch:
 ```sh
-git clone https://github.com/icsa-hua/MvmTSP-MD.git
+git clone -b mvmtsp https://github.com/icsa-hua/MvmTSP-MD.git
 ```
 2. Navigate to the project directory:
 ```sh
