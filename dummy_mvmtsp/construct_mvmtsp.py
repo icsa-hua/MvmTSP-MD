@@ -22,6 +22,10 @@ from interface.formulation_module import MvmTSP
 from dummy_mvmtsp.ga_solver import GASOL 
 from memory_profiler import profile
 
+import logging
+from tqdm import tqdm
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__) 
 
 class ConstrainedMVMTSP(MvmTSP): 
 
@@ -350,10 +354,10 @@ class ConstrainedMVMTSP(MvmTSP):
         V = {agent: {i: nodes[agent][i] for i in range(len(nodes[agent]))} for agent in self.agents}                    # cost_d = {area_id : dists for area_id, dists in zip(cluster[1]['Area_id'], cluster[1][self.dist_columns].to_numpy().astype(float))}
         
         if self.config['genetic_algorithm']:
-            
+            logging.info("Genetic Algorithm Enabled...")
             for k in self.agents:
                 self.initial_population[k] = self.call_genetic_algorithm(V[k], cost_d, k)
-            # print(self.initial_population)
+
 
         V_nodes = list(range(len(virtual_nodes)))
         return cost_d, cost_e, R_points, V_nodes, nodes_dict
@@ -381,6 +385,7 @@ class ConstrainedMVMTSP(MvmTSP):
         V = {V_nodes[i] : nodes[i] for i in range(len(nodes))}
             
         if self.config['genetic_algorithm']:
+            logging.info("Genetic Algorithm Enabled...")
             self.initial_population = self.call_genetic_algorithm(V, cost_d)
             # print(self.initial_population)
         
@@ -428,33 +433,37 @@ class ConstrainedMVMTSP(MvmTSP):
 
 
     def validation(self): 
-        context = self.extract_content()
-
-        nodes = context['area_ids']
-        cost_d = context['dists']
-        cost_e = context['ees'] 
-        R_points = list(context['R'])
-        
-        V_nodes = list(range(len(nodes)))
-        V = {V_nodes[i] : nodes[i] for i in range(len(nodes))}
-
-        if self.config['genetic_algorithm']: 
-            self.initial_population = self.call_genetic_algorithm(V, cost_d)
-        
-        self.createProblem(V_nodes)
-        self.set_objective(cost_d, cost_e, V_nodes,V)
-        
-        self.apply_constraints(self.config['enabled_constraints'], V_nodes, V, cost_d, cost_e, R_points)
-        self.get_statistics()
-
-        memory_usage = self.get_memory_usage()
-        print(f"Memory Usage: {memory_usage:.2f} MB")
+        total_steps = 4 
+        with tqdm(total=total_steps, desc="Validation", unit="step") as pbar:
             
-        pdb.set_trace()
-        gc.collect()
-        self.run()
-        self.create_solution(V_nodes, V)
-        pdb.set_trace()
+            context = self.extract_content()
+
+            nodes = context['area_ids']
+            cost_d = context['dists']
+            cost_e = context['ees'] 
+            R_points = list(context['R'])
+            
+            V_nodes = list(range(len(nodes)))
+            V = {V_nodes[i] : nodes[i] for i in range(len(nodes))}
+            pbar.update(1)
+            if self.config['genetic_algorithm']: 
+                logging.info("Genetic Algorithm Enabled...")
+                self.initial_population = self.call_genetic_algorithm(V, cost_d)
+            
+            self.createProblem(V_nodes)
+            self.set_objective(cost_d, cost_e, V_nodes,V)
+            
+            self.apply_constraints(self.config['enabled_constraints'], V_nodes, V, cost_d, cost_e, R_points)
+            self.get_statistics()
+
+            memory_usage = self.get_memory_usage()
+            print(f"Memory Usage: {memory_usage:.2f} MB")
+            pbar.update(1)
+            self.run()
+            pbar.update(1)
+            self.create_solution(V_nodes, V)
+            pbar.update(1)
+            pdb.set_trace()
 
 
     def run(self): 
@@ -479,10 +488,17 @@ class ConstrainedMVMTSP(MvmTSP):
                 
         if self.config['regionalization']:
             gdf = self.createGeoDataset(data)
+            logging.info("Regionalization initiation...")
             clusters = self.regionOptimize(gdf)
-            for cluster in clusters: 
-                self.clustering(cluster)
+            logging.info("Running optimization...")
+            total_steps = len(clusters) 
+            with tqdm(total=total_steps, desc='Processing', unit="step") as pbar: 
+                for cluster in clusters: 
+                    self.clustering(cluster)
+                    pbar.update(1)
+            
         else: 
+            logging.info("Validation Execution...")
             self.validation()
 
                         
