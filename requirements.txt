@@ -13,3 +13,5 @@ seaborn==0.13.2
 python-gnupg==0.4.8
 psutil==5.9.0
 deap==1.4.1
+tqdm 
+logging 
