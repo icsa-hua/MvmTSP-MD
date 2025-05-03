@@ -1,0 +1,5 @@
+assets/logs/*
+assets/env_settings/* 
+MV_MTSP.egg-info 
+resources 
+tspenv
