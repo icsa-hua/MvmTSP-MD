@@ -71,7 +71,8 @@ class TOPSISPriority:
 
     def run_model(self, cluster_criteria:Dict[int,Dict], ranks:List[int])-> pd.DataFrame: 
 
-        
+
+        # NOTE: Index is the cluster ID         
         df = pd.DataFrame.from_dict(cluster_criteria, orient='index', columns=self.criteria_names)
 
         # normalize criteria with vector normalization 
@@ -86,6 +87,11 @@ class TOPSISPriority:
 
         scaler = MinMaxScaler() 
         norm_df = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index) 
+
+        # Inverts the factors that go minimizing is best such as distance. 
+        cost_criteria = ['Avg_distance', 'Avg_Shortest_path_length']
+        for col in cost_criteria:
+            norm_df[col] = 1 - norm_df[col]
 
         # Apply OPA for weight
         if ranks is None: 

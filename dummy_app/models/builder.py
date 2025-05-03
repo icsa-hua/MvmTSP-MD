@@ -5,6 +5,7 @@ from dummy_app.tools.logger import logger
 from typing import Any, List, Dict, Union, Tuple
 
 import math
+import time 
 import pulp as pl 
 import numpy as np 
 import pandas as pd 
@@ -131,28 +132,36 @@ class MVMTSPBuilder(MVMTSPConfig):
 
     def allocate_agents_to_clusters(self, cluster_with_depots:Dict[int,int], priority:pd.DataFrame, duplicates:Dict[int,List[int]]): 
         
+        def iterate_depots_for_assignment(cluster_df, depots_for_agents, assignments): 
+            
+            for depot in set(depots_for_agents.values()): 
+                depot_agents = duplicates.get(depot, [
+                    agent for agent in self.agents if self.depots_for_agents[agent] == depot
+                ])
+                depot_clusters = cluster_df[cluster_df['depot']==depot]
+                if depot_clusters.empty: 
+                    logger.debug(f"(Termination) No clusters found for depot {depot}")
+                    break 
+
+                top_cluster = depot_clusters.index[0]
+                if (top_cluster, depot) not in assignments: 
+                    assignments[(top_cluster, depot)] = depot_agents
+                cluster_df = cluster_df.drop(index=top_cluster)
+                
+                # cluster_df.drop(index=top_cluster, inplace=True)
+
+            return cluster_df, assignments 
+
         # Convert depot assignments to dataframe 
         cluster_df = pd.DataFrame.from_dict(cluster_with_depots, orient='index', columns=['depot'])
         
-        # Join with priority dataframe 
-        cluster_df = cluster_df.join(priority)
+        # Join with priority dataframe (not sorted priority)
+        cluster_df = cluster_df.join(priority) 
         cluster_df.sort_values(by='Rank', ascending=True, inplace=True)
         assignments = {} 
-        for depot in set(self.depots_for_agents.values()): 
-            # Get all agents using this depot 
-            depot_agents = duplicates.get(depot, [
-                agent for agent in self.agents if self.depots_for_agents[agent] == depot
-            ])
-            # Find clusters served by this depot 
-            depot_clusters = cluster_df[cluster_df['depot']==depot]
-            if depot_clusters.empty: 
-                logger.error(f"No clusters found for depot {depot}")
-                continue 
 
-            top_cluster = depot_clusters.index[0]
-            
-            for agent in depot_agents: 
-                assignments[agent] = int(cluster_df.index[cluster_df['Rank']==top_cluster].item())
+        while not cluster_df.empty:
+            cluster_df, assignments = iterate_depots_for_assignment(cluster_df, self.depots_for_agents, assignments)
 
         return assignments 
 
@@ -242,65 +251,83 @@ class MVMTSPBuilder(MVMTSPConfig):
         return super().run()
     
 
-    def run_model(self, data:pd.DataFrame)->None:
-        logger.info("Running combinatorial problem constructor...")
+    def run_model(self, data:pd.DataFrame, cue_groups:Dict[int,List[object]]):
+        logger.debug("Running combinatorial problem constructor...")
+        with tqdm (total=8, desc="Preparing Problem with clustering") as pbar: 
 
-        # Phase 1: Preprocessing and regionalization (geospatial clustering)
-        try: 
-            data, depots = self.separate_depots_from_clusters(data)
-            logger.debug("Depots separated from clusters successfully...")
-            gdf = self.createGeoDataset(data)
-            logger.debug("GeoDataset created successfully...")
-            clusters = self.regionalization(gdf)
-            logger.debug("Clusters created successfully...")
-            
-        except Exception as e:
-            logger.exception(f"Error occurred during regionalization: {e}")
-            raise ValueError("Error occurred during regionalization.")
+           # Phase 1: Preprocessing and regionalization (geospatial clustering)
+            try: 
+                data, depots = self.separate_depots_from_clusters(data)
+                pbar.update(1)
+                logger.debug("Depots separated from clusters successfully...")
+                gdf = self.createGeoDataset(data)
+                pbar.update(1)
+                logger.debug("GeoDataset created successfully...")
+                clusters = self.regionalization(gdf)
+                pbar.update(1)
+                logger.debug("Clusters created successfully...")
+                
+            except Exception as e:
+                logger.exception(f"Error occurred during regionalization: {e}")
+                raise ValueError("Error occurred during regionalization.")
+            time.sleep(1)
+            # Phase 2: Clustering and Prioritization 
+            try: 
+                priority = self.cluster_prioritization(clusters, cue_groups)
+                pbar.update(1)
+                logger.debug("Clusters prioritized successfully...")
+            except Exception as e:
+                logger.exception(f"Error occurred during clustering: {e}")
+                raise ValueError("Error occurred during clustering.")
+            time.sleep(1)
+            # Phase 3: Agent Assignment for all clusters 
+            try: 
+                cluster_with_depots, same_depot_agents = self.assign_depot_to_cluster(clusters, depots)
+                pbar.update(1)
+                logger.debug("Depots assigned to clusters successfully...")
+                assignments = self.allocate_agents_to_clusters(cluster_with_depots, priority, same_depot_agents)
+                pbar.update(1)
+                logger.debug("Total Initial Assignments of all agents to all clusters based on priority")
 
-        # Phase 2: Clustering and Prioritization 
-        try: 
-            priority = self.cluster_prioritization(clusters)
-            logger.debug("Clusters prioritized successfully...")
-        except Exception as e:
-            logger.exception(f"Error occurred during clustering: {e}")
-            raise ValueError("Error occurred during clustering.")
+            except Exception as e:
+                logger.exception(f"Error occurred during agent assignment: {e}")
+                raise ValueError("Error occurred during agent assignment.") 
+            time.sleep(1)
+            # Phase 4: Final clusters refinement and memory deallocation 
+
+            try: 
+                updated_clusters = [] 
+                for contract in assignments.keys(): 
+                    for cluster in clusters: 
+                        flag = cluster[0] == contract[0]
+                        if flag: 
+                            updated_clusters.append(self.add_depot_data_to_cluster(cluster, depots, contract[1])) 
+                pbar.update(1)
+                deallocate_memory(data)
+                deallocate_memory(gdf)
+                deallocate_memory(clusters)
+                deallocate_memory(priority)
+                deallocate_memory(cluster_with_depots)
+                deallocate_memory(same_depot_agents)
+                deallocate_memory(depots)
+                logger.debug("Final refinements added to clusters successfully...")
+
+            except Exception as e:
+                logger.exception(f"Error occurred during final cluster refinement: {e}")
+                raise ValueError("Error occurred during final cluster refinement.")
+            time.sleep(1)
+            pbar.update(1) 
         
-        # Phase 3: Agent Assignment and Problem Construction
-        try: 
-            cluster_with_depots, same_depot_agents = self.assign_depot_to_cluster(clusters, depots)
-            assignments = self.allocate_agents_to_clusters(cluster_with_depots, priority, same_depot_agents)
-            clusters_tr = {} 
-            for idx, cluster in enumerate(clusters): 
-                refined_cluster = self.add_depot_data_to_cluster(cluster, depots, cluster_with_depots[priority.index[idx]])
-                clusters_tr[int(priority.index[idx])] = [refined_cluster, priority.iloc[idx]['Rank'], cluster_with_depots[priority.index[idx]]]
-                # TODO: Change this to get the actual cluster id as given through clusterign. 
-            priority = priority.sort_values(by='Rank', ascending=True)
-
-            logger.debug("Depots assigned to clusters successfully...")
-
-        except Exception as e:
-            logger.exception(f"Error occurred during agent assignment: {e}")
-            raise ValueError("Error occurred during agent assignment.") 
-        
-        
-
-        # Phase 4: Problem Construction and Solution
-        try: 
-            total_steps = len(clusters) * 2 
-            deallocate_memory(data)
-            deallocate_memory(gdf)
-
-            with tqdm(total=total_steps, desc="Solving problem...", unit="step") as pbar:
-                for cluster_id, cluster in clusters_tr.items():
-                    
-                    self.clustering(cluster, cluster_id, assignments)
-                    pbar.update(1)
-            
-        except Exception as E: 
-            logger.exception(f"Error occurred during problem construction: {E}")
-            raise ValueError("Error occurred during problem construction.")
-
+        logger.info("Setting up problem construction completed...")
+        logger.info("Starting cluster optimization...")
+        # Phase 5: Problem Construction and Solution
+        # with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
+        #     for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
+        #         contracts = {k:cluster_tuple[1] for k in agents}
+        #         self.clustering(cluster, cluster_tuple[0], contracts)
+        #         pbar.update(1)
+        #         logger.debug(f"Cluster {cluster_tuple[0]} solved successfully...")
+        return assignments, updated_clusters
 
     def regionalization(self, GDF):
         return super().regionalization(GDF)
@@ -312,20 +339,23 @@ class MVMTSPBuilder(MVMTSPConfig):
 
     def clustering(self, cluster, cluster_id, assignment):
         
-        logger.debug(f"Clustering with {cluster_id} and assignment {assignment}")
+        logger.debug(f"Clustering with {cluster_id} and agents assigned to it: {assignment}")
         column_names = ["dists", "ees", "travel_times", "area_ids"]
         context = extract_context_for_cluster(
-            cluster=cluster[0],
+            cluster=cluster,
             columns=[self.distance_columns, self.energy_columns, self.travel_time_columns, 'Area_id'], 
             column_names=column_names 
         )
-
+        
         # Step 1: Determine agents assigned to this cluster 
-        self.employed_agents = [
-            f"Agent_{agent_id}"
-            for agent_id, assigned_cluster_id in assignment.items() 
-            if assigned_cluster_id == cluster_id 
-        ] 
+        # self.employed_agents = [
+        #     f"Agent_{agent_id}"
+        #     for agent_id, assigned_cluster_id in assignment.items() 
+        #     if assigned_cluster_id == cluster_id 
+        # ] 
+        # NOTE: When entering here it is decided what agents go where so trying to determine which 
+        # cluster is the destination is redundant 
+        self.employed_agents = assignment
 
         if self.employed_agents is None: 
             logger.error(f"No agents assigned to cluster {cluster_id}")
@@ -690,6 +720,7 @@ class MVMTSPBuilder(MVMTSPConfig):
 
         self.validate_paths() 
         return self.paths
+
 
     def get_depot_index(self, ordered_nodes, k): 
         axx = [i for i, value in enumerate(ordered_nodes.values()) if value == self.depots_for_agents[k]]

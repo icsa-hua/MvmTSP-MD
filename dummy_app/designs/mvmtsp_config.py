@@ -172,6 +172,7 @@ class MVMTSPConfig(ABC):
 
     @abstractmethod 
     def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, population_size:int=200, generations:int=100)->List[int]: 
+        
 
         ga = GASolution(
             population=population_size, 
@@ -264,7 +265,7 @@ class MVMTSPConfig(ABC):
 
         clusters = GDF.groupby('cluster')
 
-        logger.info("Region Clustering Complete...")
+        logger.debug("Region Clustering Complete...")
 
         return clusters
 
@@ -278,7 +279,8 @@ class MVMTSPConfig(ABC):
             cluster_criteria[cluster_id] = topsis.gather_criteria(cluster_df, cue_groups=cue_groups)
 
         priority = topsis.run_model(cluster_criteria, None)
-        logger.info("Cluster Prioritization Complete...")
+        logger.debug("Cluster Prioritization (TOPSIS) Complete...")
+        
         return priority
     
 
