@@ -11,16 +11,17 @@ from deap import base, creator, tools, algorithms
 class GASolution:
 
 
-    def __init__(self, population:int=200, generations:int=100, nodes:pd.DataFrame=None, agents:List[int]=[], depots:List[int]=[] )->None:
-        self.population = population 
+    def __init__(self, population:int=200, generations:int=100, nodes:pd.DataFrame=None, depot:int=0 )->None:
+        self.population_size = population 
         self.generations = generations 
         self.nodes = nodes 
-        self.m = len(agents) 
         self.graph = nx.Graph() 
-        self.depots = depots 
+        self.depot = depot 
 
-        creator.create("FitnessMax", base.Fitness, weights=(1.0,))
-        creator.create("Individual", list, fitness=creator.FitnessMax)
+        if not hasattr(creator, "FitnessMax"):
+            creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+        if not hasattr(creator, "Individual"):
+            creator.create("Individual", list, fitness=creator.FitnessMax)
         self.toolbox = base.Toolbox() 
 
 
@@ -36,30 +37,31 @@ class GASolution:
         """
         G = nx.Graph() 
 
-        node_ids = list(self.nodes.keys())
+        for source_node in self.nodes.values(): 
+            for target_node in self.nodes.values(): 
 
-        for source in node_ids: 
-            for target in node_ids: 
-
-                if source == target: continue 
+                if source_node == target_node: continue 
 
                 try: 
-                    cost_distance = weights['distance'].iloc[self.nodes[source], self.nodes[target]]
-                    cost_energy = weights['energy'].iloc[self.nodes[source], self.nodes[target]]
-                    cost_time = weights['travel_time'].iloc[self.nodes[source], self.nodes[target]]
+                    cost_distance = weights['distance'][source_node][target_node-1]
+                    cost_energy = weights['energy'][source_node][target_node-1]
+                    cost_time = weights['travel_time'][source_node][target_node-1]
 
-                    G.add_edge(source, target, 
-                               cost_distance=cost_distance, 
-                               cost_energy=cost_energy, 
-                               cost_time=cost_time)
+                    G.add_edge(
+                        source_node,
+                        target_node, 
+                        cost_distance=cost_distance, 
+                        cost_energy=cost_energy, 
+                        cost_time=cost_time
+                    )
                     
                 except (KeyError, IndexError) as e: 
-                    logger.exception(f"Edge creation failed for nodes {source} and {target}: {e}")
+                    logger.exception(f"Edge creation failed for nodes {source_node} and {target_node}: {e}")
         logger.debug(f"Graph created with {len(G.nodes)} nodes and {len(G.edges)} edges.")
         return G
 
 
-    def initialize_tour(self)->List[int]:
+    def initialize_tour(self):
         """
         Initializes a tour starting and ending at a depot, visiting all nodes.
 
@@ -67,17 +69,16 @@ class GASolution:
             list: A complete tour (list of area IDs).
         """
         all_nodes = list(self.nodes.keys()) 
-        depot_ids = [self.nodes[depot] for depot in self.depots]
-        logger.debug(f"Depot IDs: {depot_ids}")
+        tmp = {v:k for k,v in self.nodes.items()}
+        depot_id = tmp[self.depot]
+        logger.debug(f"Depot IDs: {depot_id}")
         # Remove depot(s) from list 
-        for depot_id in depot_ids: 
-            if depot_id in all_nodes: 
-                all_nodes.remove(depot_id)
+        if depot_id in all_nodes: 
+            all_nodes.remove(depot_id)
 
         random.shuffle(all_nodes)
 
-        start_depot = depot_ids[0] 
-        tour = [start_depot] + all_nodes + [start_depot]
+        tour = [depot_id] + all_nodes + [depot_id]
 
         return tour 
 
@@ -136,7 +137,7 @@ class GASolution:
             list: Mutated tour.
         """
         if len(individual)<=3: 
-            return individual # Too small to mutate
+            return individual, # Too small to mutate
 
         if np.random.rand() < indpd: 
             swap_indices = random.sample(range(1,len(individual)-1), 2)
@@ -148,7 +149,7 @@ class GASolution:
             self.graph.has_edge(individual[idx1], individual[idx2+1])):
                 individual[idx1], individual[idx2] = individual[idx2], individual[idx1]
 
-        return individual
+        return individual,
 
 
     def fitness_evaluation(self, individual:List[int], cost:Dict[str,float]) ->Tuple[float,]: 
@@ -169,10 +170,10 @@ class GASolution:
         for i in range(len(individual) -1): 
             try: 
                 node_from = self.nodes[individual[i]]
-                node_to = self.nodes[individual[i+1]] 
+                node_to = self.nodes[individual[i+1]] -1
 
-                total_distance += cost['distance'].iloc[node_from, node_to]
-                total_energy += cost['energy'].iloc[node_from, node_to]
+                total_distance += cost['distance'][node_from][node_to]
+                total_energy += cost['energy'][node_from][node_to]
             
             except KeyError as ke: 
                 logger.exception(f"KeyError during fitness evaluation at index {i}: {ke}")
@@ -187,15 +188,15 @@ class GASolution:
         """
         Setup DEAP toolbox for the Genetic Algorithm.
         """
-        self.toolbox.register("individual",tools.initIterate, creator.Individual, self.initialize_tour) 
-        self.toolbox.register("population", tools.initRepeat, List, self.toolbox.individual)
+        self.toolbox.register("individual", tools.initIterate, creator.Individual, self.initialize_tour) 
+        self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
         self.toolbox.register("mate", self.crossover)
         self.toolbox.register("mutate", self.mutation, indpd=0.05)
         self.toolbox.register("select", tools.selTournament, tournsize=3)
         logger.debug("Toolbox configured.") 
 
     
-    def run(self, crossover_rate:float, mutation_rate:float, cost:Dict[str, float], enable_indi_fitness:bool=False)->None:
+    def run(self, crossover_rate:float, mutation_rate:float, cost:Dict[str, float], enable_indi_fitness:bool=True, verbose:bool=True)->None:
         """
         Run the GA optimization.
 
@@ -209,13 +210,14 @@ class GASolution:
         Returns:
             tuple: Best paths and fitness.
         """
+
         logger.debug("Starting Genetic Algorithm...")
         self.graph = self.create_graph(cost) 
         self.toolbox_config() 
         self.toolbox.register("evaluate", self.fitness_evaluation, cost=cost) 
 
         # Initialize population
-        population = self.toolbox.population(n=self.population)
+        population = self.toolbox.population(n=self.population_size)
 
         HOF = tools.ParetoFront() 
         stats = tools.Statistics(lambda ind: ind.fitness.values)
@@ -228,12 +230,12 @@ class GASolution:
             population, self.toolbox, 
             cxpb=crossover_rate, mutpb=mutation_rate,
             ngen=self.generations, stats=stats,
-            halloffame=HOF, verbose=False
+            halloffame=HOF, verbose=verbose
         )
 
         best_individual = tools.selBest(population, 1)[0] 
         if enable_indi_fitness:
-            best_individual.fitness.values = self.fitness_evaluation(best_individual, cost)
+            fitness = self.fitness_evaluation(best_individual, cost)
         else: 
             fitness = best_individual.fitness.values    
 
@@ -242,34 +244,3 @@ class GASolution:
         logger.debug(f"Best path: {best_path} with fitness: {fitness[0]}") 
         return best_path, fitness[0] 
     
-
-    def set_tours(self, paths:List[int], plethos_agents:int)->List[int]: 
-        """
-        Assign unique tours to agents.
-
-        Args:
-            paths (list): List of node sequences.
-            num_agents (int): Number of agents.
-
-        Returns:
-            list: List of tours.
-        """
-        unique_paths = dict()
-        path_id = 1
-        tmp_dict = {v: k for k, v in self.nodes.items()}
-        depot_values = {tmp_dict[self.depots[k]] for k in range(min(plethos_agents, len(self.depots)))}
-
-        for path in paths:
-            if not path:
-                continue
-            if path[0] in depot_values:
-                tour = tuple(path)
-                if tour not in unique_paths:
-                    unique_paths[tour] = path_id
-                    path_id += 1
-                    if path_id > plethos_agents:
-                        break
-
-        paths_list = [list(k) for k in unique_paths.keys()]
-        return paths_list
-

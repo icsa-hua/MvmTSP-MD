@@ -2,6 +2,7 @@ import gc
 import sys 
 import pandas as pd 
 import numpy as np 
+import networkx as nx 
 from typing import Any, List, Dict
 import logging 
 
@@ -50,7 +51,13 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
 
     if problem_builder.enable_ga: 
         for agent in problem_builder.employed_agents: 
-            solution_path, solution_cost = problem_builder.call_genetic_algorithm(nodes_dict,cost_bundle, depot)
+            print("Starting GA for agent: {}".format(agent))
+            solution_path, solution_cost = problem_builder.call_genetic_algorithm(
+                V_nodes=nodes_dict, 
+                cost=cost_bundle, 
+                depot=depot, 
+                verbose=False   
+            )
             print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
             problem_builder.initial_population[agent] = (solution_path, solution_cost) 
 
@@ -59,8 +66,7 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
                 # best_agent = agent 
 
     
-    V_nodes = list(range(len(nodes_dict)))
-    return cost_d, cost_e, cost_t, R_points, V_nodes, nodes_dict, problem_builder.initial_population
+    return cost_bundle, R_points, nodes_dict, problem_builder.initial_population
 
 
 
@@ -75,3 +81,15 @@ def jupyter_logger(level=logging.INFO)->logging.StreamHandler:
     jupyter_handler.setFormatter(jupyter_formatter)
 
     return jupyter_handler
+
+
+
+
+def create_model_graph(cost, nodes): 
+    graph = nx.Graph()
+
+    # Check the costo dictionary. 
+
+    for source in nodes: 
+        for target in nodes: 
+                pass

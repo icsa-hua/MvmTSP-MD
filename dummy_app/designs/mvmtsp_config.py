@@ -10,6 +10,7 @@ import pulp as pl
 import timeout_decorator 
 import resource
 import random 
+import networkx as nx
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler 
 from k_means_constrained import KMeansConstrained
@@ -32,7 +33,8 @@ class MVMTSPConfig(ABC):
         self.travel_time_columns:List[str] = []
         self.average_energy:float = 0.0
         self.customers:np.ndarray = np.empty((0,0)) 
-        
+        self.STEPS:list = [range(0,3600,1)]
+        self.graph:nx.Graph = nx.Graph()
 
     @abstractmethod 
     def set_objective(self, alpha:Any, beta:Any, gamma:Any, weight:object):
@@ -130,7 +132,7 @@ class MVMTSPConfig(ABC):
         velocity = 5.5555555555555 
         travel_times = distances/velocity/60
         travel_times.columns = tt_columns 
-
+        self.travel_cost = travel_times.values
         # Assert matrix shapes 
         assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
 
@@ -146,7 +148,6 @@ class MVMTSPConfig(ABC):
         self.allowed_visits = np.full(self.v, len(self.agents), dtype=int)
 
         # Final preperation 
-        self.travel_cost = travel_times.values 
         self.distance_columns = dist_columns 
         self.energy_columns = energy_columns
         self.travel_time_columns = tt_columns
@@ -167,27 +168,30 @@ class MVMTSPConfig(ABC):
     @abstractmethod 
     @timeout_decorator.timeout(3600)
     def solve_problem(self)->None: 
-        self.problem.solve(pl.GLPK(msg=False, options=['mipgap','0.05']))
+        self.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
 
 
     @abstractmethod 
-    def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, population_size:int=200, generations:int=100)->List[int]: 
+    def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->List[int]: 
         
-
+        print("Cost", cost)
         ga = GASolution(
             population=population_size, 
             generations=generations, 
             nodes=V_nodes,
-            agents=self.agents, 
-            depots=self.depots
+            depot=depot
         )
 
         best_paths, hof = ga.run(
             crossover_rate=0.7, 
             mutation_rate=0.05,
             cost=cost, 
-            enable_indi_fitness=True
+            enable_indi_fitness=True, 
+            verbose=verbose
         )
+
+        if nx.is_empty(self.graph): 
+            self.graph = ga.graph
 
         logger.debug(f"Best Paths: {best_paths} with depot {depot}")
         return best_paths, hof

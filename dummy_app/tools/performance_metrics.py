@@ -28,6 +28,7 @@ class Metrics:
     def get_memory_usage(self):
         process = psutil.Process(os.getpid())
         self.memory_usage = process.memory_info().rss / (1024 ** 2)
+        return self.memory_usage
 
     def display_memory_usage(self): 
         snapshot = tracemalloc.take_snapshot() 

@@ -3,3 +3,8 @@ assets/env_settings/*
 MV_MTSP.egg-info 
 resources 
 tspenv
+dummy_app/models/__pycache__/*.pyc
+dummy_app/tools/__pycache__/*.pyc
+dummy_app/designs/__pycache__/*.pyc
+
+

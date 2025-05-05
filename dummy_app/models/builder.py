@@ -28,11 +28,12 @@ class MVMTSPBuilder(MVMTSPConfig):
         self.v:int = 0
         self.population = [] 
         self.best_path = [] 
-        self.timeFrame = []
+        self.timeFrame_per_cluster = []
         self.initial_population = [] 
         self.metrics = Metrics(verbose=True) 
         self.clusters_times:Dict[int, int] = {} 
         self.cluster_id:int = 0 
+        self.time_window:int = 5 #descrete time steps
 
 
     def create_problem(self, V:List[int])->None:
@@ -44,13 +45,13 @@ class MVMTSPBuilder(MVMTSPConfig):
         self.x = pl.LpVariable.dicts("x", ((i, j, k) for i in V for j in V for k in self.agents), cat='Binary')
     
         # Variable to show position of agent's in the time frame T 
-        self.p = pl.LpVariable.dicts("p", ((k,t) for k in self.agents for t in self.timeFrame), cat='Integer')
+        self.p = pl.LpVariable.dicts("p", ((k,t) for k in self.agents for t in self.timeFrame_per_cluster), cat='Integer')
         
         # Variable to use for subtour elimination constraints 
         self.u = pl.LpVariable.dicts("u", ((i, k) for i in V for k in self.agents), lowBound=0, upBound=len(V)-1, cat='Integer')
 
         # Variable to handle the action based on timing 
-        self.t = pl.LpVariable.dicts("t", ((i, j, k, ts) for i in V for j in V for k in self.agents for ts in self.timeFrame), cat='Binary')
+        self.t = pl.LpVariable.dicts("t", ((i, j, k, ts) for i in V for j in V for k in self.agents for ts in self.timeFrame_per_cluster), cat='Binary')
 
         # Variable that holds information about the energy consumption between two nodes 
         self.e = pl.LpVariable.dicts("e", ((i, k) for i in V for k in self.agents),lowBound=0, upBound=self.max_battery, cat='Continuous')
@@ -59,12 +60,24 @@ class MVMTSPBuilder(MVMTSPConfig):
         self.z = pl.LpVariable.dicts("z_ik", ((i, k) for i in V for k in self.agents), lowBound=0, upBound=1, cat='Binary')
         
 
-    def set_objective(self, alpha:Any, beta:Any, gamma:Any, weight:object):
-        super().set_objective(alpha, beta, gamma, weight) 
-
+    def set_objective(self, distance:Any, energy:Any, time:Any, nodes:Dict):
+        
+        self.problem.setObjective(
+            pl.lpSum(
+                distance[nodes[i]][nodes[j]-1] * self.t[i,j,k,t]
+                + energy[nodes[i]][nodes[j]-1] * self.t[i,j,k,t]
+                + time[nodes[i]][nodes[j]-1] * self.t[i,j,k,t]
+                for t in self.timeFrame_per_cluster
+                for i in nodes
+                for j in nodes
+                if i != j 
+                for k in self.agents
+            )
+        )
+         
     
-    def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, population_size:int=200, generations:int=100)->List[int]:
-        return super().call_genetic_algorithm(V_nodes, cost, depot, population_size, generations) 
+    def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, verbose:bool, population_size:int=200, generations:int=100)->List[int]:
+        return super().call_genetic_algorithm(V_nodes, cost, depot, verbose, population_size, generations) 
     
 
     def assign_agents_to_areas(self, plethos:int=0, depots:Union[List[int], Dict[int,int]]=None)->Dict[int,int]:
@@ -185,21 +198,21 @@ class MVMTSPBuilder(MVMTSPConfig):
     
     
     def create_solution(self, V_nodes, nodes_dict):
-        logger.info(f"Set Time Frame is {self.timeFrame}") 
+        logger.info(f"Set Time Frame is {self.timeFrame_per_cluster}") 
 
         if pl.LpStatus[self.problem.status] != 'Optimal': 
             logger.info("Problem is not optimal, returning None...")
             exit(1)
-
+        employed_agents = ["Agent_" + str(agent_id) for agent_id in self.employed_agents]
         reverse_dict = {v:k for k,v in nodes_dict.items()}
-        list_of_agents = {name: int(name.split('_')[-1]) for name in self.employed_agents}
-        maxiter_counter = len(V_nodes) * len(self.timeFrame)
+        list_of_agents = {name: int(name.split('_')[-1]) for name in employed_agents}
+        maxiter_counter = len(V_nodes) * len(self.timeFrame_per_cluster)
 
         for agent_name, agent_id in list_of_agents.items() :
             start_node = self.depots_for_agents[agent_id] 
             current_node = reverse_dict[start_node] 
 
-            current_time_step = self.timeFrame[0] -1 
+            current_time_step = self.timeFrame_per_cluster[0] -1 
 
             route = [] 
             iteration = 0 
@@ -207,7 +220,7 @@ class MVMTSPBuilder(MVMTSPConfig):
             while iteration < maxiter_counter:
                 next_steps = [
                     (current_node, j, t)
-                    for t in self.timeFrame
+                    for t in self.timeFrame_per_cluster
                     for j in V_nodes 
                     if j != current_node and t > current_time_step
                     and self.x[current_node, j, agent_id].varValue == 1
@@ -329,6 +342,7 @@ class MVMTSPBuilder(MVMTSPConfig):
         #         logger.debug(f"Cluster {cluster_tuple[0]} solved successfully...")
         return assignments, updated_clusters
 
+
     def regionalization(self, GDF):
         return super().regionalization(GDF)
     
@@ -337,13 +351,19 @@ class MVMTSPBuilder(MVMTSPConfig):
         return super().cluster_prioritization(clusters, cue_groups)
     
 
-    def clustering(self, cluster, cluster_id, assignment):
+    def clustering(self, cluster, cluster_id, assignment, depot_id):
         
         logger.debug(f"Clustering with {cluster_id} and agents assigned to it: {assignment}")
         column_names = ["dists", "ees", "travel_times", "area_ids"]
+        
         context = extract_context_for_cluster(
             cluster=cluster,
-            columns=[self.distance_columns, self.energy_columns, self.travel_time_columns, 'Area_id'], 
+            columns=[
+                self.distance_columns,
+                self.energy_columns,
+                self.travel_time_columns,
+                'Area_id'
+            ], 
             column_names=column_names 
         )
         
@@ -363,9 +383,10 @@ class MVMTSPBuilder(MVMTSPConfig):
         
         logger.debug(f"Employed agents: {self.employed_agents} for Cluster ID {cluster_id}")
 
+
         # Step 2: Process inpute context 
         try: 
-            cost_d, cost_e, cost_t, R_points, V_nodes, nodes_dict, self.initial_population = process_extraction(self, context, cluster[-1])
+            cost, R_points, nodes_dict, self.initial_population = process_extraction(self, context, depot_id)
         except Exception as e: 
             logger.exception(f"Error processing cluster {cluster_id}: {e}")
             return 
@@ -373,31 +394,36 @@ class MVMTSPBuilder(MVMTSPConfig):
 
         # Step 3: Calculate maximum travel times 
         max_time_steps = {} 
-        print(self.travel_cost)
-        print(nodes_dict)
-
+        V_nodes = list(nodes_dict.keys())
         for i in V_nodes: 
             max_time = 0 
             for j in V_nodes: 
    
-                tmp_time = math.ceil(self.travel_cost[nodes_dict[i]][nodes_dict[j]])
+                tmp_time = math.ceil(self.travel_cost[nodes_dict[i]-1][nodes_dict[j]-1])
                 if tmp_time > max_time: 
-                    max_tim = tmp_time 
+                    max_time = tmp_time 
 
             max_time_steps[i] = max_time
 
         total_time = sum(max_time_steps.values()) 
-        self.timeFrame = list(range(self.moment, self.moment + total_time + 1))
+        # NOTE: Try it without the self.moment variable. Every time frame is specific to that cluster NOT the whole simulation. 
+        # self.timeFrame_per_cluster = list(range(self.moment, self.moment + total_time + 1))
+        
+        if total_time == 0: 
+            logger.error(f"Total time is 0 for cluster {cluster_id}")
+            raise ValueError(f"Total time is 0 for cluster {cluster_id}")
+        
+        self.timeFrame_per_cluster = list(range(0, total_time + 1))
+
 
         # Step 4: Create and configure the optimization problem 
         try: 
             self.create_problem(V_nodes)
             self.set_objective(
-                cost_d, 
-                cost_e, 
-                cost_t,
-                V_nodes, 
-                nodes_dict
+                distance=cost['distance'], 
+                energy=cost['energy'], 
+                time=cost['travel_time'],
+                nodes=nodes_dict
             )
 
         except Exception as e:
@@ -409,19 +435,17 @@ class MVMTSPBuilder(MVMTSPConfig):
             # Many Visits Multi TSP solution 
             try: 
                 self.set_constraints_for_multi_agent(
-                    V_nodes, 
-                    nodes_dict,
-                    cost_d, 
-                    cost_e,
-                    cost_t,
-                    R_points,
+                    V_nodes=V_nodes, 
+                    nodes_dict=nodes_dict,
+                    cost=cost, 
+                    R_points=R_points,
                 )
-
+                logger.info("Many-visits multi-agent TSP problem created successfully...")
             except Exception as e:
                 logger.exception(f"Error setting constraints for cluster {cluster_id}: {e}")
                 raise ValueError(f"Error in setting constraints for Cluster {cluster_id}")
-            
             try: 
+                logger.info(f"Solving problem for cluster {cluster_id}...")  
                 self.run()
                 self.create_solution(V_nodes, nodes_dict)
             except Exception as e:
@@ -437,15 +461,14 @@ class MVMTSPBuilder(MVMTSPConfig):
             raise ValueError(f"No employed agents for cluster {cluster_id}")
 
 
-    def set_constraints_for_multi_agent(self, V_nodes, nodes_dict, cost_d, cost_e, cost_t, R_points): 
+    def set_constraints_for_multi_agent(self, V_nodes:List[int], nodes_dict:Dict[int, int], cost:Dict[str,List[float]], R_points:List[int]): 
 
         logger.info(f"Setting constraints for multi-agent problem...")
-
-        list_of_agents = {x:int(x.split('_')[-1]) for x in self.employed_agents}
-        header = list_of_agents[self.employed_agents[0]]
+        employed_agents = ["Agent_" + str(agent_id) for agent_id in self.employed_agents]
+        list_of_agents = {x:int(x.split('_')[-1]) for x in employed_agents}
+        header = list_of_agents[employed_agents[0]]
         reverse_nodes = {v: k for k, v in nodes_dict.items()}
         depot_ind = self.get_depot_index(nodes_dict, header)
-        tr_times = {(i,j) for i in V_nodes for j in V_nodes if i != j and i != depot_ind and j != depot_ind}
         valid_arcs = [(i,j) for i in V_nodes for j in V_nodes if i != j and i != depot_ind and j != depot_ind]
 
         in_arcs = defaultdict(list)
@@ -455,8 +478,11 @@ class MVMTSPBuilder(MVMTSPConfig):
             out_arcs[i].append(j)
             in_arcs[j].append(i)
 
-        deallocate_memory(valid_arcs)
+        tr_times = {(i,j):self.get_travel_time(i,j,nodes_dict) for i in V_nodes for j in V_nodes}
+        
 
+        deallocate_memory(valid_arcs)
+ 
         # for j in V_nodes:
             # if j != depot_ind:
             #     self.model += lpSum(self.x[i, j, v] for i in in_arcs[j]) == 1
@@ -469,6 +495,7 @@ class MVMTSPBuilder(MVMTSPConfig):
                     next_node = reverse_nodes[self.initial_population[a][0][i+1]] 
                     self.x[node, next_node, header].setInitialValue(1) 
 
+        
 
         if "const_0" in self.constraints: 
             for j in V_nodes: 
@@ -490,8 +517,8 @@ class MVMTSPBuilder(MVMTSPConfig):
         if "const_2" in self.constraints:
             try:
                 for k, v in list_of_agents.items():
-                    self.problem += self.p[v,self.timeFrame[0]] == depot_ind, f"Positional_variable_at_start_of_journey_for_{k}" 
-                    self.problem += self.p[v,self.timeFrame[0]] == depot_ind, f"Positional_variable_at_end_of_joureny_for_{k}"
+                    self.problem += self.p[v,self.timeFrame_per_cluster[0]] == depot_ind, f"Positional_variable_at_start_of_journey_for_{k}" 
+                    self.problem += self.p[v,self.timeFrame_per_cluster[-1]] == depot_ind, f"Positional_variable_at_end_of_joureny_for_{k}"
 
                 logger.debug(f"Constraint | const_2 - Positional variable at start and end of journey (depot)| set for cluster ")
             except Exception as e: 
@@ -501,8 +528,8 @@ class MVMTSPBuilder(MVMTSPConfig):
         if "const_3" in self.constraints: 
             try: 
                 for k, v in list_of_agents.items(): 
-                    self.problem += pl.lpSum(self.t[depot_ind, j, v, self.timeFrame[0]] for j in V_nodes if depot_ind != j ) ==1, f"{k}_leaves_depot_{depot_ind}_at_specific_interval"
-                    self.problem += pl.lpSum(self.t[i, depot_ind, v, self.timeFrame[-1]] for i in V_nodes if depot_ind != i ) ==1, f"{k}_enters_depot_{depot_ind}_at_specific_interval"
+                    self.problem += pl.lpSum(self.t[depot_ind, j, v, self.timeFrame_per_cluster[0]] for j in V_nodes if depot_ind != j ) ==1, f"{k}_leaves_depot_{depot_ind}_at_specific_interval"
+                    self.problem += pl.lpSum(self.t[i, depot_ind, v, self.timeFrame_per_cluster[-1]] for i in V_nodes if depot_ind != i ) ==1, f"{k}_enters_depot_{depot_ind}_at_specific_interval"
 
                 logger.debug(f"Constraint | const_3 - Each agent leaves and enters the depot at a specific interval | set for cluster ")
             except Exception as e:
@@ -569,15 +596,15 @@ class MVMTSPBuilder(MVMTSPConfig):
                 for k, v in list_of_agents.items():
                     for j in V_nodes: 
                         if j != depot_ind: 
-                            for step in self.timeFrame[:tr_times[(depot_ind, j)]]: 
+                            for step in self.timeFrame_per_cluster[:tr_times[(depot_ind, j)]]: 
                                 self.problem += (
-                                    self.t[depot_ind, j, v, step] <= self.t[depot_ind, j, v, self.timeFrame[0]], 
+                                    self.t[depot_ind, j, v, step] <= self.t[depot_ind, j, v, self.timeFrame_per_cluster[0]], 
                                     f"Dynamic_time_enforcement_{depot_ind}_{j}_for_{k}_time_{step}"
                                 )
                             
-                            for step in self.timeFrame[:-tr_times[(j,depot_ind)]]:
+                            for step in self.timeFrame_per_cluster[:-tr_times[(j,depot_ind)]]:
                                 self.problem += (
-                                    self.t[j, depot_ind, v, step] <= self.t[j, depot_ind, v, self.timeFrame[-1]], 
+                                    self.t[j, depot_ind, v, step] <= self.t[j, depot_ind, v, self.timeFrame_per_cluster[-1]], 
                                     f"Dynamic_time_enforcement_{j}_to_{depot_ind}_for_{k}_time_{step}"
                                 )
                 logger.debug(f"Constraint | const_9 - Dynamic time enforcement | set for cluster ")
@@ -586,19 +613,19 @@ class MVMTSPBuilder(MVMTSPConfig):
                 logger.exception(f"Error setting constraint const_9 for cluster: {e}")
                 raise ValueError(f"Error in setting constraint const_9 for Cluster")
             
-        if "const_10" in self.constraints: 
+        if "const_10" in self.constraints: #NOTE: This is essential for the model to work 
             try: 
                 for k, v in list_of_agents.items(): 
                     for j in V_nodes: 
                         if j != depot_ind: 
-                            for step in self.timeFrame[:tr_times[(depot_ind, j)]]: 
+                            for step in self.timeFrame_per_cluster[:tr_times[(depot_ind, j)]]: 
                                 self.problem += (
                                     self.t[depot_ind, j, v, step] == self.x[depot_ind, j, v], 
                                     f"Enforce synchronization_between_t_and_x_{depot_ind}_{j}_for_{k}_time_{step}"
                                 )
                     for i in V_nodes: 
                         if i != depot_ind: 
-                            for step in self.timeFrame[-tr_times[(i, depot_ind)]:]: 
+                            for step in self.timeFrame_per_cluster[-tr_times[(i, depot_ind)]:]: 
                                 self.problem += (
                                     self.t[i, depot_ind, v, step] == self.x[i, depot_ind, v],
                                     f"Enforce synchronization_between_t_and_x_{i}_to_{depot_ind}_for_{k}_time_{step}"
@@ -614,11 +641,11 @@ class MVMTSPBuilder(MVMTSPConfig):
                 for k, v in list_of_agents.items():
                     for i in out_arcs:
                         for j in out_arcs[i]:
-                            time_limit = len(self.timeFrame) - (tr_times[(i, j)] + tr_times[(j, depot_ind)] + 1)
+                            time_limit = len(self.timeFrame_per_cluster) - (tr_times[(i, j)] + tr_times[(j, depot_ind)] + 1)
                             for step_idx in range(time_limit):
-                                t_step = self.timeFrame[step_idx]
-                                t_step_j = self.timeFrame[step_idx + tr_times[(i, j)]]
-                                t_step_jj = self.timeFrame[step_idx + 1 + tr_times[(i, j)]]
+                                t_step = self.timeFrame_per_cluster[step_idx]
+                                t_step_j = self.timeFrame_per_cluster[step_idx + tr_times[(i, j)]]
+                                t_step_jj = self.timeFrame_per_cluster[step_idx + 1 + tr_times[(i, j)]]
 
                                 self.problem += self.t[i, j, v, t_step_j] <= self.t[j, j, v, t_step_jj], \
                                             f"Time_Progression_{t_step}_{i}_{j}_for_{k}"
@@ -628,12 +655,12 @@ class MVMTSPBuilder(MVMTSPConfig):
                 logger.exception(f"Error setting constraint const_11 for cluster: {e}")
                 raise ValueError(f"Error in setting constraint const_11 for Cluster")
             
-        if "const_12" in self.constraints:
+        if "const_12" in self.constraints: # NOTE: Also necessary for the model to work. 
             try:
                 for k, v in list_of_agents.items():
                     for i in out_arcs: 
                         for j in out_arcs[i]:
-                            for step in self.timeFrame[(tr_times[(depot_ind,i)]):-(tr_times[(i,j)]+tr_times[(j,depot_ind)])]:
+                            for step in self.timeFrame_per_cluster[(tr_times[(depot_ind,i)]):-(tr_times[(i,j)]+tr_times[(j,depot_ind)])]:
                                 self.problem += (self.t[i, j, v, t] for t in range(step, step+tr_times[(i,j)])) == self.x[i,j,v], f"Link_x_and_t_{i}_{j}_for_{k}_at_time_{step}"
 
                 logger.debug(f"Constraint | const_12 - Link x and t | set for cluster ")
@@ -642,14 +669,14 @@ class MVMTSPBuilder(MVMTSPConfig):
                 logger.exception(f"Error setting constraint const_12 for cluster: {e}")
                 raise ValueError(f"Error in setting constraint const_12 for Cluster")
 
-        if "const_13" in self.constraints:
+        if "const_13" in self.constraints: # NOTE: This only seems to have an effect on the first agent it encounters. 
             try:
                 for k, v in list_of_agents.items():
                     for i in out_arcs:
                         for j in out_arcs[i]:
-                            self.problem += self.e[j,v] >= self.e[i,v] - cost_e[nodes_dict[i]][j] * self.x[i,j,v], f"Update_remaining_energy_{i}_{j}_for_{k}"
-                            self.problem += self.e[i,v] >= cost_e[nodes_dict[i]][j] * self.x[i, j, v],f"No_travel_if_low_energy_{i}_{j}_for_{k}"
-                    self.problem += self.e[i,v] >= cost_e[nodes_dict[i]][depot_ind] * self.x[i, depot_ind, v],f"Enough_energy_to_return_to_depot_from_{i}_for_{k}"
+                            self.problem += self.e[j,v] >= self.e[i,v] - cost['energy'][nodes_dict[i]][j] * self.x[i,j,v], f"Update_remaining_energy_{i}_{j}_for_{k}"
+                            self.problem += self.e[i,v] >= cost['energy'][nodes_dict[i]][j] * self.x[i, j, v],f"No_travel_if_low_energy_{i}_{j}_for_{k}"
+                        self.problem += self.e[i,v] >= cost['energy'][nodes_dict[i]][depot_ind] * self.x[i, depot_ind, v],f"Enough_energy_to_return_to_depot_from_{i}_for_{k}"
                 logger.debug(f"Constraint | const_13 - Update remaining energy | set for cluster ")
 
             except Exception as e:
@@ -661,7 +688,7 @@ class MVMTSPBuilder(MVMTSPConfig):
             try: 
                 for k, v in list_of_agents.items():
                     for i in out_arcs:
-                        for t in self.timeFrame: 
+                        for t in self.timeFrame_per_cluster: 
                             self.problem += self.e[i,v] >= 0, f"Energy_cannot_be_negative_{i}_for_{k}_at_time_{t}"
 
                     self.problem += self.e[depot_ind,v] == self.max_battery, f"Energy_cannot_be_negative_at_depot_for_{k}"
@@ -674,7 +701,11 @@ class MVMTSPBuilder(MVMTSPConfig):
             try:
                 for i in out_arcs:
                     for j in out_arcs[i]:
-                        for step in self.timeFrame[(tr_times[(depot_ind, i)]): -(tr_times[(i, j)] + tr_times[(j, depot_ind)])]:
+                        if i == depot_ind or j == depot_ind:
+                            continue
+                        # NOTE: Slicing the time window even more here may be brittle: since we are already enforcing positional and journey to depots in specific timesteps. 
+                        # for step in self.timeFrame_per_cluster[(tr_times[(depot_ind, i)]): -(tr_times[(i, j)] + tr_times[(j, depot_ind)])]:
+                        for step in self.timeFrame_per_cluster:
                             self.problem += pl.lpSum(self.t[i,j,v,step] for _,v in list_of_agents.items()) <= 1, f"Unique_Time_visits_constraint_at_travel_{i}_{j}_at_time_{step}" 
 
                 logger.debug(f"Constraint | const_15 - Unique Time visits constraint | set for cluster ")
@@ -688,7 +719,7 @@ class MVMTSPBuilder(MVMTSPConfig):
                 for k1, v1 in list_of_agents.items() : 
                     for k2, v2 in list_of_agents.items() : 
                         if k1 != k2 : 
-                            for step in self.timeFrame: 
+                            for step in self.timeFrame_per_cluster: 
                                 self.problem += pl.lpSum(self.t[i, j, v1, step] - self.t[i,j, v2, step] for i in out_arcs for j in out_arcs[i]) != 0, f"Agent_unique_paths_for_{k1}_and_{k2}_at_time_{step}"
                 logger.debug(f"Constraint | const_16 - Agent unique paths | set for cluster ")
 
@@ -728,7 +759,8 @@ class MVMTSPBuilder(MVMTSPConfig):
 
 
     def validate_paths(self):
-        max_time_steps = self.timeFrame[-1]
+
+        max_time_steps = self.timeFrame_per_cluster[-1]
 
         for agent_id, path_list in self.paths.items():
             path = path_list[0]  # Assuming single tour per agent
@@ -741,3 +773,5 @@ class MVMTSPBuilder(MVMTSPConfig):
 
             logger.info(f"Agent {agent_id} path validated successfully.")
 
+    def get_travel_time(self, i, j, nodes_dict): 
+        return math.ceil(self.travel_cost[nodes_dict[i], nodes_dict[j]])
