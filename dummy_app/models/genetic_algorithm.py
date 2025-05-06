@@ -3,6 +3,7 @@ import random
 import pandas as pd
 import networkx as nx 
 from dummy_app.tools.logger import logger
+from dummy_app.tools.autonomize import create_model_graph, get_weights
 from typing import Dict, List, Any, Tuple 
 from deap import base, creator, tools, algorithms
 
@@ -25,7 +26,7 @@ class GASolution:
         self.toolbox = base.Toolbox() 
 
 
-    def create_graph(self, weights:Dict[str,pd.DataFrame])->nx.Graph:
+    def create_graph(self, cost:Dict[str,pd.DataFrame])->nx.Graph:
         """ 
         Creates a graph representation using the provided cost matrices.
         
@@ -35,30 +36,8 @@ class GASolution:
         Returns:
             nx.Graph: Graph with nodes and weighted edges.
         """
-        G = nx.Graph() 
-
-        for source_node in self.nodes.values(): 
-            for target_node in self.nodes.values(): 
-
-                if source_node == target_node: continue 
-
-                try: 
-                    cost_distance = weights['distance'][source_node][target_node-1]
-                    cost_energy = weights['energy'][source_node][target_node-1]
-                    cost_time = weights['travel_time'][source_node][target_node-1]
-
-                    G.add_edge(
-                        source_node,
-                        target_node, 
-                        cost_distance=cost_distance, 
-                        cost_energy=cost_energy, 
-                        cost_time=cost_time
-                    )
-                    
-                except (KeyError, IndexError) as e: 
-                    logger.exception(f"Edge creation failed for nodes {source_node} and {target_node}: {e}")
-        logger.debug(f"Graph created with {len(G.nodes)} nodes and {len(G.edges)} edges.")
-        return G
+        weights = get_weights()
+        return create_model_graph(cost=cost, nodes=self.nodes, weights=weights)
 
 
     def initialize_tour(self):
@@ -163,10 +142,10 @@ class GASolution:
         Returns:
             tuple: Total cost as single value.
         """
-
+        weights = get_weights() 
         total_distance = 0.0 
         total_energy = 0.0 
-
+        travel_time = 0.0 
         for i in range(len(individual) -1): 
             try: 
                 node_from = self.nodes[individual[i]]
@@ -174,13 +153,18 @@ class GASolution:
 
                 total_distance += cost['distance'][node_from][node_to]
                 total_energy += cost['energy'][node_from][node_to]
-            
+                travel_time += cost['travel_time'][node_from][node_to]
+
             except KeyError as ke: 
                 logger.exception(f"KeyError during fitness evaluation at index {i}: {ke}")
             except IndexError as ie:
                 logger.exception(f"IndexError during fitness evaluation at index {i}: {ie}")
 
-        total_cost = total_distance + total_energy
+        total_cost = (
+            weights['distance'] * total_distance + 
+            weights['energy'] * total_energy +
+            weights['travel_time'] * travel_time
+        )
         return (total_cost,)
 
 

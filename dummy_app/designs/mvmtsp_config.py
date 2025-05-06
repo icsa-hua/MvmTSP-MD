@@ -174,7 +174,6 @@ class MVMTSPConfig(ABC):
     @abstractmethod 
     def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->List[int]: 
         
-        print("Cost", cost)
         ga = GASolution(
             population=population_size, 
             generations=generations, 
@@ -189,9 +188,6 @@ class MVMTSPConfig(ABC):
             enable_indi_fitness=True, 
             verbose=verbose
         )
-
-        if nx.is_empty(self.graph): 
-            self.graph = ga.graph
 
         logger.debug(f"Best Paths: {best_paths} with depot {depot}")
         return best_paths, hof

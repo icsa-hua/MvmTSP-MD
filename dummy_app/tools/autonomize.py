@@ -4,7 +4,9 @@ import pandas as pd
 import numpy as np 
 import networkx as nx 
 from typing import Any, List, Dict
+from dummy_app.models.central_hubs import CentralHub
 import logging 
+
 
 def deallocate_memory(variable:Any)->None:
     del variable 
@@ -30,10 +32,7 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     cost_e = dict(zip(area_ids, ees))
     cost_t = dict(zip(area_ids, travel_times))
 
-    R_points = {node: len(problem_builder.employed_agents) for node in area_ids}
 
-    assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
-    "Mismatch between distance, energy, travel_time and R_points dictionary length"
 
     # Initialize structures 
     problem_builder.initial_population = {agent: () for agent in problem_builder.employed_agents} 
@@ -46,12 +45,41 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
         'travel_time':cost_t,
     }
 
+    problem_builder.graph = create_model_graph(
+        cost=cost_bundle, 
+        nodes=nodes_dict,
+        weights=get_weights() 
+    )
+
+    hub = CentralHub()
+    
+    bridge_nodes = hub.get_bridge_nodes(
+        graph=problem_builder.graph, 
+        cluster_nodes = nodes_dict.keys(), 
+        cost_dist=cost_bundle['distance'],
+        nodes_dict=nodes_dict,
+        n_agents=len(problem_builder.employed_agents)
+    )
+    if not bridge_nodes: 
+        raise ValueError("No bridge nodes were found")
+
+    bridge_nodes = [nodes_dict[bridge_nodes[i]] for i in range(len(bridge_nodes))]
+    R_points = [] 
+    for i in nodes_dict: 
+        if nodes_dict[i] in bridge_nodes: 
+            allowed_visits = hub.number_allowed_visits[i]
+        else: 
+            allowed_visits = 1 
+        R_points.append(allowed_visits)
+
+    assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
+    "Mismatch between distance, energy, travel_time and R_points dictionary length"
+
     best_fit_score = np.inf 
     # best_agent = None 
 
     if problem_builder.enable_ga: 
         for agent in problem_builder.employed_agents: 
-            print("Starting GA for agent: {}".format(agent))
             solution_path, solution_cost = problem_builder.call_genetic_algorithm(
                 V_nodes=nodes_dict, 
                 cost=cost_bundle, 
@@ -66,7 +94,7 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
                 # best_agent = agent 
 
     
-    return cost_bundle, R_points, nodes_dict, problem_builder.initial_population
+    return cost_bundle, R_points, bridge_nodes, nodes_dict, problem_builder.initial_population
 
 
 
@@ -83,13 +111,25 @@ def jupyter_logger(level=logging.INFO)->logging.StreamHandler:
     return jupyter_handler
 
 
-
-
-def create_model_graph(cost, nodes): 
+def create_model_graph(cost:Dict[str,np.ndarray], nodes:Dict[int,int], weights): 
     graph = nx.Graph()
 
-    # Check the costo dictionary. 
+    for source_node in nodes.values(): 
+        for target_node in nodes.values(): 
+            if source_node == target_node: continue 
+            composite_cost = 0.0 
+            # Calculate the composite cost for the edge
+            for cost_type in cost.keys(): 
+               composite_cost += weights[cost_type] * cost[cost_type][source_node][target_node] 
 
-    for source in nodes: 
-        for target in nodes: 
-                pass
+            graph.add_edge(source_node, target_node, cost=composite_cost)
+
+    return graph 
+
+        
+def get_weights(): 
+    return {
+        'distance': 0.4,
+        'energy': 0.4,
+        'travel_time': 0.2
+    }
