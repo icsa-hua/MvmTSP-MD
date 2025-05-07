@@ -50,7 +50,6 @@ class GASolution:
         all_nodes = list(self.nodes.keys()) 
         tmp = {v:k for k,v in self.nodes.items()}
         depot_id = tmp[self.depot]
-        logger.debug(f"Depot IDs: {depot_id}")
         # Remove depot(s) from list 
         if depot_id in all_nodes: 
             all_nodes.remove(depot_id)

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dummy_app.tools.logger import logger
+from dummy_app.tools.autonomize import deallocate_memory
 from dummy_app.models.genetic_algorithm import GASolution
 from dummy_app.models.topsis import TOPSISPriority
 import geopandas 
@@ -31,6 +32,8 @@ class MVMTSPConfig(ABC):
         self.distance_columns:List[str] = []
         self.energy_columns:List[str] = []
         self.travel_time_columns:List[str] = []
+        self.normalized_battery:np.ndarray[int] = np.empty((0,0))
+        self.max_battery_norm:float = 0.0
         self.average_energy:float = 0.0
         self.customers:np.ndarray = np.empty((0,0)) 
         self.STEPS:list = [range(0,3600,1)]
@@ -118,7 +121,21 @@ class MVMTSPConfig(ABC):
         self.V = nodes 
         self.v = len(self.V)
         self.agents = list(range(1,agents+1))
-        self.max_battery = max_battery 
+        self.max_battery = max_battery
+        max_battery_norm = np.ones(len(energies.columns)) * max_battery 
+
+        temporary_dataframe_energy = energies.copy() 
+        temporary_dataframe_energy.loc[len(energies)] = max_battery_norm
+        temporary_dataframe_energy = normalize_data(temporary_dataframe_energy)
+        max_battery_norm = temporary_dataframe_energy.iloc[-1]
+        temporary_dataframe_energy.drop([len(energies)], inplace=True)
+        self.normalized_battery = temporary_dataframe_energy.values
+        self.max_battery_norm = max_battery_norm.iloc[0]
+        
+
+        deallocate_memory(temporary_dataframe_energy)
+        deallocate_memory(max_battery)
+        deallocate_memory(max_battery_norm)
 
         # Prepare Matrices 
         dist_columns = [f'dist_{i}' for i in range(1, self.v + 1)]
