@@ -60,6 +60,7 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
         nodes_dict=nodes_dict,
         n_agents=len(problem_builder.employed_agents)
     )
+    
     if not bridge_nodes: 
         raise ValueError("No bridge nodes were found")
 

@@ -145,6 +145,7 @@ class MVMTSPConfig(ABC):
         distances.columns = dist_columns 
         energies.columns = energy_columns
         self.average_energy = np.average(energies)
+        
         # Velocity in m/s
         velocity = 5.5555555555555 
         travel_times = distances/velocity/60
