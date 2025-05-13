@@ -18,7 +18,7 @@ def extract_context_for_cluster(cluster:pd.DataFrame, columns:List[List[str]], c
     return extraction
 
 
-def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[str]], depot:int): 
+def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[str]], depot:int, employed_agents:List[int]): 
 
     try: 
         area_ids = extraction['area_ids'].astype(int) 
@@ -32,11 +32,8 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     cost_e = dict(zip(area_ids, ees))
     cost_t = dict(zip(area_ids, travel_times))
 
-
-
     # Initialize structures 
-    problem_builder.initial_population = {agent: () for agent in problem_builder.employed_agents} 
-    shortest_paths = {agent:[] for agent in problem_builder.employed_agents}
+    initial_population = {agent: () for agent in employed_agents} 
     nodes_dict = {i: int(node) for i, node in enumerate(area_ids)}
 
     cost_bundle = {
@@ -45,7 +42,7 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
         'travel_time':cost_t,
     }
 
-    problem_builder.graph = create_model_graph(
+    graph = create_model_graph(
         cost=cost_bundle, 
         nodes=nodes_dict,
         weights=get_weights() 
@@ -54,11 +51,11 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     hub = CentralHub()
     
     bridge_nodes = hub.get_bridge_nodes(
-        graph=problem_builder.graph, 
+        graph=graph, 
         cluster_nodes = nodes_dict.keys(), 
         cost_dist=cost_bundle['distance'],
         nodes_dict=nodes_dict,
-        n_agents=len(problem_builder.employed_agents)
+        n_agents=len(employed_agents)
     )
     
     if not bridge_nodes: 
@@ -76,11 +73,8 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
     "Mismatch between distance, energy, travel_time and R_points dictionary length"
 
-    best_fit_score = np.inf 
-    # best_agent = None 
-
     if problem_builder.enable_ga: 
-        for agent in problem_builder.employed_agents: 
+        for agent in employed_agents: 
             solution_path, solution_cost = problem_builder.call_genetic_algorithm(
                 V_nodes=nodes_dict, 
                 cost=cost_bundle, 
@@ -88,15 +82,9 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
                 verbose=False   
             )
             print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
-            problem_builder.initial_population[agent] = (solution_path, solution_cost) 
+            initial_population[agent] = (solution_path, solution_cost) 
 
-            if solution_cost < best_fit_score: 
-                best_fit_score = solution_cost 
-                # best_agent = agent 
-
-    
-    return cost_bundle, R_points, bridge_nodes, nodes_dict, problem_builder.initial_population
-
+    return cost_bundle, R_points, bridge_nodes, nodes_dict, initial_population
 
 
 def jupyter_logger(level=logging.INFO)->logging.StreamHandler: 
@@ -114,14 +102,13 @@ def jupyter_logger(level=logging.INFO)->logging.StreamHandler:
 
 def create_model_graph(cost:Dict[str,np.ndarray], nodes:Dict[int,int], weights): 
     graph = nx.Graph()
-
     for source_node in nodes.values(): 
         for target_node in nodes.values(): 
             if source_node == target_node: continue 
             composite_cost = 0.0 
             # Calculate the composite cost for the edge
             for cost_type in cost.keys(): 
-               composite_cost += weights[cost_type] * cost[cost_type][source_node][target_node] 
+               composite_cost += weights[cost_type] * cost[cost_type][source_node][target_node-1] 
 
             graph.add_edge(source_node, target_node, cost=composite_cost)
 

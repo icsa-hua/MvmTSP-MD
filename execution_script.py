@@ -1,23 +1,44 @@
-from dummy_app.models.builder import MVMTSPBuilder 
+from dummy_app.models.simulation_builder import Builder 
 from dummy_app.designs.envsim import EnvSim
 from dummy_app.designs.mobility import GroundUserGroup
 from dummy_app.designs.voronoi_map import Map 
 from dummy_app.tools.logger import logger 
-from dummy_app.tools.autonomize import extract_context_for_cluster, process_extraction
 
+import time
 import os 
 import numpy as np 
 from pathlib import Path 
-
-
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 
+trials = 300 
 max_memory = 2 * 1024 *1024 *1024
 number_of_agents = 5
 max_battery = 1500
-constraints = ['const_0', 'const_1', 'const_2', 'const_3', 'const_4', 'const_5', 'const_6', 'const_7', 'const_8', 'const_9',
-               'const_10', 'const_11','const_12','const_13','const_14','const_15','const_16']
+constraints = ['const_0', # NOTE: Constraint for many visits
+               'const_1', # NOTE: Constraint for entering and leaving depot 
+                #  'const_2', # NOTE: Constraint for position on first and last time step
+                   'const_3', # NOTE: Constraint for time on depot at first and last time step 
+                     'const_4', # NOTE: Constraint for ensuring that only 1 travel for depot in/out is allowed 
+                    #    'const_5', # NOTE: Constraint to prohibit depot loop 
+                        #  'const_6', # NOTE: Constraint to allow a single travel between nodes 
+                        #    'const_7', # NOTE: Constraint to set the busy characteristic on the agent 
+                            #  'const_8', # NOTE: Constraint to prevent overlaps with busy 
+                              #  'const_9', # NOTE: Constraint to ensure that the time steps in the beginning and end are alligned with the depot decision journey. 
+                                #  'const_10', # NOTE: Synchronization of depots for spatial and time variables
+                                #    'const_11', # NOTE: Constraint to ensure time progression 
+                                    #  'const_12', # NOTE: Synchronization between spatial and time variables 
+                                    #    'const_13', # NOTE: Energy constraint 
+                                        #  'const_14',  # NOTE: Constraint to ensure that energy won't be negative (failure) during travel
+                                        #    'const_15', # NOTE: Constaint to ensure that for a specific time step only a single agent can be on that travel
+                                            #  'const_16', # NOTE: Constraint to ensure that agents have unique paths 
+                                            #    'const_17', # NOTE: Constraint to ensure that there are no loops in the paths i->j->i
+                                                #  'const_18', 
+                                                #    'const_19',
+                                                    #  'const_20',
+                                                      #  'const_21',
+                                                        #  'const_22',
+]
 
 config = {
     "regionalization":True, 
@@ -34,7 +55,8 @@ gues_path = f"{PROJECT_ASSETS}/env_settings/ground_users.csv"
 
 
 
-problem = MVMTSPBuilder(config)
+
+problem = Builder(config)
 
 mobility_sim = EnvSim() 
 
@@ -65,12 +87,16 @@ data = problem.preprocess(
     max_battery=max_battery
 )
 
-assignments, updated_clusters =problem.run_model(data, ground_users.group)
+problem.run_model(data=data,cue_groups=ground_users.group)
+print(constraints)
+ 
+start = time.time() 
 
-for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
-    problem.clustering(cluster=cluster, cluster_id=cluster_tuple[0], assignment=agents, depot_id=cluster_tuple[1])
-    
+end = time.time() 
 
+print(f"Time taken: {end - start}")
+
+print(problem.paths)
 
 
 

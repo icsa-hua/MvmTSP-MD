@@ -209,7 +209,7 @@ class MVMTSPBuilder(MVMTSPConfig):
         print(nodes_dict)
         
         if pl.LpStatus[self.problem.status] != 'Optimal': 
-            logger.info("Problem is not optimal, returning None...")
+            logger.info(f"Problem is not optimal for number of constraints {len(self.problem.constraints)}, returning None...")
             sys.exit(1)
 
         employed_agents = ["Agent_" + str(agent_id) for agent_id in self.employed_agents]
@@ -262,10 +262,11 @@ class MVMTSPBuilder(MVMTSPConfig):
 
         memory_usage = self.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
-        logger.info("Optimal Solution Found")
-        logger.info("Validating solutions....")
+        logger.info(f"Optimal Solution Found | Number of Constraints {len(self.problem.constraints)}")
+
+        logger.debug("Validating solutions....")
         self.validate_paths(paths=self.paths, nodes_dict=nodes_dict)
-        logger.info("Solutions validated successfully...")
+        logger.debug("Solutions validated successfully...")
 
 
     def createGeoDataset(self, data):
@@ -398,7 +399,7 @@ class MVMTSPBuilder(MVMTSPConfig):
 
         # Step 2: Process inpute context 
         try: 
-            cost, R_points, self.bridge_nodes, nodes_dict, self.initial_population = process_extraction(self, context, depot_id)
+            cost, R_points, self.bridge_nodes, nodes_dict, self.initial_population = process_extraction(self, context, depot_id, self.employed_agents)
         except Exception as e: 
             logger.exception(f"Error processing cluster {cluster_id}: {e}")
             return 
@@ -532,12 +533,12 @@ class MVMTSPBuilder(MVMTSPConfig):
                 for k, v in list_of_agents.items():
                     self.problem += pl.lpSum(
                         self.x[depot_ind, j, v]
-                        for j in V_nodes if j != depot_ind 
+                        for j in V_nodes if j != depot_ind and nodes_dict[j] not in self.bridge_nodes
                     ) == R_points[depot_ind], f"{k}_enters_single_area_from_depot_{depot_ind}"
 
                     self.problem += pl.lpSum(
                         self.x[i, depot_ind, v]
-                        for i in V_nodes if i != depot_ind 
+                        for i in V_nodes if i != depot_ind and nodes_dict[i] not in self.bridge_nodes
                     ) == R_points[depot_ind], f"{k}_leaves_single_area_to_depot_{depot_ind}"
             
                 logger.debug(f"Constraint | const_1 - Each agent enters and leaves the depot once | set for cluster ")
@@ -565,7 +566,7 @@ class MVMTSPBuilder(MVMTSPConfig):
                             valid_departure_window = self.timeFrame_per_cluster[:-(self.tr_times[(depot_ind, j)] + self.tr_times[(j, depot_ind)])]
                             self.problem += pl.lpSum(self.t[depot_ind, j, v, t] for t in valid_departure_window) >= 1, \
                                 f"{k}_leaves_depot_{depot_ind}_for_node_{j}_within_valid_time"
-
+                             
                             valid_return_window = self.timeFrame_per_cluster[-(self.tr_times[(j, depot_ind)] + 1):]
                             self.problem += pl.lpSum(self.t[j, depot_ind, v, t] for t in valid_return_window) >= 1, \
                                 f"{k}_returns_to_depot_{depot_ind}_from_node_{j}_within_valid_time"
@@ -782,15 +783,14 @@ class MVMTSPBuilder(MVMTSPConfig):
                 for t in self.timeFrame_per_cluster:
                     self.problem += self.busy[v, t] + self.wait[v, t] <= 1
 
+
         if "const_18" in self.constraints: 
             for k, v in list_of_agents.items():
                 for i in V_nodes:
                     if i != depot_ind:
                         valid_departure_window = self.timeFrame_per_cluster[:-(self.tr_times[(depot_ind, i)] + self.tr_times[(i, depot_ind)])]
-                        self.problem += pl.lpSum(
-                            self.t[depot_ind, i, v, t] 
-                            for t in valid_departure_window
-                        ) == self.t[depot_ind, i, v, step], f"Dynamic_time_enforcement_{depot_ind}_{i}_for_{k}_time_{step}"
+                        self.problem += pl.lpSum(self.t[depot_ind, i, v, t] for t in valid_departure_window
+                        ) >= self.x[depot_ind,i,v] , f"Dynamic_time_enforcement_{depot_ind}_{i}_for_{k}_time_{step}"
                             
                 for j in V_nodes:
                     if j != depot_ind:
@@ -799,15 +799,16 @@ class MVMTSPBuilder(MVMTSPConfig):
                         self.problem += pl.lpSum(
                             self.t[j, depot_ind, v, t] 
                             for t in valid_return_window
-                        ) == self.t[j, depot_ind, v, step], f"Dynamic_time_enforcement_{j}_{depot_ind}_for_{k}_time_{step}"
+                        ) >= self.x[j, depot_ind, v], f"Dynamic_time_enforcement_{j}_{depot_ind}_for_{k}_time_{step}"
 
 
         if "const_19" in self.constraints: 
             for k, v in list_of_agents.items(): 
                 for step in self.timeFrame_per_cluster: 
                     self.problem += pl.lpSum(
-                        self.t[i,j,v,step] for i in V_nodes for j in V_nodes if i!=j
-                    ) <= 1, f"Only_one_journey_per_agent_{k}_at_time_{step}"
+                        self.t[i,j,v,step] for i in V_nodes for j in V_nodes if i!=j \
+                        if nodes_dict[i] not in self.bridge_nodes and nodes_dict[j] not in self.bridge_nodes
+                    ) == 1, f"Only_one_journey_per_agent_{k}_at_time_{step}"
 
 
         if "const_20" in self.constraints: 
@@ -815,28 +816,33 @@ class MVMTSPBuilder(MVMTSPConfig):
             #     self.problem += pl.lpSum(
             #         self.x[i,j,v] for i in V_nodes for j in V_nodes if i!=j
             #     ) <= R_points, f"Total_number_of_agents_in_the_system_{k}"
+
             for k,v in list_of_agents.items():
                 for t in self.timeFrame_per_cluster:
                     # Agent waits at t if no departure has started yet
-                    self.problem += self.wait[v, t] >= 1 - pl.lpSum(self.t[depot_ind, j, v, tau] for j in V_nodes if j != depot_ind for tau in self.timeFrame_per_cluster if tau < t), \
+                    self.problem += self.wait[v, t] >= 1 - pl.lpSum(
+                        self.t[depot_ind, j, v, tau]
+                        for j in V_nodes if j != depot_ind
+                        for tau in self.timeFrame_per_cluster if tau < t), \
                         f"Wait_before_departure_{v}_{t}"
 
-        if "const_21" in self.constraints: 
-            for k, v in list_of_agents.items(): 
-                for t in self.timeFrame_per_cluster: 
-                    self.problem += pl.lpSum(
-                        self.p[v, t] == j for j in V_nodes
-                    ) == 1, f"Enforce_Unique_Node_Occupancy_in_Time_{k}_{t}"
 
-            M = len(V_nodes) + 1
+        if "const_22" in self.constraints: 
+            
+            constraint_counter = 0
+            M = len(V_nodes) 
             for k, v in list_of_agents.items(): 
-                for i in out_arcs: 
-                    for j in out_arcs[i]: 
+                for i in V_nodes: 
+                    for j in V_nodes:
+                        if i == j and (i==depot_ind or j==depot_ind) : continue 
+                        if nodes_dict[i] in self.bridge_nodes or nodes_dict[j] in self.bridge_nodes: continue
                         trip_time = self.tr_times[(i,j)]
                         for step in self.timeFrame_per_cluster[:-trip_time]:
-                            self.problem += self.p[v, step + trip_time] <= j + (1 - self.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_{j}{i}"
-                            self.problem += self.p[v, step + trip_time] >= j - (1 - self.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_-{j}{i}"
-
+                            if (i, j, v, step) in self.t and self.t[i,j,v,step].name in self.problem.variablesDict():
+                                self.problem += self.p[v, step + trip_time] <= j + (1 - self.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_{j}{i}"
+                                self.problem += self.p[v, step + trip_time] >= j - (1 - self.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_-{j}{i}"
+                                constraint_counter += 1
+            print(f"for Const_22 | added {constraint_counter} constraints")
 
 
     def get_solution(self) -> List[int]: 
