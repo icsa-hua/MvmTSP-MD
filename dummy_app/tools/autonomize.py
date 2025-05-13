@@ -121,3 +121,15 @@ def get_weights():
         'energy': 0.4,
         'travel_time': 0.2
     }
+
+
+def get_session_duration(paths): 
+    agent_times = [] 
+    for cluster in paths: 
+        duration = 0 
+        for agent in paths[cluster]: 
+            duration = len(paths[cluster][agent])
+        agent_times.append(duration) 
+
+    session_duration = max(agent_times)
+    return session_duration

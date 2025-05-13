@@ -129,7 +129,7 @@ class Cluster:
             while step in self.timeframe: 
                 if step == self.timeframe[0]: 
                     
-                    self.paths[agent_id].extend([self.depot_id])
+                    self.paths[agent_id].extend([(self.depot_id,self.depot_id,step)])
 
                     current_node = self.depot_id
                     next_node = random.choice(node_values) 
@@ -137,7 +137,7 @@ class Cluster:
                     step += 1 
                     continue
                 elif step >= self.timeframe[-1]:
-                    self.paths[agent_id].extend([self.depot_id])
+                    self.paths[agent_id].extend([(self.depot_id,self.depot_id,step)])
                     break
 
                 duration = self.tr_times[(reverse_dict[current_node], reverse_dict[next_node])]
@@ -151,10 +151,11 @@ class Cluster:
 
 
             if self.paths[agent_id][-1] != self.depot_id:
-                self.paths[agent_id].extend([self.depot_id])
+                self.paths[agent_id].extend([(self.depot_id,self.depot_id,step)])
 
             logger.debug(f"Agent {agent_id} path: {self.paths[agent_id]}")
-      
+
+            
 
     def create_problem(self): 
         V = list(self.nodes_dict.keys())
@@ -191,15 +192,6 @@ class Cluster:
     
 
 
-
-
-
-        
-
-
-
-    
-    
 
 
 

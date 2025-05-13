@@ -1,5 +1,6 @@
 import numpy as np 
 import pandas as pd 
+import time
 from typing import Union
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -113,6 +114,7 @@ class GroundUserGroup:
         )
 
         self.scatter.set_offsets(self.get_coords())
+        return self.fig, self.ax
 
     
     def simulate(self): 
@@ -137,6 +139,7 @@ class GroundUserGroup:
                                   self.alpha3 * np.random.normal(0.0))
 
             self.update_plot() 
+            plt.draw()  
             yield self.env.timeout(1)
 
 
@@ -145,5 +148,5 @@ class GroundUserGroup:
             self.scatter.set_offsets(self.get_coords())
             
 
-    def run(self, duration:int=3600)->None: 
-        self.env.run(until=duration)
+    # def run(self, duration:int=3600)->None: 
+    #     self.env.run(until=duration)

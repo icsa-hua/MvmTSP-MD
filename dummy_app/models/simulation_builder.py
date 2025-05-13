@@ -260,6 +260,7 @@ class Builder(MVMTSPConfig):
 
         logger.info("Problem construction and solution follow...")
         paths = {} 
+        
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
@@ -270,7 +271,7 @@ class Builder(MVMTSPConfig):
                           depot_id=cluster_tuple[1])
                 pbar.update(1)
                 logger.debug(f"Cluster {cluster_tuple[0]} solved successfully...")
-
+                break 
         return paths     
         
 
@@ -324,7 +325,12 @@ class Builder(MVMTSPConfig):
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5 extract solution 
-        cluster_object.get_solution() 
+        cluster_object.get_solution()
+
+        # Step 6: Add the recharge phase 
+        for agent in cluster_object.employed_agents:
+            for t in range(self.recharge_time_window): 
+                cluster_object.paths[agent].append((depot_id,depot_id,cluster_object.timeframe[-1]+t))
 
         self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster_id] = self.moment

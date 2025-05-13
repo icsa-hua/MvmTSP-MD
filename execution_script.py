@@ -4,14 +4,17 @@ from dummy_app.designs.mobility import GroundUserGroup
 from dummy_app.designs.voronoi_map import Map 
 from dummy_app.tools.logger import logger 
 
-import time
+from tqdm import tqdm 
 import os 
 import numpy as np 
 from pathlib import Path 
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 
-trials = 300 
+trials = 500 
 max_memory = 2 * 1024 *1024 *1024
 number_of_agents = 5
 max_battery = 1500
@@ -65,7 +68,7 @@ ground_users = GroundUserGroup(
     env=mobility_sim.env, 
     map_obj=map, 
     alpha=0.85, 
-    mean_velocity=1.0, 
+    mean_velocity=2.0, 
     sigma=0.5
 )
 
@@ -86,12 +89,36 @@ data = problem.preprocess(
 )
 
 
-mobility_sim.simulations(
-    constructor=problem,
-    cues=ground_users, 
-    data=data, 
-    trials=trials
-)
+# mobility_sim.simulations(
+#     constructor=problem,
+#     cues=ground_users, 
+#     map=map.vor_map,
+#     data=data, 
+#     trials=trials
+# )
+# Create tqdm iterator
+progress = tqdm(total=trials, desc="Progress")
+
+def frame_generator():
+    for i in range(trials):
+        progress.update(1)
+        yield i
+    raise StopIteration
+
+
+
+mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map.vor_map)
  
+ani = FuncAnimation(
+    mobility_sim.fig,
+    mobility_sim.simulations,
+    frames=frame_generator(),
+    fargs=(problem, ground_users, map.vor_map, data, trials),
+    interval=100,
+    blit=False, 
+    cache_frame_data=False)
+
+plt.show()
+
 
 logger.info(f"The constraint use for this problem: {constraints}")
