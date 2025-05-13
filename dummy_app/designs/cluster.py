@@ -13,7 +13,7 @@ class Cluster:
 
     def __init__(self, cluster:pd.DataFrame, id:int, assignment:Dict[int,int], depot_id:int): 
         self.cluster = cluster 
-        self.id = 0 
+        self.id = id
         self.employed_agents:List[int] = assignment 
         if self.employed_agents is None: 
             logger.error(f"No agents assigned to cluster {self.id}")

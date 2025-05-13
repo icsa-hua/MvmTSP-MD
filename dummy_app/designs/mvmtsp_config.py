@@ -163,7 +163,7 @@ class MVMTSPConfig(ABC):
         self.customers = customers.to_numpy() 
 
         # Setup visits allowed 
-        self.allowed_visits = np.full(self.v, len(self.agents), dtype=int)
+        # self.allowed_visits = np.full(self.v, len(self.agents), dtype=int)
 
         # Final preperation 
         self.distance_columns = dist_columns 

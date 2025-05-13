@@ -54,9 +54,7 @@ customers_path = f"{PROJECT_ASSETS}/env_settings/customers.csv"
 gues_path = f"{PROJECT_ASSETS}/env_settings/ground_users.csv"
 
 
-
-
-problem = Builder(config)
+problem = Builder(config, trials)
 
 mobility_sim = EnvSim() 
 
@@ -87,24 +85,13 @@ data = problem.preprocess(
     max_battery=max_battery
 )
 
-problem.run_model(data=data,cue_groups=ground_users.group)
-print(constraints)
+
+mobility_sim.simulations(
+    constructor=problem,
+    cues=ground_users, 
+    data=data, 
+    trials=trials
+)
  
-start = time.time() 
 
-end = time.time() 
-
-print(f"Time taken: {end - start}")
-
-print(problem.paths)
-
-
-
-
-
-
-
-
-
-
-
+logger.info(f"The constraint use for this problem: {constraints}")

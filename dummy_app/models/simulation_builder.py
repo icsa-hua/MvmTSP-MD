@@ -172,10 +172,9 @@ class Builder(MVMTSPConfig):
 
         cluster.get_solution()
         
-
         logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
         self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
-        self.clusters_times[self.cluster_id] = self.moment 
+        self.clusters_times[cluster.id] = self.moment 
 
         memory_usage = self.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
@@ -260,20 +259,20 @@ class Builder(MVMTSPConfig):
             pbar.update(1) 
 
         logger.info("Problem construction and solution follow...")
-
+        paths = {} 
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
-                self.cluster_id = cluster_tuple[0]
-                self.clustering(
+                paths[cluster_tuple[0]] = self.clustering(
                     cluster=cluster,
                       cluster_id=cluster_tuple[0],
                         assignment=agents,
                           depot_id=cluster_tuple[1])
-
                 pbar.update(1)
                 logger.debug(f"Cluster {cluster_tuple[0]} solved successfully...")
-                time.sleep(10)
+
+        return paths     
+        
 
 
     def regionalization(self, GDF):
@@ -300,7 +299,7 @@ class Builder(MVMTSPConfig):
             time=self.travel_time_columns,
             column_names= ["dists", "ees", "travel_times", "area_ids"]
         )
-
+  
         logger.debug(f"Clustering with {cluster_id} and agents assigned to it: {assignment}")
        
         # Step 2: Process inpute context 
@@ -312,7 +311,7 @@ class Builder(MVMTSPConfig):
         except Exception as e: 
             logger.exception(f"Error processing cluster {cluster_id}: {e}")
             return 
-        
+   
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
 
@@ -329,6 +328,8 @@ class Builder(MVMTSPConfig):
 
         self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster_id] = self.moment
+
+        return cluster_object.paths 
 
 
 
@@ -360,7 +361,6 @@ class Builder(MVMTSPConfig):
                       node = reverse_nodes[cluster.initial_population[a][0][i]]
                       next_node = reverse_nodes[cluster.initial_population[a][0][i+1]] 
                       cluster.x[node, next_node, header].setInitialValue(1) 
-
 
         for const in available_constraints:
             if const in self.constraints:

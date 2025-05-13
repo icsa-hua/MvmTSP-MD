@@ -6,10 +6,11 @@ class EnvSim:
     def __init__(self)->None: 
         self.env = simpy.Environment()
         self.ready_event = self.env.event()
-
+        self.paths = {} 
 
     def optimization_process(self, constructor:object, data:pd.DataFrame, cue_groups:dict):
-        constructor.run_model(data, cue_groups)
+        paths = constructor.run_model(data, cue_groups)
+        print(paths)
         self.ready_event.succeed()
 
         while True: 

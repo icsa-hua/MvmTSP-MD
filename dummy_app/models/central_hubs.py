@@ -29,7 +29,7 @@ class CentralHub:
         
 
     def get_node_with_min_total_distance(self, cluster_nodes, dist_matrix, nodes_dict):
-        total_dists = {i: sum(dist_matrix[nodes_dict[i]][nodes_dict[j]] for j in cluster_nodes if i != j) for i in cluster_nodes}
+        total_dists = {i: sum(dist_matrix[nodes_dict[i]][nodes_dict[j]-1] for j in cluster_nodes if i != j) for i in cluster_nodes}
         self.distance_centroid = np.array([total_dists[i] for i in cluster_nodes]).reshape(-1, 1)
 
 

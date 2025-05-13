@@ -81,7 +81,7 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
                 depot=depot, 
                 verbose=False   
             )
-            print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
+            # print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
             initial_population[agent] = (solution_path, solution_cost) 
 
     return cost_bundle, R_points, bridge_nodes, nodes_dict, initial_population
