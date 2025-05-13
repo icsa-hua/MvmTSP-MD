@@ -17,9 +17,6 @@ from tqdm import tqdm
 from collections import defaultdict
 
 
-
-
-
 class Builder(MVMTSPConfig):
 
     def __init__(self, config:Dict[str,Any], trials): 
@@ -28,13 +25,13 @@ class Builder(MVMTSPConfig):
         self.allow_regionalization:bool = config['regionalization']
         self.enable_ga:bool = config['genetic_algorithm']
         self.constraints:List[str] = config['constraints']
-        self.V = pd.DataFrame() 
-        self.v:int = 0
+        self.V:pd.DataFrame = pd.DataFrame() 
+        self.v:int = 0 
         self.best_path:List[int] = [] 
         self.TimeFrame:List[int] = [range(0,trials,1)]
         self.metrics:object = Metrics(verbose=True) 
         self.clusters_times:Dict[int, int] = {} 
-        self.time_window:int = 5 #descrete time steps
+        self.recharge_time_window:int = 5 #descrete time steps
         
 
 
@@ -177,7 +174,7 @@ class Builder(MVMTSPConfig):
         
 
         logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
-        self.moment += len(cluster.nodes_dict.keys()) + 1 + self.time_window
+        self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[self.cluster_id] = self.moment 
 
         memory_usage = self.metrics.get_memory_usage()
@@ -330,7 +327,7 @@ class Builder(MVMTSPConfig):
         # Step 5 extract solution 
         cluster_object.get_solution() 
 
-        self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.time_window
+        self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster_id] = self.moment
 
 
