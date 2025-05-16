@@ -1,5 +1,5 @@
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
-from dummy_app.tools.autonomize import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.tools.logger import logger 
 from typing import Any, List, Dict, Union, Tuple

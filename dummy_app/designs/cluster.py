@@ -4,14 +4,14 @@ import pandas as pd
 import numpy as np 
 import pulp as pl 
 import networkx as nx 
-from typing import Dict, Tuple, List
-from dummy_app.tools.autonomize import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+from typing import Dict, Tuple, List, Union, Any
+from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.logger import logger
 
 
 class Cluster: 
 
-    def __init__(self, cluster:pd.DataFrame, id:int, assignment:Dict[int,int], depot_id:int): 
+    def __init__(self, cluster:pd.DataFrame, id:int, assignment:List[int], depot_id:int): 
         self.cluster = cluster 
         self.id = id
         self.employed_agents:List[int] = assignment 
@@ -28,19 +28,19 @@ class Cluster:
         self.tr_times:Dict[(Tuple[int,int],int)] = {}
         self.cost = {}
         self.R_points = []
-        self.paths = self.paths = {agent:[] for agent in self.employed_agents}
-        self.problem = None 
+        # self.paths =  {(id,agent):[] for agent in self.employed_agents}
+        self.problem = pl.LpProblem()
 
 
 
-    def get_cluster_content(self, distance, energy, time, column_names ):
+    def get_cluster_content(self, distance, energy, time, column_names )->Dict:
         context = extract_context_for_cluster(
             cluster=self.cluster, 
             columns=[
                 distance, 
                 energy, 
                 time, 
-                'Area_id'
+                ['Area_id']
             ], 
             column_names=column_names
         )
@@ -48,17 +48,20 @@ class Cluster:
         return context 
     
 
-    def prepare_context(self, context:Dict[str, np.ndarray[str]], builder:object): 
-        self.cost, self.R_points, self.bridge_nodes, self.nodes_dict, self.initial_population = process_extraction(
+    def prepare_context(self, context:Dict, builder:Any): 
+        self.cost, self.R_points, self.bridge_nodes, self.nodes_dict, raw_population = process_extraction(
             problem_builder=builder, 
             extraction=context,
             depot=self.depot_id, 
             employed_agents=self.employed_agents,
         )
+        self.initial_population = {
+            k: (list(v[0]), float(v[1])) for k, v in raw_population.items()
+        }
 
 
-    def get_estimated_time_frame(self, builder:object): 
-
+    def get_estimated_time_frame(self, builder:Any): 
+        total_time = 0 
         if self.initial_population is None: 
             G = create_model_graph(
                 cost=self.cost['travel_time'], 
@@ -73,10 +76,11 @@ class Cluster:
         else: 
             best_agent = min(self.initial_population.items(), key=lambda item: item[1][1])
             best_path = best_agent[1][0]
-            total_time = math.ceil(sum(
-                builder.get_travel_time(i, i+1, best_path)
-                for i in range(len(best_path)-1)
-            ))
+            if hasattr(builder, 'get_travel_time'):
+                total_time = math.ceil(sum(
+                    builder.get_travel_time(i, i+1, best_path)
+                    for i in range(len(best_path)-1)
+                ))
 
         if total_time == 0: 
             logger.error(f"Total time is 0 for cluster {self.id}")
@@ -113,12 +117,11 @@ class Cluster:
 
 
     def get_solution(self): # Test Trial #TODO: Implement this to extract the solution from the MILP problem. 
-
         reverse_dict = {v:k for k, v in self.nodes_dict.items()}
         employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
-
-        for agent_name, agent_id in list_of_agents.items():
+        paths =  {agent:[] for agent in employed_agents}
+        for name, agent_id in list_of_agents.items():
             node_values = [v for k, v in self.nodes_dict.items()]
             node_values.remove(self.depot_id)
             
@@ -129,7 +132,7 @@ class Cluster:
             while step in self.timeframe: 
                 if step == self.timeframe[0]: 
                     
-                    self.paths[agent_id].extend([(self.depot_id,self.depot_id,step)])
+                    paths[name].extend([(self.depot_id,self.depot_id,step)])
 
                     current_node = self.depot_id
                     next_node = random.choice(node_values) 
@@ -137,11 +140,11 @@ class Cluster:
                     step += 1 
                     continue
                 elif step >= self.timeframe[-1]:
-                    self.paths[agent_id].extend([(self.depot_id,self.depot_id,step)])
+                    paths[name].extend([(self.depot_id,self.depot_id,step)])
                     break
 
                 duration = self.tr_times[(reverse_dict[current_node], reverse_dict[next_node])]
-                self.paths[agent_id].extend([(next_node,t) for t in range(step, step + duration)])
+                paths[name].extend([(current_node,next_node,t) for t in range(step, step + duration)])
                 step += duration 
                 current_node = next_node
                 if len(node_values) == 0:
@@ -149,13 +152,19 @@ class Cluster:
                 next_node = random.choice(node_values)
                 node_values.remove(next_node)
 
+            time_difference = step - self.timeframe[-1]
+            for t in range(0,time_difference):
+                paths[name].extend([(current_node, next_node, step + t + 1)]) 
 
-            if self.paths[agent_id][-1] != self.depot_id:
-                self.paths[agent_id].extend([(self.depot_id,self.depot_id,step)])
 
-            logger.debug(f"Agent {agent_id} path: {self.paths[agent_id]}")
+            if paths[name][-1][1] != self.depot_id:
+                duration = self.tr_times[(reverse_dict[next_node], reverse_dict[self.depot_id])]
 
-            
+                paths[name].extend([(next_node,self.depot_id,step)])
+            logger.debug(f"Agent {agent_id} path: {paths[name]}")
+
+        return paths
+    
 
     def create_problem(self): 
         V = list(self.nodes_dict.keys())

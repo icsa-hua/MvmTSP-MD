@@ -9,11 +9,11 @@ class CentralHub:
     # that the agent will be able to pass through multiple times 
 
     def __init__(self)->None: 
-        self.betweeness:float = 0.0  
-        self.distance_centroid:float = 0.0 
-        self.number_allowed_visits:int = 0
+        self.betweeness:np.ndarray = np.array([])  
+        self.distance_centroid:np.ndarray = np.array([])   
+        self.number_allowed_visits:Dict[int,int] = {}
 
-    def calculate_betweeness(self, G:nx.Graph, cluster_nodes:List[int], nodes_dict, cost_dist)->float:
+    def calculate_betweeness(self, G:nx.Graph, cluster_nodes:List[int], nodes_dict, cost_dist)->None:
 
         if len(cluster_nodes) < 25: 
             centrality = nx.closeness_centrality(G, distance='cost')
@@ -23,7 +23,8 @@ class CentralHub:
         
         if not nx.is_connected(G):
             print("Graph is not connected.")
-            return
+            return 
+        
         
         self.betweeness = np.array([centrality[nodes_dict[n]] for n in cluster_nodes]).reshape(-1, 1)
         
@@ -49,8 +50,7 @@ class CentralHub:
         self.number_allowed_visits = {k: int(1 + self.betweeness[k] * (max_visits - 1)) for k in range(len(cluster_nodes))}
         
 
-    def get_bridge_nodes(self, graph, cluster_nodes, cost_dist, nodes_dict, n_agents ): 
-        cluster_nodes = list(cluster_nodes)
+    def get_bridge_nodes(self, graph:nx.Graph, cluster_nodes:List[int], cost_dist:Dict[int,np.ndarray], nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
         self.calculate_betweeness(graph, cluster_nodes, nodes_dict,cost_dist)
         self.get_node_with_min_total_distance(cluster_nodes, cost_dist, nodes_dict)
         self.normalize_values() 
@@ -58,6 +58,6 @@ class CentralHub:
         composite_score = self.aggregate_scores(cluster_nodes)
         bridge_nodes = max(1, int(0.1 * len(composite_score)))
 
-        return sorted(composite_score, key=composite_score.get, reverse=True)[:bridge_nodes]
+        return [node for node, _ in sorted(composite_score.items(), key=lambda item: item[1], reverse=True)[:bridge_nodes]]
     
 

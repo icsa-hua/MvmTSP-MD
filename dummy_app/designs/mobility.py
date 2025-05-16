@@ -1,7 +1,6 @@
 import numpy as np 
 import pandas as pd 
-import time
-from typing import Union
+from typing import Union, Tuple
 from pathlib import Path
 import matplotlib.pyplot as plt
 from dummy_app.designs.voronoi_map import Map
@@ -18,12 +17,12 @@ U = lambda MIN, MAX, SAMPLES: np.random.rand(*SAMPLES.shape) * (MAX-MIN) + MIN
 class GroundUser: 
 
     def __init__(self, x, y, mean_velocity=1.0)->None:
-        self.x = x 
-        self.y = y 
-        self.velocity = mean_velocity 
-        self.theta = None 
-        self.angle_mean = None
-        self.current_area = None 
+        self.x:Union[int,float] = x 
+        self.y:Union[int,float] = y 
+        self.velocity:float = mean_velocity 
+        self.theta:float = 0.0 
+        self.angle_mean:float = 0.0
+        self.current_area:int = 0 
 
     
     def move(self, map_obj:Map)->Point: 
@@ -49,8 +48,8 @@ class GroundUser:
 class GroundUserGroup: 
 
 
-    def __init__(self, env, map_obj:Map, alpha:int, mean_velocity:float=1.0, sigma:float=0.5)->None:
-        self.env = env
+    def __init__(self, mobility_env, map_obj:Map, alpha:float, mean_velocity:float=1.0, sigma:float=0.5)->None:
+        self.mobility_env = mobility_env
         self.map_obj = map_obj
         self.alpha = alpha
         self.mean_velocity = mean_velocity
@@ -60,17 +59,17 @@ class GroundUserGroup:
         self.alpha3 = np.sqrt(1.0 - self.alpha * self.alpha) * self.sigma
 
         self.group = {}
-        self.fig = None 
-        self.ax = None 
+        self.fig = self.mobility_env.fig 
+        self.ax = self.mobility_env.ax
         self.scatter = None 
-        self.process = env.process(self.simulate())
+        self.process = self.mobility_env.env.process(self.simulate())
 
 
     def load_users(self, data_path:Union[str,Path], customers_path:Union[Path,str])->None: 
         df = pd.read_csv(data_path)
         customers = pd.read_csv(customers_path)
 
-        df.index = customers['Customers ids']
+        df = df.set_index(customers['Customers ids'])
         df.columns = [i for i in range(1, len(df.columns)+1)]
 
         self.group = {area_id : [] for area_id in df.index}
@@ -89,14 +88,14 @@ class GroundUserGroup:
             
 
 
-    def get_coords(self)->np.array: 
+    def get_coords(self)->np.ndarray: 
         x = [user.x for area in self.group.values() for user in area]
         y = [user.y for area in self.group.values() for user in area]
         return np.column_stack((x,y))
     
 
-    def plot_users(self, vor_map:Voronoi)->None: 
-        self.fig, self.ax = plt.subplots(figsize=(8,8))
+    def plot_users(self, vor_map:Voronoi)->Tuple: 
+
         voronoi_plot_2d(
             vor_map, 
             ax=self.ax, 
@@ -120,7 +119,6 @@ class GroundUserGroup:
     def simulate(self): 
 
         regions = self.map_obj.clip_voronoi_to_box() 
-
         while True: 
             for area_users in self.group.values() : 
                 for user in area_users:
@@ -140,7 +138,7 @@ class GroundUserGroup:
 
             self.update_plot() 
             plt.draw()  
-            yield self.env.timeout(1)
+            yield self.mobility_env.env.timeout(1)
 
 
     def update_plot(self)->None:

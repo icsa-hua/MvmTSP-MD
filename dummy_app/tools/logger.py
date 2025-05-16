@@ -2,7 +2,7 @@ import logging
 import datetime 
 import os 
 
-from dummy_app.tools.autonomize import jupyter_logger
+from dummy_app.tools.common import jupyter_logger
 
 parent_dir = os.getcwd()
 log_dir = parent_dir + "/assets/logs"
@@ -34,6 +34,6 @@ if not logger.hasHandlers():
 
 jupyter_handler = jupyter_logger(level=logging.INFO)
 
-if not any(isinstance(H, logging.StreamHandler) for h in logger.handlers):
+if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
     logger.addHandler(jupyter_handler) 
 

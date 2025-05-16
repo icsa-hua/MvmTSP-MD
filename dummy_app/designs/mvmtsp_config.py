@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from dummy_app.tools.logger import logger
-from dummy_app.tools.autonomize import deallocate_memory
+from dummy_app.tools.common import deallocate_memory
 from dummy_app.models.genetic_algorithm import GASolution
 from dummy_app.models.topsis import TOPSISPriority
 import geopandas 
 import pandas as pd 
 import numpy as np 
-from typing import Any, Union, List, Dict
+from typing import Any, Union, List, Dict, Mapping, Tuple
 import pulp as pl 
 import timeout_decorator 
 import resource
@@ -23,32 +23,25 @@ class MVMTSPConfig(ABC):
     @abstractmethod
     def __init__(self, config:Dict[str, Any])->None: 
 
-        self.problem = None 
-        self.V:pd.DataFrame = None
+        self.problem = pl.LpProblem() 
+        self.V:pd.DataFrame = pd.DataFrame()
         self.agents:List[int] = [] 
         self.moment:int = 0 
-        self.paths:Dict[str, List[int]] = {}
         self.travel_cost:np.ndarray = np.empty((0,0))
         self.distance_columns:List[str] = []
         self.energy_columns:List[str] = []
         self.travel_time_columns:List[str] = []
-        self.normalized_battery:np.ndarray[int] = np.empty((0,0))
+        self.normalized_battery:np.ndarray = np.ndarray((0,0))
         self.max_battery_norm:float = 0.0
         self.average_energy:float = 0.0
         self.customers:np.ndarray = np.empty((0,0)) 
         self.STEPS:list = [range(0,3600,1)]
         self.graph:nx.Graph = nx.Graph()
-
-    @abstractmethod 
-    def set_objective(self, alpha:Any, beta:Any, gamma:Any, weight:object):
-
-        self.problem.setObjective(
-            pl.lpSum(alpha[i][j] * weight[i,j] + beta[i][j] * weight[i,j] + gamma[i][j] * weight[i,j] for i in self.V for j in self.V)
-        ) 
+        self.depots:List[int] = []
 
 
     @abstractmethod
-    def assign_agents_to_areas(self, plethos:int=0, depots:Union[List[int], Dict[int,int]]=None)->Dict[int,int]:
+    def assign_agents_to_areas(self, plethos:int=0, depots:List[int]=[])->Dict[int,int]:
         """ 
             Assign agents randomly and equally to depot areas.
 
@@ -101,7 +94,7 @@ class MVMTSPConfig(ABC):
 
     
     @abstractmethod 
-    def preprocess(self, distances_path:Union[str,Path], energies:Union[str,Path], nodes_path:Union[Path, str], agents:int, customers_path:Union[Path,str], ground_users:Union[Path,str], max_battery:int)->pd.DataFrame:
+    def preprocess(self, distances_path:Union[str,Path], energies_path:Union[str,Path], nodes_path:Union[Path, str], agents:int, customers_path:Union[Path,str], ground_users:Union[Path,str], max_battery:int)->pd.DataFrame:
 
         def normalize_data(df:pd.DataFrame)->pd.DataFrame:
             scaler = MinMaxScaler()
@@ -113,7 +106,7 @@ class MVMTSPConfig(ABC):
         
         # Load Data 
         distances = pd.read_csv(ensure_str_path(distances_path))
-        energies = pd.read_csv(ensure_str_path(energies))
+        energies = pd.read_csv(ensure_str_path(energies_path))
         nodes = pd.read_csv(ensure_str_path(nodes_path))
         customers = pd.read_csv(ensure_str_path(customers_path))
 
@@ -144,7 +137,8 @@ class MVMTSPConfig(ABC):
 
         distances.columns = dist_columns 
         energies.columns = energy_columns
-        self.average_energy = np.average(energies)
+
+        self.average_energy = float(np.average(energies))
         
         # Velocity in m/s
         velocity = 5.5555555555555 
@@ -169,11 +163,10 @@ class MVMTSPConfig(ABC):
         self.distance_columns = dist_columns 
         self.energy_columns = energy_columns
         self.travel_time_columns = tt_columns
-        self.paths = {agent:[] for agent in self.agents}
         
 
         if self.v >= 10: 
-            self.depots = self.V['Area_id'].iloc[[7,8]].values.tolist()
+            self.depots = self.V['Area_id'].iloc[np.array([7, 8])].values.tolist()
         else: 
             raise ValueError("Not enough nodes to select default depots at positions 7 and 8.")
         
@@ -185,17 +178,17 @@ class MVMTSPConfig(ABC):
 
     @abstractmethod 
     @timeout_decorator.timeout(3600)
-    def solve_problem(self)->None: 
-        self.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
-
+    def solve_problem(self, cluster:Any)->None: 
+        # self.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
+        pass
 
     @abstractmethod 
-    def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->List[int]: 
+    def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]: 
         
         ga = GASolution(
             population=population_size, 
             generations=generations, 
-            nodes=V_nodes,
+            nodes_dict=nodes_dict,
             depot=depot
         )
 
@@ -211,26 +204,15 @@ class MVMTSPConfig(ABC):
         return best_paths, hof
 
 
-    @abstractmethod
-    def run(self): 
-
-        try: 
-            self.solve_problem() 
-            return tuple(("Problem solved successfully", True))
-        except timeout_decorator.TimeoutError:
-            logger.exception("Timeout reached. Problem could not be solved within the time limit.")
-            return tuple(("Timeout occurred. Exiting...", False))
-        
-    
 
     @abstractmethod
-    def run_model(self, data:pd.DataFrame, enabled_constraints:List[str])->None: 
+    def run_model(self, data:pd.DataFrame,  cue_groups:Dict[int,List[Any]])->Dict: 
         pass 
 
 
 
     @abstractmethod
-    def create_solution(self, nodes:List[int], V:Dict[int, int])->None: 
+    def create_solution(self, cluster:Any)->None: 
         pass 
 
 
@@ -289,21 +271,21 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod
-    def cluster_prioritization(self, clusters:pd.core.groupby.generic.DataFrameGroupBy, cue_groups:Dict[int,object])->pd.DataFrame:
+    def cluster_prioritization(self, clusters:pd.core.groupby.generic.DataFrameGroupBy, cue_groups:Mapping[int,Any])->pd.DataFrame:
         topsis = TOPSISPriority()
         cluster_criteria = {} 
          
         for cluster_id, cluster_df in clusters: 
             cluster_criteria[cluster_id] = topsis.gather_criteria(cluster_df, cue_groups=cue_groups)
 
-        priority = topsis.run_model(cluster_criteria, None)
+        priority = topsis.run_model(cluster_criteria, [])
         logger.debug("Cluster Prioritization (TOPSIS) Complete...")
         
         return priority
     
 
     @abstractmethod
-    def clustering(self, cluster:pd.DataFrame, cluster_id:int, assignment:Dict[int, int])->None: 
+    def clustering(self, cluster:pd.DataFrame, cluster_id:int, assignment:List[int], depot_id:int)->Dict: 
         pass 
 
 

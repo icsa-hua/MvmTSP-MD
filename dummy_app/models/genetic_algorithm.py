@@ -3,17 +3,17 @@ import random
 import pandas as pd
 import networkx as nx 
 from dummy_app.tools.logger import logger
-from dummy_app.tools.autonomize import create_model_graph, get_weights
+from dummy_app.tools.common import create_model_graph, get_weights
 from typing import Dict, List, Any, Tuple 
 from deap import base, creator, tools, algorithms
 
 class GASolution:
 
 
-    def __init__(self, population:int=200, generations:int=100, nodes:pd.DataFrame=None, depot:int=0 )->None:
+    def __init__(self, population:int=200, generations:int=100, nodes_dict:Dict[int,int]={}, depot:int=0 )->None:
         self.population_size = population 
         self.generations = generations 
-        self.nodes = nodes 
+        self.nodes = nodes_dict 
         self.graph = nx.Graph() 
         self.depot = depot 
 
@@ -24,7 +24,7 @@ class GASolution:
         self.toolbox = base.Toolbox() 
 
 
-    def create_graph(self, cost:Dict[str,pd.DataFrame])->nx.Graph:
+    def create_graph(self, cost:Dict[str,Dict[int,np.ndarray]])->nx.Graph:
         """ 
         Creates a graph representation using the provided cost matrices.
         
@@ -132,7 +132,7 @@ class GASolution:
         return self.sanitize(individual),
 
 
-    def fitness_evaluation(self, individual:List[int], cost:Dict[str,float]) ->Tuple[float,]: 
+    def fitness_evaluation(self, individual:List[int], cost:Dict[str,Dict[int,np.ndarray]]) ->Tuple[float,]: 
         """
         Evaluates fitness: total travel cost (distance + energy).
 
@@ -208,7 +208,7 @@ class GASolution:
         logger.debug("Toolbox configured.") 
 
     
-    def run(self, crossover_rate:float, mutation_rate:float, cost:Dict[str, float], enable_indi_fitness:bool=True, verbose:bool=True)->None:
+    def run(self, crossover_rate:float, mutation_rate:float, cost:Dict, enable_indi_fitness:bool=True, verbose:bool=True)->Tuple:
         """
         Run the GA optimization.
 
@@ -230,8 +230,11 @@ class GASolution:
         self.toolbox.register("evaluate", self.fitness_evaluation, cost=cost) 
 
         # Initialize population
-        population = self.toolbox.population(n=self.population_size)
-
+        if hasattr(self.toolbox, "population"):
+            population = self.toolbox.population(n=self.population_size)
+        else: 
+            raise ValueError("Population not initialized. Check toolbox configuration.")
+        
         for ind in population:
             assert isinstance(ind, creator.Individual)
             assert hasattr(ind, 'fitness')    

@@ -1,10 +1,11 @@
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
-from dummy_app.tools.autonomize import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
+from dummy_app.designs.agents import TSPAgent 
 from dummy_app.designs.constraint import * 
 from dummy_app.tools.logger import logger 
-from typing import Any, List, Dict, Union, Tuple
+from typing import Any, List, Dict, Union, Tuple, Mapping
 
 import sys
 import math
@@ -12,7 +13,8 @@ import time
 import pulp as pl 
 import numpy as np 
 import pandas as pd
-import networkx as nx 
+import networkx as nx
+import timeout_decorator 
 from tqdm import tqdm 
 from collections import defaultdict
 
@@ -28,30 +30,21 @@ class Builder(MVMTSPConfig):
         self.V:pd.DataFrame = pd.DataFrame() 
         self.v:int = 0 
         self.best_path:List[int] = [] 
-        self.TimeFrame:List[int] = [range(0,trials,1)]
-        self.metrics:object = Metrics(verbose=True) 
+        self.TimeFrame:List[int] = list(range(0, trials, 1))
+        self.metrics = Metrics(verbose=True) 
         self.clusters_times:Dict[int, int] = {} 
         self.recharge_time_window:int = 5 #descrete time steps
-        
-
-
-    def create_problem(self, V:List[int])->None:
-        super().create_problem(V)
-
-
-    def set_objective(self, distance:Any, energy:Any, time:Any, nodes:Dict):
-        pass
-         
-    
-    def call_genetic_algorithm(self, V_nodes:List[int], cost:Dict[str,float], depot:int, verbose:bool, population_size:int=200, generations:int=100)->List[int]:
-        return super().call_genetic_algorithm(V_nodes, cost, depot, verbose, population_size, generations) 
     
 
-    def assign_agents_to_areas(self, plethos:int=0, depots:Union[List[int], Dict[int,int]]=None)->Dict[int,int]:
+    def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
+        return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
+    
+
+    def assign_agents_to_areas(self, plethos:int=0, depots:List[int]=[])->Dict[int,int]:
         return super().assign_agents_to_areas(plethos, depots)
     
 
-    def assign_depot_to_cluster(self, clusters:object, depots_df:pd.DataFrame):
+    def assign_depot_to_cluster(self, clusters:Any, depots_df:pd.DataFrame):
 
         def find_duplicate_values(mapping:Dict)->Dict: 
             reverse = {} 
@@ -68,7 +61,7 @@ class Builder(MVMTSPConfig):
 
             # Find nearest depot 
             min_dist = float('inf')
-            best_depot = None 
+            best_depot:int = 0 
             for _, depot_row in depots_df.iterrows(): 
                 depot_coords = depot_row[['X_coords', 'Y_coords']].values
                 dist = np.linalg.norm(centroid - depot_coords) 
@@ -100,7 +93,7 @@ class Builder(MVMTSPConfig):
         return cluster_data, depot_data 
     
 
-    def add_depot_data_to_cluster(self, cluster_df:Tuple[int,pd.DataFrame], depot_row:pd.Series, depot_id:int):
+    def add_depot_data_to_cluster(self, cluster_df:Tuple[int,pd.DataFrame], depot_row:pd.DataFrame, depot_id:int):
         depot_row= depot_row.copy()
         depot_row  = depot_row[depot_row['Area_id']==depot_id]
         depot_row.loc[:, 'cluster'] = np.mean(cluster_df[1]['cluster'])        
@@ -145,16 +138,15 @@ class Builder(MVMTSPConfig):
 
         return assignments 
 
-
-    def solve_problem(self, cluster:object):
+    @timeout_decorator.timeout(3600)
+    def solve_problem(self, cluster:Any):
         cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
     
     
-    def preprocess(self, distances_path, energies, nodes_path, agents, customers_path, ground_users, max_battery):
-        data = super().preprocess(distances_path, energies, nodes_path, agents, customers_path, ground_users, max_battery)
+    def preprocess(self, distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery):
+        data = super().preprocess(distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery)
         
         self.depots_for_agents = self.assign_agents_to_areas(len(self.agents),self.depots)
-
 
         logger.info("Preprocessing completed successfully...")
         return data 
@@ -164,7 +156,7 @@ class Builder(MVMTSPConfig):
         return super().set_memory_limit(max_memory)
     
     
-    def create_solution(self, cluster:object):
+    def create_solution(self, cluster:Any):
         logger.info(f"Cluster Time Frame is {cluster.timeframe}") 
         if pl.LpStatus[cluster.problem.status] != 'Optimal': 
             logger.info("Problem is not optimal, returning None...")
@@ -186,13 +178,9 @@ class Builder(MVMTSPConfig):
 
     def createGeoDataset(self, data):
         return super().createGeoDataset(data)
-    
+     
 
-    def run(self):
-        return super().run()
-    
-
-    def run_model(self, data:pd.DataFrame, cue_groups:Dict[int,List[object]]):
+    def run_model(self, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Dict:
         logger.debug("Running combinatorial problem constructor...")
         with tqdm (total=8, desc="Preparing Problem with clustering") as pbar: 
 
@@ -214,6 +202,7 @@ class Builder(MVMTSPConfig):
 
             # Phase 2: Clustering and Prioritization 
             try: 
+                
                 priority = self.cluster_prioritization(clusters, cue_groups)
                 pbar.update(1)
                 logger.debug("Clusters prioritized successfully...")
@@ -260,31 +249,61 @@ class Builder(MVMTSPConfig):
 
         logger.info("Problem construction and solution follow...")
         paths = {} 
-        
+        import pdb 
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
-                paths[cluster_tuple[0]] = self.clustering(
+                paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
                     cluster=cluster,
                       cluster_id=cluster_tuple[0],
                         assignment=agents,
                           depot_id=cluster_tuple[1])
                 pbar.update(1)
                 logger.debug(f"Cluster {cluster_tuple[0]} solved successfully...")
-                break 
-        return paths     
         
+        # Step 6: Agent Generation for simulation
+        
+        # Step 6: Flatten all the paths to form a single path for each agent
+        paths = self.flatten_paths_on_time(paths)  
+       
+        # Step 7: Transform positions to coordinates
+        agents_paths_clusters = defaultdict(dict)
+
+        for agent in paths.keys(): 
+            agents_paths_clusters[agent] = {
+                'path': self.get_coordinates_for_path(paths[agent])
+            }
+            
+        # Step 8: Add interpolation steps for the paths (visualizatino) 
+        agents_paths_clusters = self.post_process_interpolation(agents_paths_clusters)
+
+        return agents_paths_clusters     
+    
+
+    def get_coordinates_for_path(self, path): 
+        coordinates = []
+        for point in path: 
+            try:
+                current_node = self.V.index[self.V['Area_id'] == point[0]][0] 
+                next_node = self.V.index[self.V['Area_id'] == point[1]][0]
+                current_coords = (int(self.V['X_coords'].iloc[current_node]), int(self.V['Y_coords'].iloc[current_node]))
+                next_coords = (int(self.V['X_coords'].iloc[next_node]), int(self.V['Y_coords'].iloc[next_node]))
+                coordinates.append((current_coords, next_coords, point[2]))
+            except IndexError:
+                logger.error(f"Node {point[0]} or {point[1]} not found in the dataframe.")
+                continue
+        return coordinates
 
 
     def regionalization(self, GDF):
         return super().regionalization(GDF)
     
     
-    def cluster_prioritization(self, clusters, cue_groups):
+    def cluster_prioritization(self, clusters, cue_groups: Mapping[int, Any]):
         return super().cluster_prioritization(clusters, cue_groups)
     
 
-    def clustering(self, cluster, cluster_id, assignment, depot_id):
+    def clustering(self, cluster, cluster_id, assignment, depot_id)->Dict:
 
         # Step 1: Create the cluster object to accomodate the problem.  
         cluster_object = Cluster(
@@ -302,7 +321,6 @@ class Builder(MVMTSPConfig):
         )
   
         logger.debug(f"Clustering with {cluster_id} and agents assigned to it: {assignment}")
-       
         # Step 2: Process inpute context 
         try: 
             cluster_object.prepare_context(
@@ -311,7 +329,8 @@ class Builder(MVMTSPConfig):
             )
         except Exception as e: 
             logger.exception(f"Error processing cluster {cluster_id}: {e}")
-            return 
+            raise ValueError(f"Error processing cluster {cluster_id}: {e}")
+
    
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
@@ -325,21 +344,20 @@ class Builder(MVMTSPConfig):
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5 extract solution 
-        cluster_object.get_solution()
+        paths = cluster_object.get_solution()
 
-        # Step 6: Add the recharge phase 
-        for agent in cluster_object.employed_agents:
-            for t in range(self.recharge_time_window): 
-                cluster_object.paths[agent].append((depot_id,depot_id,cluster_object.timeframe[-1]+t))
+        # Step 6: Add the recharge phase & synchronize agents 
+        paths = self.synchronize_agent_paths(paths, cluster_object, depot_id)
+        
 
         self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster_id] = self.moment
 
-        return cluster_object.paths 
+        return paths 
 
 
 
-    def set_constraints_for_multi_agent(self, cluster:object): 
+    def set_constraints_for_multi_agent(self, cluster:Any): 
         available_constraints = {
             "const_0":constraint_0, "const_1":constraint_1,
             "const_2":constraint_2, "const_3":constraint_3,
@@ -383,29 +401,6 @@ class Builder(MVMTSPConfig):
                     raise ValueError(f"Error setting constraint {const} for cluster")
 
 
-    def get_solution(self) -> List[int]: 
-        if len(self.paths) != len(self.agents): 
-            logger.error(f"Insufficient paths: expected {len(self.agents)}, got {len(self.paths)}") 
-            raise RuntimeError(f"Insufficient paths: expected {len(self.agents)}, got {len(self.paths)}")                     
-                            
-        for k in self.paths: 
-            # flatten paths if composed of subtours 
-            full_path = [] 
-            for tour in self.paths[k]: 
-                full_path.extend(tour)
-            self.paths[k] = [full_path]
-
-        for k, path_list in self.paths.items(): 
-            readable = ' -> '.join(f"{node}@T{time}" for node, time in path_list[0])
-            logger.debug(f"Path for agent {k}: {readable}") 
-
-            visited_nodes = {node for node, _ in path_list[0]}
-            if len(visited_nodes) != self.v: 
-                logger.error(f"Agent {k} visited only {len(visited_nodes)} nodes out of {self.v}")
-                raise RuntimeError(f"Agent {k} visited only {len(visited_nodes)} nodes out of {self.v}")
-
-        self.validate_paths() 
-        return self.paths
 
 
     def get_depot_index(self, ordered_nodes, k): 
@@ -487,3 +482,80 @@ class Builder(MVMTSPConfig):
         
     def get_travel_time(self, i, j, nodes_dict): 
         return math.ceil(self.travel_cost[nodes_dict[i]-1, nodes_dict[j]-1])
+    
+
+    def post_process_interpolation(self, agents_paths_clusters): 
+
+        interpolated_paths = {}
+
+        for key in agents_paths_clusters.keys():
+            path = agents_paths_clusters[key]['path']
+            processed_path = []
+            step = 0
+            
+            while step < len(path):
+                i, j, t = path[step]
+                journey = (i, j)
+
+                # Count how many steps this journey spans
+                duration = 1
+                while (
+                    step + duration < len(path) and
+                    (path[step + duration][0], path[step + duration][1]) == journey
+                ):
+                    duration += 1
+                
+                # Get coordinates for interpolation
+                x1, y1 = i  # coords is a dict: node -> (x, y)
+                x2, y2 = j
+                
+                xs = np.linspace(x1, x2, duration + 1)[1:]  # exclude x1 (already included)
+                ys = np.linspace(y1, y2, duration + 1)[1:]
+                
+                for d in range(duration):
+                    processed_path.append((xs[d], ys[d], t + d))
+
+                step += duration  # move to next journey
+
+            interpolated_paths[key] = processed_path
+        return interpolated_paths
+    
+
+    def synchronize_agent_paths(self, paths:Dict ,cluster:Any, depot_id:int)->Dict: 
+        
+        for agent, path in paths.items(): 
+            for t in range(self.recharge_time_window): 
+                if len(path) < cluster.timeframe[-1]: 
+                    time_diff = cluster.timeframe[-1] - len(path) +1
+                    idle = [(depot_id,depot_id,path[-1][2]+step) for step in range(time_diff)] 
+                    path.extend(idle)
+                path.append((depot_id,depot_id,cluster.timeframe[-1]+t))
+
+        return paths 
+    
+
+    def flatten_paths_on_time(self, paths): 
+
+        order_of_clusters = list(paths.keys())
+        employed_agents = ["Agent_" + str(agent_id) for agent_id in self.agents]
+        
+        single_agent_paths_for_clusters = {}
+        for agent in employed_agents: 
+            flattened_path = []
+            for cluster_id in order_of_clusters:
+                if agent in list(paths[cluster_id].keys()): 
+                    
+                    if len(flattened_path)==0: 
+                        flattened_path.extend(paths[cluster_id][agent])
+
+                    else: 
+                        last_time = flattened_path[-1][2] 
+                        new_time_steps_for_path = [step[2]+last_time + 1 for step in paths[cluster_id][agent]]
+                        new_path = [(step[0], step[1], new_time_steps_for_path[i]) for i, step in enumerate(paths[cluster_id][agent])]
+                        flattened_path.extend(new_path)
+            
+            single_agent_paths_for_clusters[agent] = flattened_path
+        
+        return single_agent_paths_for_clusters
+
+

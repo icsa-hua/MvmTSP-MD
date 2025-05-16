@@ -69,7 +69,7 @@ class TOPSISPriority:
         }
     
 
-    def run_model(self, cluster_criteria:Dict[int,Dict], ranks:List[int])-> pd.DataFrame: 
+    def run_model(self, cluster_criteria:Dict[int,Dict], ranks:np.ndarray)-> pd.DataFrame: 
 
 
         # NOTE: Index is the cluster ID         
@@ -94,7 +94,7 @@ class TOPSISPriority:
             norm_df[col] = 1 - norm_df[col]
 
         # Apply OPA for weight
-        if ranks is None: 
+        if len(ranks) == 0: 
             mean_val = df.mean().tolist() 
             ranks = np.argsort(-np.array(mean_val)) + 1 # Higher value = better 
 
@@ -112,7 +112,7 @@ class TOPSISPriority:
         scores = dist_to_nadir / (dist_to_label + dist_to_nadir)
 
         df['TOPSIS'] = scores 
-        df['Rank'] = scores.rank(ascending=False)
+        df['Rank'] = pd.Series(scores, index=df.index).rank(ascending=False)
 
         self.topsis_scores = scores 
         

@@ -1,6 +1,7 @@
+import numpy as np
 from typing import List, Dict 
 
-def opa_weights(ranks:List[int], criteria_names:List[str])->Dict[str,float]: 
+def opa_weights(ranks:np.ndarray, criteria_names:List[str])->Dict[str,float]: 
     """
     Calculates weights using the Ordinal Priority Approach (OPA).
 

@@ -3,7 +3,7 @@ import sys
 import pandas as pd 
 import numpy as np 
 import networkx as nx 
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Union
 from dummy_app.models.central_hubs import CentralHub
 import logging 
 
@@ -13,15 +13,15 @@ def deallocate_memory(variable:Any)->None:
     gc.collect() 
 
 
-def extract_context_for_cluster(cluster:pd.DataFrame, columns:List[List[str]], column_names:List[str]) -> Dict[str, np.ndarray[str]]: 
+def extract_context_for_cluster(cluster:pd.DataFrame, columns:List[List[str]], column_names:List[str]) -> Dict: 
     extraction = {k:cluster[v].to_numpy() for k,v in zip(column_names, columns)}
     return extraction
 
 
-def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[str]], depot:int, employed_agents:List[int]): 
+def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],np.ndarray]], depot:int, employed_agents:List[int]): 
 
     try: 
-        area_ids = extraction['area_ids'].astype(int) 
+        area_ids = np.array(extraction['area_ids']).squeeze()
         dists = extraction['dists']
         ees = extraction['ees']
         travel_times = extraction['travel_times']
@@ -33,14 +33,10 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     cost_t = dict(zip(area_ids, travel_times))
 
     # Initialize structures 
-    initial_population = {agent: () for agent in employed_agents} 
+    initial_population = {} 
     nodes_dict = {i: int(node) for i, node in enumerate(area_ids)}
 
-    cost_bundle = {
-        'distance':cost_d, 
-        'energy':cost_e,
-        'travel_time':cost_t,
-    }
+    cost_bundle = {'distance':cost_d, 'energy':cost_e,'travel_time':cost_t}
 
     graph = create_model_graph(
         cost=cost_bundle, 
@@ -52,12 +48,12 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     
     bridge_nodes = hub.get_bridge_nodes(
         graph=graph, 
-        cluster_nodes = nodes_dict.keys(), 
+        cluster_nodes = list(nodes_dict.keys()), 
         cost_dist=cost_bundle['distance'],
         nodes_dict=nodes_dict,
         n_agents=len(employed_agents)
     )
-    
+
     if not bridge_nodes: 
         raise ValueError("No bridge nodes were found")
 
@@ -73,10 +69,10 @@ def process_extraction(problem_builder:object, extraction:Dict[str,np.ndarray[st
     assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
     "Mismatch between distance, energy, travel_time and R_points dictionary length"
 
-    if problem_builder.enable_ga: 
+    if hasattr(problem_builder, 'enable_ga') and problem_builder.enable_ga: 
         for agent in employed_agents: 
             solution_path, solution_cost = problem_builder.call_genetic_algorithm(
-                V_nodes=nodes_dict, 
+                nodes_dict=nodes_dict, 
                 cost=cost_bundle, 
                 depot=depot, 
                 verbose=False   
@@ -100,7 +96,7 @@ def jupyter_logger(level=logging.INFO)->logging.StreamHandler:
     return jupyter_handler
 
 
-def create_model_graph(cost:Dict[str,np.ndarray], nodes:Dict[int,int], weights): 
+def create_model_graph(cost:Dict[str,Dict[int,np.ndarray]], nodes:Dict[int,int], weights): 
     graph = nx.Graph()
     for source_node in nodes.values(): 
         for target_node in nodes.values(): 
@@ -125,10 +121,11 @@ def get_weights():
 
 def get_session_duration(paths): 
     agent_times = [] 
-    for cluster in paths: 
-        duration = 0 
-        for agent in paths[cluster]: 
-            duration = len(paths[cluster][agent])
+    for agent in paths.keys(): 
+        duration = len(paths[agent])
+        last_time_step = paths[agent][-1][2]
+        if duration > last_time_step:
+            duration = last_time_step
         agent_times.append(duration) 
 
     session_duration = max(agent_times)

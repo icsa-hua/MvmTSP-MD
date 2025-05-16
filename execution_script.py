@@ -6,6 +6,7 @@ from dummy_app.tools.logger import logger
 
 from tqdm import tqdm 
 import os 
+import time
 import numpy as np 
 from pathlib import Path 
 import matplotlib.pyplot as plt
@@ -65,7 +66,7 @@ map = Map(data_path=areas_path, incremental=False)
 map.voronoi_tessellation()
 
 ground_users = GroundUserGroup(
-    env=mobility_sim.env, 
+    mobility_env=mobility_sim, 
     map_obj=map, 
     alpha=0.85, 
     mean_velocity=2.0, 
@@ -80,7 +81,7 @@ ground_users.load_users(
 
 data = problem.preprocess(
     distances_path=dist_path, 
-    energies=energy_path, 
+    energies_path=energy_path, 
     nodes_path=areas_path, 
     agents=number_of_agents, 
     customers_path=customers_path,
@@ -107,18 +108,43 @@ def frame_generator():
 
 
 
+if map.vor_map is None:
+    raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
+
 mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map.vor_map)
- 
-ani = FuncAnimation(
-    mobility_sim.fig,
-    mobility_sim.simulations,
-    frames=frame_generator(),
-    fargs=(problem, ground_users, map.vor_map, data, trials),
-    interval=100,
-    blit=False, 
-    cache_frame_data=False)
+# mobility_sim.simulations(
+#     frame=None,
+#     constructor=problem,
+#     cues=ground_users,
+#     data=data,
+#     trials=trials,
+#     map=map.vor_map
+# ) 
+try: 
+    ani = FuncAnimation(
+        mobility_sim.fig,
+        mobility_sim.simulations,
+        frames=frame_generator(),
+        fargs=(problem, ground_users, map.vor_map, data, trials),
+        interval=100,
+        blit=False, 
+        cache_frame_data=False)
+    
+    
+    plt.show(block=False)
 
-plt.show()
+    while True:
+        plt.pause(0.001)  # keeps the plot interactive
+        time.sleep(0.01)
+    logger.info(f"The constraint use for this problem: {constraints}")
 
+except KeyboardInterrupt as kb:
+    plt.close(mobility_sim.fig)
+    logger.exception(f"KeyboardInterrupt: {kb}")
+    exit(1)
 
-logger.info(f"The constraint use for this problem: {constraints}")
+except Exception as e:
+    plt.close(mobility_sim.fig)
+    logger.exception(f"Exception: {e}")
+    exit(1)
+
