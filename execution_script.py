@@ -15,7 +15,7 @@ from matplotlib.animation import FuncAnimation
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 
-trials = 500 
+trials = 220 
 max_memory = 2 * 1024 *1024 *1024
 number_of_agents = 5
 max_battery = 1500
@@ -104,7 +104,7 @@ def frame_generator():
     for i in range(trials):
         progress.update(1)
         yield i
-    raise StopIteration
+    # raise StopIteration
 
 
 
@@ -130,12 +130,14 @@ try:
         blit=False, 
         cache_frame_data=False)
     
-    
     plt.show(block=False)
 
-    while True:
-        plt.pause(0.001)  # keeps the plot interactive
-        time.sleep(0.01)
+    # while True:
+    #     plt.pause(0.001)  # keeps the plot interactive
+    #     time.sleep(0.001)
+
+    # Save as MP4 (requires ffmpeg)
+    ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
     logger.info(f"The constraint use for this problem: {constraints}")
 
 except KeyboardInterrupt as kb:

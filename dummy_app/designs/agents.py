@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
 
 
 class TSPAgent: 
@@ -29,11 +31,24 @@ class TSPAgents:
 
         
         self.agents = [TSPAgent(id, path) for (id), path in agent_paths.items()]
-        self.scatter = self.ax.scatter([], [], c='blue', s=100, label='Agents', edgecolors='black')
         
+        self.path_lines = []  # To store line objects for each agent
+
+        for agent in self.agents:
+            # Initially empty line plot for each agent
+            line, = self.ax.plot([], [], linestyle='--', linewidth=2)
+            self.path_lines.append(line)
+
+        n_agents = len(self.agents)
+        self.agent_colors = cm.get_cmap('tab10', n_agents)(range(n_agents))
+        self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
+        
+        for i, agent in enumerate(self.agents):
+            self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
+        self.ax.legend()
+
         # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
         self.process = self.mobility_env.env.process(self.simulate())
-        import pdb; pdb.set_trace()
 
 
     def get_coords(self):
@@ -46,13 +61,20 @@ class TSPAgents:
 
         if self.scatter: 
             self.scatter.set_offsets(self.get_coords())
+            self.scatter.set_color(self.agent_colors)
          
 
     def simulate(self):
         while True:
             timestep = self.mobility_env.env.now
-            for agent in self.agents:
+            for i, agent in enumerate(self.agents):
                 agent.update_position(timestep)
+
+                path = agent.path  # Assume path is a list of (x, y) coordinates
+                if path:
+                    x_vals, y_vals, _ = zip(*path)
+                    self.path_lines[i].set_data(x_vals, y_vals)
+
             self.update_plot()
             plt.draw()
             yield self.mobility_env.env.timeout(1)

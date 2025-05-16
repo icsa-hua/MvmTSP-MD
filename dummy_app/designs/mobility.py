@@ -101,13 +101,13 @@ class GroundUserGroup:
             ax=self.ax, 
             show_vertices=False, 
             line_colors='black',
-            line_width=2, 
+            line_width=3, 
             line_alpha=0.6
         )
         self.scatter = self.ax.scatter(
             [],[],
             c='red',
-            s=100,
+            s=50,
             label='Ground Users',
             edgecolors='black'
         )
