@@ -157,13 +157,78 @@ class Builder(MVMTSPConfig):
     
     
     def create_solution(self, cluster:Any):
-        logger.info(f"Cluster Time Frame is {cluster.timeframe}") 
+        logger.debug(f"Cluster Time Frame is {cluster.timeframe}") 
         if pl.LpStatus[cluster.problem.status] != 'Optimal': 
             logger.info("Problem is not optimal, returning None...")
             sys.exit(1)
 
-        cluster.get_solution()
-        
+        logger.info(f"Cluster bridge nodes are {cluster.bridge_nodes}")
+
+        employed_agents = ["Agent_" + str(i) for i in cluster.employed_agents]
+        list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
+        reverse_dict = {v: k for k, v in cluster.nodes_dict.items()}
+        paths = {agent: [] for agent in employed_agents}
+        max_iterations = len(cluster.nodes_dict.keys())*len(cluster.timeframe) + 1 + self.recharge_time_window
+        import pdb
+        for agent_name, agent_id in list_of_agents.items():
+            edges = set()
+            step = cluster.timeframe[0] 
+
+            current_node = reverse_dict[cluster.depot_id]
+            iteration = 0 
+
+
+            while iteration < max_iterations: 
+                found_next = False
+                for timestep in cluster.timeframe: 
+                    if timestep < step: continue 
+                    for next_node in cluster.nodes_dict.keys(): 
+                        if next_node == current_node: continue 
+                        if cluster.x[current_node, next_node, agent_id].varValue != 1: continue 
+                        if cluster.t[current_node, next_node, agent_id, timestep].varValue != 1: continue
+                        
+                        logger.debug(f"Agent_{agent_id} | Cluster_X->[{cluster.nodes_dict[current_node],cluster.nodes_dict[next_node]}]")
+                        logger.debug(f"Agent_{agent_id} | Cluster_T->[{cluster.nodes_dict[current_node],cluster.nodes_dict[next_node],timestep}]")
+                        
+                        triplet = (
+                            cluster.nodes_dict[current_node],
+                            cluster.nodes_dict[next_node],
+                            timestep
+                        )
+                        print(f"Step: {step} | Triplet: {triplet}")
+                        
+                        
+                        if triplet in edges:
+                            logger.debug(f"Edge {triplet[0], triplet[1]} already seen for agent {agent_name}")
+                            continue
+
+
+                        edges.add((triplet))
+                        paths[agent_name].extend(([triplet]))
+                        
+                        current_node = reverse_dict[triplet[1]]
+                        step = triplet[2] + 1
+                        found_next = True
+
+                        break
+
+                    if found_next:
+                        break
+
+                if not found_next:
+                    logger.warning(f"No valid move found for agent {agent_name} at iteration {iteration}. Ending early.")
+                    break
+                
+                if paths[agent_name] and paths[agent_name][-1][1] == cluster.depot_id:
+                    break
+
+                iteration += 1
+            # Force return to depot if path doesn't end there
+            if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
+                paths[agent_name].append((cluster.depot_id, cluster.depot_id, step))
+            
+        print(paths)
+        pdb.set_trace()
         logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
         self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster.id] = self.moment 
@@ -249,7 +314,7 @@ class Builder(MVMTSPConfig):
 
         logger.info("Problem construction and solution follow...")
         paths = {} 
-        import pdb 
+
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
@@ -344,6 +409,7 @@ class Builder(MVMTSPConfig):
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5 extract solution 
+        import pdb; pdb.set_trace()
         paths = cluster_object.get_solution()
 
         # Step 6: Add the recharge phase & synchronize agents 
@@ -354,7 +420,6 @@ class Builder(MVMTSPConfig):
         self.clusters_times[cluster_id] = self.moment
 
         return paths 
-
 
 
     def set_constraints_for_multi_agent(self, cluster:Any): 

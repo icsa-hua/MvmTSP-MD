@@ -102,9 +102,16 @@ class Cluster:
             energy=self.cost['energy'], 
             time=self.cost['travel_time'],
         )
-
+        if not hasattr(builder, 'get_travel_time'):
+            logger.error("Builder does not have get_travel_time method") 
+            raise ValueError("Builder does not have get_travel_time method")    
+        
         self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
-
+        
+        if not hasattr(builder, 'set_constraints_for_multi_agent'):
+            logger.error("Builder does not have set_constraints_for_multi_agent method") 
+            raise ValueError("Builder does not have set_constraints_for_multi_agent method")
+        
         if len(self.employed_agents) > 1: 
             builder.set_constraints_for_multi_agent(self)
         
@@ -113,7 +120,6 @@ class Cluster:
 
         builder.solve_problem(self) 
         builder.create_solution(self)
-
 
 
     def get_solution(self): # Test Trial #TODO: Implement this to extract the solution from the MILP problem. 
@@ -156,7 +162,6 @@ class Cluster:
             for t in range(0,time_difference):
                 paths[name].extend([(current_node, next_node, step + t + 1)]) 
 
-
             if paths[name][-1][1] != self.depot_id:
                 duration = self.tr_times[(reverse_dict[next_node], reverse_dict[self.depot_id])]
 
@@ -179,12 +184,16 @@ class Cluster:
 
         self.e = pl.LpVariable.dicts("e", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=self.max_battery, cat='Continuous')
         
-        
+        # TODO: Try it like this but after checking the validity of an integer variable. 
+        # self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=1, cat='Binary')
+        self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents),lowBound=0, cat='Integer')
 
     def set_objective(self, distance, energy, time): 
         V_nodes = list(self.nodes_dict.keys())
+        penalty = 0.8
         self.problem.setObjective(
             pl.lpSum(
+                penalty * self.y[j,v] + 
                 distance[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
                 + energy[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
                 + time[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]

@@ -36,6 +36,7 @@ def constraint_1(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     Only allow a single travel from depot to all nodes and the reverse as well.
     """
     depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
+
     for k, v in list_of_agents.items():
         cluster.problem += pl.lpSum(
             cluster.x[depot_ind, j, v] 
@@ -54,16 +55,36 @@ def constraint_2(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     """
     depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
     for k, v in list_of_agents.items():
-        for j in V_nodes:
-            if j == depot_ind: continue 
-            valid_departure_window = cluster.timeframe[:-(cluster.tr_times[(depot_ind, j)] + cluster.tr_times[(j, depot_ind)])]
-            cluster.problem += pl.lpSum(cluster.t[depot_ind, j, v, t] for t in valid_departure_window) >= 1, \
-                f"{k}_leaves_depot_{depot_ind}_for_node_{j}_within_valid_time"
+        # for j in V_nodes:
+        #     if j == depot_ind: continue 
+        #     valid_departure_window = cluster.timeframe[:-(cluster.tr_times[(depot_ind, j)] + cluster.tr_times[(j, depot_ind)])]
+        #     cluster.problem += pl.lpSum(cluster.t[depot_ind, j, v, t] for t in valid_departure_window) >= 1, \
+        #         f"{k}_leaves_depot_{depot_ind}_for_node_{j}_within_valid_time"
+            
+        # For dynamic departure (start at any time)
+        cluster.problem += pl.lpSum(
+            cluster.t[depot_ind, j, v, t]
+            for j in V_nodes if j != depot_ind
+            for t in cluster.timeframe[:-(cluster.tr_times[(depot_ind, j)] + 1)]
+        ) == 1, f"{k}_departs_depot_once"
 
-            valid_return_window = cluster.timeFrame_per_cluster[-(cluster.tr_times[(j, depot_ind)] + 1):]
-            cluster.problem += pl.lpSum(cluster.t[j, depot_ind, v, t] for t in valid_return_window) >= 1, \
-                f"{k}_returns_to_depot_{depot_ind}_from_node_{j}_within_valid_time"
-                
+            # valid_return_window = cluster.timeframe[-(cluster.tr_times[(j, depot_ind)] + 1):]
+            
+            # # cluster.problem += pl.lpSum(cluster.t[j, depot_ind, v, t] for t in valid_return_window) >= 1, \
+            # cluster.problem += pl.lpSum(cluster.t[j, depot_ind, v, t] for t in valid_return_window) == 1, \
+            #     f"{k}_returns_to_depot_{depot_ind}_from_node_{j}_within_valid_time"
+
+        # For dynamic return (return at feasible time)
+        cluster.problem += pl.lpSum(
+            cluster.t[i, depot_ind, v, t]
+            for i in V_nodes if i != depot_ind
+            for t in cluster.timeframe[-(max(cluster.tr_times[(i, depot_ind)] + 1, 1)):]
+        ) == 1, f"{k}_returns_to_depot_once"
+
+
+    # for k, v in list_of_agents.items():
+    #     cluster.problem += cluster.p[v,cluster.timeframe[0]] == depot_ind, f"Positional_variable_at_start_of_journey_for_{k}" 
+
     
 def constraint_3(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     """
@@ -76,7 +97,7 @@ def constraint_3(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                         pl.lpSum(cluster.x[i, depot_ind, v] for i in V_nodes if i != depot_ind ) == 2, f"{k}_start_&_finishes_at_depot_{depot_ind}"  
                 
 
-def constraint_4(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+def constraint_4(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict):
     """
     Prohibit Depot looping for each agent.
     """
@@ -97,13 +118,13 @@ def constraint_5(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
             if cluster.nodes_dict[i] not in cluster.bridge_nodes and i != depot_ind:
                 cluster.problem += pl.lpSum(cluster.x[i,j,v] for j in V_nodes if i != j) == 1, f"Only_one_visit_from_i_to_j_for_agent_{k}_for_node_{i}"
             elif cluster.nodes_dict[i] in cluster.bridge_nodes and i != depot_ind:
-                cluster.problem += pl.lpSum(cluster.x[i,j,v] for j in V_nodes if i != j) == cluster.R_points[i], f"Only_one_visit_from_i_to_j_for_agent_{k}_for_node_{i}"
-
+                cluster.problem += pl.lpSum(cluster.x[i,j,v] for j in V_nodes if i != j) <= cluster.R_points[i], f"Only_one_visit_from_i_to_j_for_agent_{k}_for_node_{i}"
+        # Suggestion, use the <= inequality for bridge nodes so as to not overconstrain the problem. 
         for j in V_nodes:
             if cluster.nodes_dict[j] not in cluster.bridge_nodes and j != depot_ind:
                 cluster.problem += pl.lpSum(cluster.x[i,j,v] for i in V_nodes if i != j) == 1, f"Only_one_visit_from_j_to_i_for_agent_{k}_for_node_{j}"
             elif cluster.nodes_dict[j] in cluster.bridge_nodes and j != depot_ind:
-                cluster.problem += pl.lpSum(cluster.x[i,j,v] for i in V_nodes if i != j) == cluster.R_points[j], f"Only_one_visit_from_j_to_i_for_agent_{k}_for_node_{j}"
+                cluster.problem += pl.lpSum(cluster.x[i,j,v] for i in V_nodes if i != j) <= cluster.R_points[j], f"Only_one_visit_from_j_to_i_for_agent_{k}_for_node_{j}"
 
 
 def constraint_6(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
@@ -112,12 +133,12 @@ def constraint_6(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     """    
     depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
     out_arcs, _ = get_arcs(V_nodes, depot_ind)
-    for i in out_arcs: 
-        for j in out_arcs[i]:
+    for i in V_nodes: #out_arcs 
+        for j in V_nodes: #in_arcs 
+            if i == j: continue 
             # if nodes_dict[j] not in self.bridge_nodes and nodes_dict[i] not in self.bridge_nodes:
-                for step in cluster.timeframe:
-                    cluster.problem += pl.lpSum(cluster.t[i,j,v,step] for _,v in list_of_agents.items()) <= 1, f"Unique_Time_visits_constraint_at_travel_{i}_{j}_at_time_{step}" 
-
+            for step in cluster.timeframe:
+                cluster.problem += pl.lpSum(cluster.t[i,j,v,step] for _,v in list_of_agents.items()) <= 1, f"Unique_Time_visits_constraint_at_travel_{i}_{j}_at_time_{step}" 
 
 
 def constraint_7(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
@@ -126,11 +147,13 @@ def constraint_7(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     """
     depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
     for k, v in list_of_agents.items():
-        for i in V_nodes:
             for j in V_nodes:
-                if j == depot_ind or i == depot_ind: continue 
-                cluster.problem += pl.lpSum(cluster.t[i,j,v,t] for t in cluster.timeframe) == cluster.tr_times[(i,j)], f"Travel_time_constraint_for_agent_{k}_from_{i}_to_{j}"
-
+                if j == depot_ind: continue 
+                cluster.problem += pl.lpSum(
+                    cluster.t[i,j,v,t]
+                    for i in V_nodes if i != j
+                    for t in cluster.timeframe) <= cluster.R_points[j], f"Agent_{k}_max_arrivals_at_{j}"
+    
 
 def constraint_8(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     """
@@ -138,8 +161,22 @@ def constraint_8(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     """
     depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
     
-    T_max = max(cluster.tr_times[(i,depot_ind)] for i in V_nodes if i != depot_ind)
+    # T_max = max(cluster.tr_times[(i,depot_ind)] for i in V_nodes if i != depot_ind)
 
+    # for k, v in list_of_agents.items(): 
+    #     for i in V_nodes: 
+    #         for j in V_nodes:
+    #             if i == j : continue 
+    #             if i == depot_ind or j == depot_ind: continue 
+
+    #             for step in cluster.timeframe: 
+    #                 if step + cluster.tr_times[(i,j)] - 1 < T_max:    
+    #                     cluster.problem += pl.lpSum(
+    #                         cluster.t[i,j,v,t] for t in range(step, step + cluster.tr_times[(i,j)])
+    #                     ) == cluster.tr_times[(i,j)]*cluster.x[i,j,v]
+
+    # Suggestion don't use the T_MAX as it prevents later steps from being checked while it should check feasibility over the full timeline, not against the max travel time to the depot. 
+    # Missing depot transitions which may be intentional - but it leaves depot timing uncontrolled unless differenct synchronization constraint is used. 
     for k, v in list_of_agents.items(): 
         for i in V_nodes: 
             for j in V_nodes:
@@ -147,10 +184,12 @@ def constraint_8(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                 if i == depot_ind or j == depot_ind: continue 
 
                 for step in cluster.timeframe: 
-                    if step + cluster.tr_times[(i,j)] - 1 < T_max:    
+                    if step + cluster.tr_times[(i,j)] <= cluster.timeframe[-1]:    
                         cluster.problem += pl.lpSum(
                             cluster.t[i,j,v,t] for t in range(step, step + cluster.tr_times[(i,j)])
                         ) == cluster.tr_times[(i,j)]*cluster.x[i,j,v]
+
+
 
 
 def constraint_9(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
@@ -180,8 +219,9 @@ def constraint_10(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                 if i == cluster.depot_id or j == cluster.depot_id: continue
                 if cluster.nodes_dict[i] in cluster.bridge_nodes or cluster.nodes_dict[j] in cluster.bridge_nodes: continue 
                 for t in cluster.timeframe:
-                    if t + 1 in cluster.timeframe:
+                    if t + cluster.tr_times[(i,j)] in cluster.timeframe:
                         cluster.problem += cluster.t[i, j, v, t] + cluster.t[j, i, v, t + 1] <= 1, f"No_immediate_loop_{i}_{j}_time_{t}_agent_{k}"
+                        # cluster.problem += cluster.t[i, j, v, t] + cluster.t[j, i, v, t + cluster.tr_times[(i,j)]] <= 1, f"No_immediate_loop_{i}_{j}_time_{t}_agent_{k}"
 
 
 def constraint_11(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
@@ -191,7 +231,16 @@ def constraint_11(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
         for k2, v2 in list_of_agents.items() : 
             if k1 != k2 : 
                 for step in cluster.timeframe: 
-                    cluster.problem += pl.lpSum(cluster.t[i, j, v1, step] - cluster.t[i,j, v2, step] for i in out_arcs for j in out_arcs[i]) != 0, f"Agent_unique_paths_for_{k1}_and_{k2}_at_time_{step}"
+                    cluster.problem += pl.lpSum(
+                        cluster.t[i, j, v1, step] - cluster.t[i,j, v2, step]
+                        for i in out_arcs
+                        for j in out_arcs[i]
+                        # if cluster.nodes_dict[i] != cluster.bridge_nodes and 
+                        #  cluster.nodes_dict[j] != cluster.bridge_nodes
+                        ) != 0, f"Agent_unique_paths_for_{k1}_and_{k2}_at_time_{step}"
+
+    # The != 0 is not linear hence it might not be correctly interpreted by the solver. It is reformulated using binary auxiliary, big-M or indicator constraints. 
+    # this also overconstrains the system. 
 
 
 def constraint_12(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
@@ -206,13 +255,13 @@ def constraint_12(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                 cluster.problem += cluster.e[i,v] >= builder.normalized_battery[source][target] * cluster.x[i, j, v],f"No_travel_if_low_energy_{i}_{j}_for_{k}"
             cluster.problem += cluster.e[i,v] >= builder.normalized_battery[source][cluster.nodes_dict[depot_ind]-1] * cluster.x[i, depot_ind, v],f"Enough_energy_to_return_to_depot_from_{i}_for_{k}"
         
-        for i in out_arcs: 
-            source = cluster.nodes_dict[i]-1
-            for j in out_arcs[i]: 
-                target =  cluster.nodes_dict[j]-1
-                # for step in self.timeFrame_per_cluster[self.tr_times[(depot_ind,i)]:-(self.tr_times[(i,j)]+self.tr_times[(j,depot_ind)])]: 
-                for step in cluster.timeframe: 
-                    cluster.problem += cluster.e[j,v] >= cluster.e[i,v] - builder.normalized_battery[source][target] * pl.lpSum(cluster.t[i, j, v, step]), f"Energy_update_{i}_{j}_at_time_{step}_for_{k}"
+        # for i in out_arcs: 
+        #     source = cluster.nodes_dict[i]-1
+        #     for j in out_arcs[i]: 
+        #         target =  cluster.nodes_dict[j]-1
+        #         # for step in self.timeFrame_per_cluster[self.tr_times[(depot_ind,i)]:-(self.tr_times[(i,j)]+self.tr_times[(j,depot_ind)])]: 
+        #         for step in cluster.timeframe: 
+        #             cluster.problem += cluster.e[j,v] >= cluster.e[i,v] - builder.normalized_battery[source][target] * pl.lpSum(cluster.t[i, j, v, step]), f"Energy_update_{i}_{j}_at_time_{step}_for_{k}"
 
             # cluster.problem += cluster.e[i,v] >= builder.normalized_battery[source][target] * \
             #     pl.lpSum(
@@ -225,9 +274,7 @@ def constraint_13(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     for k, v in list_of_agents.items():
         for i in V_nodes:
             if i == depot_ind: continue
-
-            for t in cluster.timeframe: 
-                cluster.problem += cluster.e[i,v] >= 0, f"Energy_cannot_be_negative_{i}_for_{k}_at_time_{t}"
+            cluster.problem += cluster.e[i,v] >= 0, f"Energy_cannot_be_negative_{i}_for_{k}"
 
         cluster.problem += cluster.e[depot_ind, v] == builder.max_battery_norm, f"Every_agent_starts_with_full_battery_{k}"
   
@@ -257,7 +304,12 @@ def constraint_15(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
 def constraint_16(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     for k,v in list_of_agents.items():
         for t in cluster.timeframe:
-            cluster.problem += cluster.busy[v, t] + cluster.wait[v, t] <= 1
+            cluster.problem += cluster.busy[v, t] + cluster.wait[v, t] == 1
+
+            #Suggestion: With the current formulation, the constraint limits co-activation, but does not guarantee at least one is active. 
+            # So the agent might be inactive (neither busy nor waiting) unless we add the == instead of <=. 
+
+            # the wait variable can also be defined as a wait[v,t] >= 1-busy[v,t] or a separate activity tracking layer 
 
 
 def constraint_17(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
@@ -297,3 +349,115 @@ def constraint_18(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                         constraint_counter += 1
 
 
+def constraint_100(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    for k, v in list_of_agents.items(): 
+        for t in cluster.timeframe: 
+            cluster.problem += pl.lpSum(
+                cluster.t[i,j,v,t - cluster.tr_times[(i,j)]] 
+                for i in V_nodes 
+                for j in V_nodes if i != j
+            )<=1
+
+
+
+def constraint_19(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    for k,v in list_of_agents.items(): 
+        for i in V_nodes: 
+            for j in V_nodes: 
+                if i == j: continue 
+                if i == cluster.depot_id or j == cluster.depot_id: continue
+                for t in cluster.timeframe: 
+                    if t + cluster.tr_times[(i,j)] in cluster.timeframe:
+                        cluster.problem += cluster.t[i, j, v, t] <= cluster.busy[j, v, t + cluster.tr_times[(i,j)]], f"Busy_constraint_{i}_{j}_for_{k}_at_time_{t}"
+
+
+def constraint_20(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    for  k, v in list_of_agents.items():
+        for i in V_nodes:
+            if i == cluster.depot_id: continue 
+            for t in cluster.timeframe: 
+                cluster.problem += pl.lpSum(
+                    cluster.t[i, j, v, t] for j in V_nodes if i != j  
+                    and j != cluster.depot_id   
+                ) <= 1, f"Only_one_travel_from_{i}_for_{k}_at_time_{t}"
+                   
+
+def constraint_21(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+   # visit at most once
+    for k, v in list_of_agents.items():
+        for j in V_nodes: 
+            cluster.problem += pl.lpSum(
+                cluster.t[i, j, v, t] for i in V_nodes if i != j
+                for t in cluster.timeframe
+            ) <= cluster.R_points[j], f"Only_one_visit_from_i_to_j_for_agent_{k}_for_node_{j}"
+
+
+
+def constraint_22(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    for k, v in list_of_agents.items():
+        for j in V_nodes: 
+            if j == cluster.depot_id: continue 
+            cluster.problem += pl.lpSum(
+                cluster.t[i, j, v, t] for i in V_nodes if i != j
+                for t in cluster.timeframe
+            ) == pl.lpSum(
+                cluster.t[j, l, v, t] for l in V_nodes if l != j
+                for t in cluster.timeframe
+            ) 
+
+def constraint_23(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
+    for k, v in list_of_agents.items():
+        cluster.problem += pl.lpSum(
+            cluster.t[i,depot_ind,v,t]
+            for i in V_nodes if i != depot_ind
+            for t in cluster.timeframe
+        )==1 
+        cluster.problem += pl.lpSum(
+            cluster.t[depot_ind,j,v,t]
+            for j in V_nodes if j != depot_ind
+            for t in cluster.timeframe
+        )==1
+
+
+def constraint_24(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+
+
+    for k, v in list_of_agents.items():
+        for t in cluster.timeframe: 
+            cluster.problem += pl.lpSum(
+                cluster.t[i, j, v, t]
+                for i in V_nodes 
+                for j in V_nodes if i != j
+            ) <= 1, f"Only_one_travel_from_i_to_j_for_agent_{k}_at_time_{t}"
+
+
+def constraint_25(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    for k, v in list_of_agents.items(): 
+        for i in V_nodes: 
+            for j in V_nodes: 
+                if i == j: continue 
+                if cluster.nodes_dict[i] in cluster.bridge_nodes or cluster.nodes_dict[j] in cluster.bridge_nodes: continue
+                cluster.problem += pl.lpSum(cluster.t[i,j,v,t] for t in cluster.timeframe) <=1 
+
+
+def constraint_26(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+    # This is a good approach however a better approach would be to use an integer decision variable 
+    # that penalizes every repeat visit not just presence. 
+    # M = len(V_nodes) * len(cluster.timeframe)
+
+    # for k, v in list_of_agents.items(): 
+    #     for j in V_nodes: 
+    #         cluster.problem += pl.lpSum(
+    #             cluster.t[i,j,v,t]
+    #             for i in V_nodes if i != j 
+    #             for t in cluster.timeframe
+    #         ) <= M * cluster.y[j,v] 
+
+    for k, v in list_of_agents.items(): 
+        for j in V_nodes: 
+            cluster.problem += pl.lpSum(
+                cluster.t[i,j,v,t]
+                for i in V_nodes if i != j 
+                for t in cluster.timeframe
+            ) <= cluster.y[j,v]
