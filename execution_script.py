@@ -26,11 +26,11 @@ constraints = ['const_0', # NOTE: Constraint for many visits.
                      'const_4', # NOTE: Constraint to stop depot looping. 
                        'const_5', # NOTE: Constraint to ensure single travel between nodes (except for bridge nodes) which we can enter and exit more times towards different nodes. 
                          'const_6', # NOTE: Constraint for collision avoidance and unique agent per node. This is a constraint that excludes depot and bridge nodes, as the agents can co exist there at the same time. 
-                        #    'const_7', # NOTE: Constraint 
+                        # #    'const_7', # NOTE: Constraint 
                              'const_8', # NOTE: Constraint to synchronize the time and space decision variables. 
                                'const_9', # NOTE: Constraint to allow a single travel from i to j for time variable. However consider that the problem has to return the paths including duration of travel. 
                                 #  'const_10', # NOTE: Synchronization of depots for spatial and time variables
-                                #    'const_11', # NOTE: Constraint to ensure colision avoidance between agents on the time variable, excluding bridge nodes and depots. 
+                        #         #    'const_11', # NOTE: Constraint to ensure colision avoidance between agents on the time variable, excluding bridge nodes and depots. 
                                      'const_12', # NOTE: Constraint to ensure that the agent has enough energy to travel from i to j.
                                        'const_13', # NOTE: Constraint to ensure that the agent starts from the depot with enough energy.
                                          'const_14',  # NOTE: Constraint to ensure that the agent is idle before departue. 
@@ -38,21 +38,20 @@ constraints = ['const_0', # NOTE: Constraint for many visits.
                                              'const_16', # NOTE: Constraint to combine the wait and busy variables ensuring that the agent is either busy or waiting.
                                                'const_17', # NOTE: Constraint to ensure that the travel from depot to a node is synchronized correctly between time and space variables. 
                                                 #  'const_18', 
-                                                   'const_19',
+                                                #    'const_19',
                                                     #  'const_20',
                                                     #    'const_21',
-                                                         'const_22',
-                                                           'const_23', 
-                                                             'const_24',
-                                                              'const_100'
-                                                               'const_25',
-                                                                 'const_26',
+                                                        #  'const_22',
+                                                        #    'const_23', 
+                                                            #    'const_24', # COnstraint to limit the movement of the agent  to 1 for every time step. 
+                                                #                'const_25',
+                                                #                  'const_26',
                                                 #                    'const_27',
                                                 #                      'const_28',
                                                 #                        'const_29',
                                                 #                          'const_30',
                                                 #                            'const_31',
-                                                #                              'const_32',
+                                                                            #  'const_32',
                                                 #                                'const_33',
                                                 #                                  'const_34',                                                      
 ]

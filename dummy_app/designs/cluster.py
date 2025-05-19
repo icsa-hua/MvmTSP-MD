@@ -186,7 +186,9 @@ class Cluster:
         
         # TODO: Try it like this but after checking the validity of an integer variable. 
         # self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=1, cat='Binary')
-        self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents),lowBound=0, cat='Integer')
+        self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents), lowBound=0, cat='Integer')
+
+        self.active_agents = pl.LpVariable.dicts("active_agents", (v for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
 
     def set_objective(self, distance, energy, time): 
         V_nodes = list(self.nodes_dict.keys())
