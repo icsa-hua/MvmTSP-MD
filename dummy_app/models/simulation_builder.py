@@ -197,6 +197,7 @@ class Builder(MVMTSPConfig):
 
                 for timestep in cluster.timeframe: 
                     if timestep < step: continue 
+                    print(f"Step : {step}")
                     for next_node in cluster.nodes_dict.keys(): 
                         if next_node == current_node: continue 
                         if cluster.x[current_node, next_node, agent_id].varValue != 1: continue 
@@ -226,6 +227,14 @@ class Builder(MVMTSPConfig):
                             for d in range(duration):
                                 paths[agent_name].append((triplet[0], triplet[1], timestep + d))
 
+                            wait_step = timestep + duration
+                            if wait_step in cluster.timeframe and cluster.wait[agent_id, wait_step].varValue == 1:
+                                wait_triplet = (cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], wait_step)
+                                paths[agent_name].append(wait_triplet)
+
+
+
+
                             edges.add(triplet)
                             current_node = reverse_dict[triplet[1]]
                             step = timestep + duration - 1
@@ -237,14 +246,6 @@ class Builder(MVMTSPConfig):
                         # logger.debug(f"Agent_{agent_id} | Cluster_X->[{cluster.nodes_dict[current_node],cluster.nodes_dict[next_node]}]")
                         # logger.debug(f"Agent_{agent_id} | Cluster_T->[{cluster.nodes_dict[current_node],cluster.nodes_dict[next_node],timestep}]")
                         
-
-
-
-
-
-
-
-
 
                     #     triplet = (
                     #         cluster.nodes_dict[current_node],
@@ -277,7 +278,7 @@ class Builder(MVMTSPConfig):
 
                     if found_next:
                         break
-
+                            
                 if not found_next:
                     logger.warning(f"No valid move found for agent {agent_name} at iteration {iteration}. Ending early.")
                     break
@@ -288,7 +289,7 @@ class Builder(MVMTSPConfig):
                 iteration += 1
             # Force return to depot if path doesn't end there
             if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
-                paths[agent_name].append((cluster.depot_id, cluster.depot_id, step))
+                paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
             
         print(paths)
         logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
@@ -463,7 +464,7 @@ class Builder(MVMTSPConfig):
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
 
-
+        cluster_object.R_points = np.ones(len(cluster_object.nodes_dict))
         # Step 4: Create and configure the optimization problem 
         try: 
             cluster_object.problem_formulation(builder=self) 

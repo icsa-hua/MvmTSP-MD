@@ -86,7 +86,7 @@ class Cluster:
             logger.error(f"Total time is 0 for cluster {self.id}")
             raise ValueError(f"Total time is 0 for cluster {self.id}")
         
-        self.timeframe = list(range(0, total_time+1))
+        self.timeframe = list(range(0, total_time))
 
 
     def problem_formulation(self, builder): 
