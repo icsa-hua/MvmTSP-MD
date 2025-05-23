@@ -30,7 +30,7 @@ def constraint_0(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
         for j in V_nodes: 
             cluster.problem.addConstraint(
                 name=f"Allowed_visits_for_each_agent_{k}_for_node_{j}", 
-                constraint = pl.lpSum(cluster.x[i,j,v] for i in V_nodes if i != j) <= cluster.R_points[j],
+                constraint = pl.lpSum(cluster.x[i,j,v] for i in V_nodes if i != j) == cluster.R_points[j],
             )
 
     # for j in V_nodes: 
@@ -77,14 +77,18 @@ def constraint_2(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
             constraint=pl.lpSum(cluster.t[depot_ind, j, v, cluster.timeframe[0]] for j in V_nodes if depot_ind != j ) == 1,
         )
 
+        # cluster.problem.addConstraint(
+        #     name=f"{k}_dynamic_window_return_to_{depot_ind}", 
+        #     constraint = pl.lpSum(cluster.t[i, depot_ind, v, t]
+        #                  for i in V_nodes if i != depot_ind
+        #                  for t in cluster.timeframe[-(max(cluster.tr_times[(i, depot_ind)] + 1, 1)):]) == 1,
+        # )
+
         cluster.problem.addConstraint(
-            name=f"{k}_dynamic_window_return_to_{depot_ind}", 
-            constraint = pl.lpSum(cluster.t[i, depot_ind, v, t]
-                         for i in V_nodes if i != depot_ind
-                         for t in cluster.timeframe[-(max(cluster.tr_times[(i, depot_ind)] + 1, 1)):]) == 1,
+            name=f"{k}_enters_depot_{depot_ind}_at_specific_interval",
+            constraint= pl.lpSum(cluster.t[i, depot_ind, v, cluster.timeframe[-1]]
+                                  for i in V_nodes if depot_ind != i ) ==1, 
         )
-
-
 
 
 
@@ -295,19 +299,6 @@ def constraint_8(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                                         ) == cluster.tr_times[(i,j)]*cluster.x[i,j,v],
                         )
     
-    
-    # for k, v in list_of_agents.items(): 
-    #     for i in V_nodes: 
-    #         for j in V_nodes:
-    #             if i == j : continue 
-    #             if i == depot_ind or j == depot_ind: continue 
-
-    #             for step in cluster.timeframe: 
-    #                 if step + cluster.tr_times[(i,j)] <= cluster.timeframe[-1]:    
-    #                     cluster.problem += pl.lpSum(
-    #                         cluster.t[i,j,v,t] for t in range(step, step + cluster.tr_times[(i,j)])
-    #                     ) == cluster.tr_times[(i,j)]*cluster.x[i,j,v]
-    
     #PER TEAM 
     # for k, v in list_of_agents.items(): 
     #     for i in V_nodes: 
@@ -447,11 +438,17 @@ def constraint_14(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict):
     M = len(V_nodes)+ len(cluster.bridge_nodes) -1
 
     for k, v in list_of_agents.items():
-        for t in cluster.timeframe[1:]:
-            cluster.problem.addConstraint(
-                name=f"Dynamic_positioning_for_{k}_at_time_{t}", 
-                constraint=cluster.p[v ,t] == depot_ind + (1 - pl.lpSum(cluster.t[i, depot_ind, v, t] for i in V_nodes if i != depot_ind)) * M
-            )
+        # for t in cluster.timeframe[1:]:
+        #     cluster.problem.addConstraint(
+        #         name=f"Dynamic_positioning_for_{k}_at_time_{t}", 
+        #         constraint=cluster.p[v ,t] == depot_ind + (1 - pl.lpSum(cluster.t[i, depot_ind, v, t] for i in V_nodes if i != depot_ind)) * M
+        #     )
+        cluster.problem.addConstraint(
+            name=f"Positional_variable_at_end_of_journey_for_{k}",
+            constraint=cluster.p[v,cluster.timeframe[-1]] == depot_ind, 
+        )
+        
+
         cluster.problem.addConstraint(
             name=f"Positional_variable_at_start_of_journey_for_{k}",
             constraint=cluster.p[v,cluster.timeframe[0]] == depot_ind, 
@@ -473,7 +470,12 @@ def constraint_15(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
 
                         cluster.problem.addConstraint(
                             name=f"Busy_if_travel_{i}_{j}_starts_at_{t_start}_for_{k}_covers_{t}",
-                            constraint=cluster.busy[v,t] >= cluster.t[i,j,v,t_start],
+                            constraint=cluster.busy[v,t] <= cluster.t[i,j,v,t_start],
+                        )
+
+                        cluster.problem.addConstraint(
+                            name=f"Wait_after_busy_{i,j,t_start}_for_{k}_covers_{t}", 
+                            constraint=cluster.wait[v, t_start + travel_duration] >= cluster.t[i, j, v, t_start]
                         )
 
     logger.debug(f"Constraint 15: {len(cluster.problem.constraints)}")
@@ -484,7 +486,7 @@ def constraint_16(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
         for t in cluster.timeframe:
             cluster.problem.addConstraint(
                 name=f"{k}_can_only_be_busy_or_idle_at_{t}",
-                constraint=cluster.busy[v, t] + cluster.wait[v, t] == 1
+                constraint=cluster.busy[v, t] + cluster.wait[v, t] <= 1
             )
             
             #Suggestion: With the current formulation, the constraint limits co-activation, but does not guarantee at least one is active. 
@@ -509,13 +511,32 @@ def constraint_17(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                         name=f"Enforce synchronization_between_t_and_x_{depot_ind}_{j}_for_{k}_time_{step}",
                         constraint=cluster.t[depot_ind, j, v, step] == cluster.x[depot_ind, j, v], 
                     )
-                    
-                valid_return_window = cluster.timeframe[-(cluster.tr_times[(j, depot_ind)] + 1):]
-                
-                cluster.problem.addConstraint(
-                    name = f"Dynamic_time_enforcement_{j}_{depot_ind}_for_{k}_time", 
-                    constraint = pl.lpSum(cluster.t[j, depot_ind, v, t] for t in valid_return_window) >= cluster.x[j, depot_ind, v], 
-                )
+
+        for i in V_nodes: 
+            if i != depot_ind:
+                # For departure at zero 
+                valid_return_window = cluster.timeframe[-(cluster.tr_times[(i, depot_ind)] + 1):]
+
+                for step in valid_return_window: 
+                    cluster.problem.addConstraint(
+                        name=f"Dynamic_time_enforcement_{i,depot_ind}__for_{k}_time_{step}",
+                        constraint=cluster.t[i,depot_ind, v, step] == cluster.t[i,depot_ind, v, cluster.timeframe[-1]], 
+                    )  
+                    cluster.problem.addConstraint(
+                        name=f"Enforce synchronization_between_t_and_x_{i,depot_ind}_for_{k}_time_{step}",
+                        constraint=cluster.t[i, depot_ind, v, step] == cluster.x[i, depot_ind, v], 
+                    )
+
+        # for i in V_nodes: 
+        #     if i == depot_ind: continue  
+        #     valid_return_window = cluster.timeframe[-(cluster.tr_times[(i, depot_ind)] + 1):]
+            
+        #     cluster.problem.addConstraint(
+        #         name = f"Dynamic_time_enforcement_{i}_{depot_ind}_for_{k}_time", 
+        #         constraint = pl.lpSum(cluster.t[i, depot_ind, v, t] for t in valid_return_window) >= cluster.x[i, depot_ind, v], 
+        #     )
+
+
 
 
         # for i in V_nodes:
@@ -548,18 +569,18 @@ def constraint_17(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
 
 def constraint_18(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     # constraint_counter = 0
-    # depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
-    # out_arcs, in_arcs = get_arcs(V_nodes, depot_ind)
-    # M = len(V_nodes) 
-    # for k, v in list_of_agents.items(): 
-    #     for i in out_arcs: 
-    #         for j in out_arcs[i]:
-    #             # if cluster.nodes_dict[i] in cluster.bridge_nodes or cluster.nodes_dict[j] in cluster.bridge_nodes: continue
-    #             trip_time = cluster.tr_times[(i,j)]
-    #             for step in cluster.timeframe[1:-trip_time-1]:
-    #                 if (i, j, v, step) in cluster.t and cluster.t[i,j,v,step].name in cluster.problem.variablesDict():
-    #                     cluster.problem += cluster.p[v, step + trip_time-1] <= j + (1 - cluster.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_{j}{i}"
-    #                     cluster.problem += cluster.p[v, step + trip_time-1] >= j - (1 - cluster.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_-{j}{i}"
+    depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
+    out_arcs, in_arcs = get_arcs(V_nodes, depot_ind)
+    M = len(V_nodes) 
+    for k, v in list_of_agents.items(): 
+        for i in out_arcs: 
+            for j in out_arcs[i]:
+                # if cluster.nodes_dict[i] in cluster.bridge_nodes or cluster.nodes_dict[j] in cluster.bridge_nodes: continue
+                trip_time = cluster.tr_times[(i,j)]
+                for step in cluster.timeframe[:-trip_time]:
+                    if (i, j, v, step) in cluster.t and cluster.t[i,j,v,step].name in cluster.problem.variablesDict():
+                        cluster.problem += cluster.p[v, step + trip_time] <= j + (1 - cluster.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_{j}{i}"
+                        cluster.problem += cluster.p[v, step + trip_time] >= j - (1 - cluster.t[i, j, v, step]) * M, f"Positional_alignment_with_step_{step}_for_{k}_at_-{j}{i}"
     #                     constraint_counter += 1
 
     logger.debug(f"Constraint 18: {len(cluster.problem.constraints)}")
@@ -575,7 +596,7 @@ def constraint_19(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                     if t + cluster.tr_times[(i,j)] in cluster.timeframe:
                         cluster.problem.addConstraint(
                             name=f"Busy_constraint_{i}_{j}_for_{k}_at_time_{t}", 
-                            constraint=cluster.t[i, j, v, t] <= cluster.busy[v, t + cluster.tr_times[(i,j)]],  
+                            constraint=cluster.t[i, j, v, t] >= cluster.busy[v, t + cluster.tr_times[(i,j)]],  
                         )
 
     logger.debug(f"Constraint 19: {len(cluster.problem.constraints)}")

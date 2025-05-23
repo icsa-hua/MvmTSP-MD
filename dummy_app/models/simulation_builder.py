@@ -227,7 +227,7 @@ class Builder(MVMTSPConfig):
                             for d in range(duration):
                                 paths[agent_name].append((triplet[0], triplet[1], timestep + d))
 
-                            wait_step = timestep + duration
+                            wait_step = timestep + duration 
                             if wait_step in cluster.timeframe and cluster.wait[agent_id, wait_step].varValue == 1:
                                 wait_triplet = (cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], wait_step)
                                 paths[agent_name].append(wait_triplet)
@@ -237,7 +237,7 @@ class Builder(MVMTSPConfig):
 
                             edges.add(triplet)
                             current_node = reverse_dict[triplet[1]]
-                            step = timestep + duration - 1
+                            step = timestep + duration +1
                             found_next = True
                             break  # next timestep
                                 

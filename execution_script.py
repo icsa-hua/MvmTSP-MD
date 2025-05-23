@@ -35,7 +35,7 @@ constraints = ['const_0 ', # NOTE: Constraint for many visits.
                                        'const_13', # NOTE: Constraint to ensure that the agent starts from the depot with enough energy.
                                          'const_14',  # NOTE: Constraint to ensure that the agent is idle before departue. 
                                            'const_15', # NOTE: Consrtaint to model time progression through agent business. 
-                                            #  'const_16', # NOTE: Constraint to combine the wait and busy variables ensuring that the agent is either busy or waiting.
+                                             'const_16', # NOTE: Constraint to combine the wait and busy variables ensuring that the agent is either busy or waiting.
                                                'const_17', # NOTE: Constraint to ensure that the travel from depot to a node is synchronized correctly between time and space variables. 
                                                 #  'const_18', 
                                                    'const_19',
