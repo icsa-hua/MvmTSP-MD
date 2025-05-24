@@ -170,19 +170,6 @@ class Builder(MVMTSPConfig):
         paths = {agent: [] for agent in employed_agents}
         max_iterations = len(cluster.nodes_dict.keys())*len(cluster.timeframe) + 1 + self.recharge_time_window
         V_nodes = list(cluster.nodes_dict.keys())
-        import pdb
-
-        for agent in cluster.employed_agents:
-            for t in cluster.timeframe: 
-                for i in V_nodes: 
-                    for j in V_nodes: 
-                        if cluster.x[i,j,agent].varValue == 1 and cluster.t[i,j,agent,t].varValue == 1: 
-                            logger.debug(f"Agent_{agent} | Cluster_X->[{cluster.nodes_dict[i],cluster.nodes_dict[j]}]")
-                            logger.debug(f"Agent_{agent} | Cluster_T->[{cluster.nodes_dict[i],cluster.nodes_dict[j],t}]")
-
-            break
-
-
 
         for agent_name, agent_id in list_of_agents.items():
             edges = set()
@@ -216,9 +203,7 @@ class Builder(MVMTSPConfig):
                                 timestep,
                             )
 
-                            logger.debug(f"Agent_{agent_id} | Cluster_X->[{triplet[0], triplet[1]}]")
-                            logger.debug(f"Agent_{agent_id} | Cluster_T->[{triplet[0], triplet[1], triplet[2]}] duration: {duration}")
-
+                          
                             if triplet in edges:
                                 logger.debug(f"Edge {triplet[0], triplet[1]} already seen for agent {agent_name}")
                                 continue
@@ -290,8 +275,8 @@ class Builder(MVMTSPConfig):
             # Force return to depot if path doesn't end there
             if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
                 paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
-            
-        print(paths)
+        print(paths) 
+        import pdb; pdb.set_trace()   
         logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
         self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster.id] = self.moment 
@@ -302,7 +287,6 @@ class Builder(MVMTSPConfig):
         logger.debug("Validating solutions....")
         self.validate_paths(paths=paths, nodes_dict=cluster.nodes_dict, cluster=cluster)
         logger.debug("Solutions validated successfully...")
-        pdb.set_trace()
 
 
     def createGeoDataset(self, data):
@@ -473,7 +457,6 @@ class Builder(MVMTSPConfig):
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5 extract solution 
-        import pdb; pdb.set_trace()
         paths = cluster_object.get_solution()
 
         # Step 6: Add the recharge phase & synchronize agents 
@@ -504,7 +487,8 @@ class Builder(MVMTSPConfig):
             "const_26":constraint_26, "const_27":constraint_27,
             "const_28":constraint_28, "const_29":constraint_29,
             "const_30":constraint_30, "const_31":constraint_31,
-            "const_32":constraint_32,
+            "const_32":constraint_32, "const_33":constraint_33,
+            "const_34":constraint_34, "const_35":constraint_35
 
         }
 
@@ -546,7 +530,6 @@ class Builder(MVMTSPConfig):
 
 
     def validate_paths(self, paths, nodes_dict, cluster):
-        import pdb
         max_time_steps = cluster.timeframe[-1]
         reverse = {v: k for k, v in nodes_dict.items()}
         depot_ind = reverse[cluster.depot_id]
@@ -562,7 +545,9 @@ class Builder(MVMTSPConfig):
 
             if path[-1][1] != cluster.depot_id: 
                 logger.error(f"Agent {agent_id} did not finish at depot [{path[0][-1] }|{nodes_dict[depot_ind]}]")
+            
             visit_nodes.append(cluster.depot_id)
+
             for i in range(len(path)-1):
                 
                 step = path[i] 
@@ -612,7 +597,7 @@ class Builder(MVMTSPConfig):
 
             if len(visit_nodes) != len(nodes_dict)-1 : 
                 logger.error(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
-            pdb.set_trace()
+
         agent_ids = list(all_paths.keys()) 
         for i in range(len(agent_ids)): 
             for j in range(i + 1, len(agent_ids)):

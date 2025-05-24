@@ -17,8 +17,9 @@ PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 
 trials = 220 
 max_memory = 2 * 1024 *1024 *1024
-number_of_agents = 5
+number_of_agents = 4 # MIN 4. 
 max_battery = 1500
+# TODO: INCLUDE HOVER ENERGY OR COVERAGE ENERGY. 
 constraints = ['const_0 ', # NOTE: Constraint for many visits.
                'const_1', # NOTE: Constraint for entering and leaving the once.
                  'const_2', # NOTE: Constraint to have dynamic start and end time on the depot for each agent. 
@@ -30,7 +31,7 @@ constraints = ['const_0 ', # NOTE: Constraint for many visits.
                              'const_8', # NOTE: Constraint to synchronize the time and space decision variables. 
                                'const_9', # NOTE: Constraint to allow a single travel from i to j for time variable. However consider that the problem has to return the paths including duration of travel. 
                                 #  'const_10', # NOTE: Synchronization of depots for spatial and time variables
-            #             #         #    'const_11', # NOTE: Constraint to ensure colision avoidance between agents on the time variable, excluding bridge nodes and depots. 
+                                   'const_11', # NOTE: Constraint to ensure colision avoidance between agents on the time variable, excluding bridge nodes and depots. 
                                      'const_12', # NOTE: Constraint to ensure that the agent has enough energy to travel from i to j.
                                        'const_13', # NOTE: Constraint to ensure that the agent starts from the depot with enough energy.
                                          'const_14',  # NOTE: Constraint to ensure that the agent is idle before departue. 
@@ -51,9 +52,10 @@ constraints = ['const_0 ', # NOTE: Constraint for many visits.
                                                                        'const_29',
                                                                          'const_30',
                                                                            'const_31',
-                                                                            #  'const_32',
-                                                #                                'const_33',
-                                                #                                  'const_34',                                                      
+                                                                             'const_32',
+                                                                               'const_33',
+                                                                                 'const_34',  
+                                                                                #    'const_35'                                                    
 ]
  
 config = {

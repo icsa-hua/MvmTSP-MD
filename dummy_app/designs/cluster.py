@@ -86,7 +86,7 @@ class Cluster:
             logger.error(f"Total time is 0 for cluster {self.id}")
             raise ValueError(f"Total time is 0 for cluster {self.id}")
         
-        self.timeframe = list(range(0, total_time))
+        self.timeframe = list(range(0, total_time + 1))
 
 
     def problem_formulation(self, builder): 
@@ -193,9 +193,11 @@ class Cluster:
     def set_objective(self, distance, energy, time): 
         V_nodes = list(self.nodes_dict.keys())
         penalty = 0.8
+        alpha = 0.3
         self.problem.setObjective(
             pl.lpSum(
                 penalty * self.y[j,v] + 
+                alpha * self.y[j,v] * self.R_points[j] +
                 distance[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
                 + energy[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
                 + time[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
