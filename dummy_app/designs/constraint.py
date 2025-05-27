@@ -402,6 +402,21 @@ def constraint_12(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                 constraint=cluster.e[i,v] >= builder.normalized_battery[source][cluster.nodes_dict[depot_ind]-1] * cluster.x[i, depot_ind, v],
             )
 
+        for t in cluster.timeframe: 
+            for i in V_nodes: 
+                if i == depot_ind: continue 
+                # Subtract coverage energy from remaining battery
+                cluster.problem.addConstraint(
+                    name=f"Update_remaining_energy_comm_{i}_at_{t}_for_{k}",
+                    constraint=cluster.e[i, v] >= cluster.e[i, v] - builder.normalized_coverage_energy * cluster.wait[v, t],
+                )
+
+                # Optional: ensure energy is enough before waiting
+                cluster.problem.addConstraint(
+                    name=f"No_wait_if_low_energy_{i}_at_{t}_for_{k}",
+                    constraint=cluster.e[i, v] >= builder.normalized_coverage_energy * cluster.wait[v, t],
+                )
+
                
     logger.debug(f"Constraint 12: {len(cluster.problem.constraints)}")
 
@@ -776,8 +791,6 @@ def constraint_32(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
 
 
 def constraint_33(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict): 
-    depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
-
     for k, v in list_of_agents.items():
         for i in V_nodes:
             for j in V_nodes:
@@ -785,20 +798,22 @@ def constraint_33(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict):
                 # Prevent starting a trip if it can't be completed before end
                 for t in cluster.timeframe:
                     if t + duration > cluster.timeframe[-1]:
-                        cluster.problem += (
-                            cluster.t[i, j, v, t] <= 1,
-                            f"Prevent_travel_{i}_{j}_at_t{t}_for_{k}_overflowing_Tmax"
+                        cluster.problem.addConstraint(
+                            name=f"Prevent_travel_{i}_{j}_at_t{t}_for_{k}_overflowing_Tmax", 
+                            constraint=cluster.t[i, j, v, t] <= 1,
                         )
+                        
 
 def constraint_34(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict): 
     # Symmetry-breaking constraint 
     for k1 in range(len(cluster.employed_agents) - 1):
         v1 = cluster.employed_agents[k1]
         v2 = cluster.employed_agents[k1 + 1]
-
-        cluster.problem += pl.lpSum(cluster.busy[v1, t] for t in cluster.timeframe) >= \
-                        pl.lpSum(cluster.busy[v2, t] for t in cluster.timeframe), \
-                        f"Time_symmetry_breaking_agent_{v1}_vs_{v2}"
+        cluster.problem.addConstraint(
+            name=f"Time_symmetry_breaking_agent_{v1}_vs_{v2}", 
+            constraint = pl.lpSum(cluster.busy[v1, t] for t in cluster.timeframe) >= \
+                         pl.lpSum(cluster.busy[v2, t] for t in cluster.timeframe)
+        )
 
 
 def constraint_35(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict): 

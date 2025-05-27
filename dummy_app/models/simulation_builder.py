@@ -9,7 +9,7 @@ from typing import Any, List, Dict, Union, Tuple, Mapping
 
 import sys
 import math
-import time 
+import pdb
 import pulp as pl 
 import numpy as np 
 import pandas as pd
@@ -17,6 +17,8 @@ import networkx as nx
 import timeout_decorator 
 from tqdm import tqdm 
 from collections import defaultdict
+from geopy.distance import geodesic
+
 
 
 class Builder(MVMTSPConfig):
@@ -55,20 +57,26 @@ class Builder(MVMTSPConfig):
         cluster_depot = {} 
 
         for cluster_id, cluster_df in clusters:
-
             # Calculate cluster centroid directly
             centroid = cluster_df[['X_coords', 'Y_coords']].mean().values 
 
             # Find nearest depot 
             min_dist = float('inf')
             best_depot:int = 0 
+            dist = 0.0
             for _, depot_row in depots_df.iterrows(): 
                 depot_coords = depot_row[['X_coords', 'Y_coords']].values
-                dist = np.linalg.norm(centroid - depot_coords) 
+
+                if self.distance_metric == 'euclidean':
+                    dist = np.linalg.norm(centroid - depot_coords) 
+
+                elif self.distance_metric == 'geodesic':
+                    dist = geodesic(centroid, depot_coords).km
+
                 if dist < min_dist:
                     min_dist = dist
                     best_depot = depot_row['Area_id']
-    
+
             cluster_depot[cluster_id] = int(best_depot)
         dulpicates = find_duplicate_values(self.depots_for_agents) 
         return cluster_depot, dulpicates
@@ -112,9 +120,10 @@ class Builder(MVMTSPConfig):
                     agent for agent in self.agents if self.depots_for_agents[agent] == depot
                 ])
                 depot_clusters = cluster_df[cluster_df['depot']==depot]
+
                 if depot_clusters.empty: 
-                    logger.debug(f"(Termination) No clusters found for depot {depot}")
-                    break 
+                    logger.debug(f"No clusters found for depot {depot}")
+                    continue
 
                 top_cluster = depot_clusters.index[0]
                 if (top_cluster, depot) not in assignments: 
@@ -127,7 +136,7 @@ class Builder(MVMTSPConfig):
 
         # Convert depot assignments to dataframe 
         cluster_df = pd.DataFrame.from_dict(cluster_with_depots, orient='index', columns=['depot'])
-        
+
         # Join with priority dataframe (not sorted priority)
         cluster_df = cluster_df.join(priority) 
         cluster_df.sort_values(by='Rank', ascending=True, inplace=True)
@@ -145,12 +154,16 @@ class Builder(MVMTSPConfig):
     
     def preprocess(self, distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery):
         data = super().preprocess(distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery)
-        
         self.depots_for_agents = self.assign_agents_to_areas(len(self.agents),self.depots)
-
         logger.info("Preprocessing completed successfully...")
         return data 
 
+
+    def preprocess_generated_data(self, distance_matrix, regions, centroids, user_points, depots, agents, v_ver, v_hor, max_battery):
+        data = super().preprocess_generated_data(distance_matrix, regions, centroids, user_points, depots, agents, v_ver, v_hor, max_battery)
+        self.depots_for_agents = self.assign_agents_to_areas(len(self.agents), self.depots)
+        logger.debug("Preprocessing of generated data completed successfully...")
+        return data 
 
     def set_memory_limit(self, max_memory = 1024):
         return super().set_memory_limit(max_memory)
@@ -276,7 +289,6 @@ class Builder(MVMTSPConfig):
             if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
                 paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
         print(paths) 
-        import pdb; pdb.set_trace()   
         logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
         self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster.id] = self.moment 
@@ -312,10 +324,10 @@ class Builder(MVMTSPConfig):
             except Exception as e:
                 logger.exception(f"Error occurred during regionalization: {e}")
                 raise ValueError("Error occurred during regionalization.")
+            
 
             # Phase 2: Clustering and Prioritization 
             try: 
-                
                 priority = self.cluster_prioritization(clusters, cue_groups)
                 pbar.update(1)
                 logger.debug("Clusters prioritized successfully...")
@@ -366,6 +378,7 @@ class Builder(MVMTSPConfig):
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
+
                 paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
                     cluster=cluster,
                       cluster_id=cluster_tuple[0],
@@ -444,11 +457,10 @@ class Builder(MVMTSPConfig):
             logger.exception(f"Error processing cluster {cluster_id}: {e}")
             raise ValueError(f"Error processing cluster {cluster_id}: {e}")
 
-   
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
 
-        cluster_object.R_points = np.ones(len(cluster_object.nodes_dict))
+        # cluster_object.R_points = np.ones(len(cluster_object.nodes_dict))
         # Step 4: Create and configure the optimization problem 
         try: 
             cluster_object.problem_formulation(builder=self) 
@@ -462,7 +474,6 @@ class Builder(MVMTSPConfig):
         # Step 6: Add the recharge phase & synchronize agents 
         paths = self.synchronize_agent_paths(paths, cluster_object, depot_id)
         
-
         self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster_id] = self.moment
 
@@ -540,11 +551,11 @@ class Builder(MVMTSPConfig):
             seen_edges = set()
             # Reject agents that haven't been used at this point. 
             if len(path) == 0: 
-                logger.error(f"Agent {agent_id} has no path")
+                logger.debug(f"Agent {agent_id} has no path")
                 continue 
 
             if path[-1][1] != cluster.depot_id: 
-                logger.error(f"Agent {agent_id} did not finish at depot [{path[0][-1] }|{nodes_dict[depot_ind]}]")
+                logger.debug(f"Agent {agent_id} did not finish at depot [{path[0][-1] }|{nodes_dict[depot_ind]}]")
             
             visit_nodes.append(cluster.depot_id)
 
@@ -559,7 +570,7 @@ class Builder(MVMTSPConfig):
                 keypoint = (target_node, time_step)
                 
                 if keypoint in key_points and target_node != nodes_dict[depot_ind] and source_node!=nodes_dict[depot_ind]: 
-                    logger.error(f"Collision: Agent {agent_id} and Agent {key_points[keypoint]} from node {source_node} at node {keypoint[0]} at time {keypoint[1]}")
+                    logger.debug(f"Collision: Agent {agent_id} and Agent {key_points[keypoint]} from node {source_node} at node {keypoint[0]} at time {keypoint[1]}")
 
 
                 key_points[keypoint] = agent_id
@@ -575,34 +586,34 @@ class Builder(MVMTSPConfig):
                 next_time_step = next_step[2]
                  
                 if next_time_step < time_step: 
-                    logger.error(f"Agent {agent_id} visited node {next_source_node} at time {next_time_step} before visiting node {source_node} at time {time_step}")
+                    logger.debug(f"Agent {agent_id} visited node {next_source_node} at time {next_time_step} before visiting node {source_node} at time {time_step}")
 
                 if next_source_node != target_node:
-                    logger.error(f"Agent {agent_id} visited node {next_source_node} at time {next_time_step} instead of node {target_node} at time {time_step}")
+                    logger.debug(f"Agent {agent_id} visited node {next_source_node} at time {next_time_step} instead of node {target_node} at time {time_step}")
 
                 if next_target_node == target_node: 
-                    logger.error(f"Agent {agent_id} visited node {target_node} at time {time_step} before visiting node {next_target_node} at time {next_time_step}") 
+                    logger.debug(f"Agent {agent_id} visited node {target_node} at time {time_step} before visiting node {next_target_node} at time {next_time_step}") 
 
                 if source_node not in visit_nodes and source_node != nodes_dict[depot_ind]: 
                     visit_nodes.append(source_node)
 
                 if i != len(path)-2 and target_node == cluster.depot_id:
-                    logger.error(f"Agent {agent_id} visited node {target_node} at time {time_step} before visiting node {cluster.depot_id} at time {time_step+1}")
+                    logger.debug(f"Agent {agent_id} visited node {target_node} at time {time_step} before visiting node {cluster.depot_id} at time {time_step+1}")
 
                 if time_step > max_time_steps: 
-                    logger.error(f"Agent {agent_id} visited node {target_node} at time {time_step} which is greater than the maximum time step {max_time_steps}")
+                    logger.debug(f"Agent {agent_id} visited node {target_node} at time {time_step} which is greater than the maximum time step {max_time_steps}")
 
             edge_sequence = tuple((step[0], step[1]) for step in path)
             all_paths[agent_id] = edge_sequence
 
             if len(visit_nodes) != len(nodes_dict)-1 : 
-                logger.error(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
+                logger.debug(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
 
         agent_ids = list(all_paths.keys()) 
         for i in range(len(agent_ids)): 
             for j in range(i + 1, len(agent_ids)):
                 if all_paths[agent_ids[i]] == all_paths[agent_ids[j]]:
-                    logger.error(f"Agents {agent_ids[i]} and {agent_ids[j]} have identical paths!")
+                    logger.debug(f"Agents {agent_ids[i]} and {agent_ids[j]} have identical paths!")
 
         
     def get_travel_time(self, i, j, nodes_dict): 

@@ -48,7 +48,12 @@ class CentralHub:
     def allowed_visits(self, cluster_nodes, n_agents): 
         max_visits = n_agents 
         self.number_allowed_visits = {k: int(1 + self.betweeness[k] * (max_visits - 1)) for k in range(len(cluster_nodes))}
-        
+        # Ensure at least one node gets more than 1 visit
+        if all(v == 1 for v in self.number_allowed_visits.values()):
+            max_index = int(np.argmax(self.betweeness))
+            self.number_allowed_visits[max_index] = 2 
+
+            
 
     def get_bridge_nodes(self, graph:nx.Graph, cluster_nodes:List[int], cost_dist:Dict[int,np.ndarray], nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
         self.calculate_betweeness(graph, cluster_nodes, nodes_dict,cost_dist)

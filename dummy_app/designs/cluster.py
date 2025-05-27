@@ -7,6 +7,7 @@ import networkx as nx
 from typing import Dict, Tuple, List, Union, Any
 from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.logger import logger
+from dummy_app.models.coverage import coverage_u2c
 
 
 class Cluster: 
@@ -30,7 +31,6 @@ class Cluster:
         self.R_points = []
         # self.paths =  {(id,agent):[] for agent in self.employed_agents}
         self.problem = pl.LpProblem()
-
 
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -118,6 +118,8 @@ class Cluster:
         else: 
             pass 
 
+        import pdb;pdb.set_trace()
+
         builder.solve_problem(self) 
         builder.create_solution(self)
 
@@ -173,8 +175,8 @@ class Cluster:
 
     def create_problem(self): 
         V = list(self.nodes_dict.keys())
-        self.problem = pl.LpProblem("ContrainedMVMTSP", pl.LpMinimize)
-        
+        # self.problem = pl.LpProblem("ContrainedMVMTSP", pl.LpMinimize)
+        self.problem = pl.LpProblem("ClusterOptimization", pl.LpMaximize)
         self.x = pl.LpVariable.dicts("x", ((i,j,v) for i in V for j in V for v in self.employed_agents), cat='Binary')
         self.t = pl.LpVariable.dicts("t", ((i, j, v, ts) for i in V for j in V for v in self.employed_agents for ts in self.timeframe), cat='Binary')
         
@@ -189,6 +191,7 @@ class Cluster:
         self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents), lowBound=0, cat='Integer')
 
         self.active_agents = pl.LpVariable.dicts("active_agents", (v for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
+
 
     def set_objective(self, distance, energy, time): 
         V_nodes = list(self.nodes_dict.keys())
@@ -210,8 +213,24 @@ class Cluster:
         )
 
 
+    def set_coverage_objective(self, coverage)->None:
+        V_nodes = list(self.nodes_dict.keys()) 
+        self.problem.setObjective(
+           pl.lpSum(coverage[i, t] * self.wait[v, t]
+                   for i in V_nodes
+                   for v in self.employed_agents
+                   for t in self.timeframe)
+        )
 
+
+    def get_average_coverage(self):
+        for i in self.nodes_dict.keys():
+            agent_position = self.nodes_dict[i]
+        coverage = {
+            (i, t): average_throughput_at_node_i_at_t  # could be constant if static
+        }
     
+
 
 
 
