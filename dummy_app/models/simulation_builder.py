@@ -23,7 +23,7 @@ from geopy.distance import geodesic
 
 class Builder(MVMTSPConfig):
 
-    def __init__(self, config:Dict[str,Any], trials): 
+    def __init__(self, config:Dict[str,Any], trials:int, scenario:str='energy'): 
         super().__init__(config)
         
         self.allow_regionalization:bool = config['regionalization']
@@ -36,7 +36,7 @@ class Builder(MVMTSPConfig):
         self.metrics = Metrics(verbose=True) 
         self.clusters_times:Dict[int, int] = {} 
         self.recharge_time_window:int = 5 #descrete time steps
-    
+        self.scenario:str = scenario 
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
@@ -122,7 +122,7 @@ class Builder(MVMTSPConfig):
                 depot_clusters = cluster_df[cluster_df['depot']==depot]
 
                 if depot_clusters.empty: 
-                    logger.debug(f"No clusters found for depot {depot}")
+                    logger.debug(f"❌ No clusters found for depot {depot}")
                     continue
 
                 top_cluster = depot_clusters.index[0]
@@ -147,6 +147,7 @@ class Builder(MVMTSPConfig):
 
         return assignments 
 
+
     @timeout_decorator.timeout(3600)
     def solve_problem(self, cluster:Any):
         cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
@@ -155,15 +156,16 @@ class Builder(MVMTSPConfig):
     def preprocess(self, distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery):
         data = super().preprocess(distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery)
         self.depots_for_agents = self.assign_agents_to_areas(len(self.agents),self.depots)
-        logger.info("Preprocessing completed successfully...")
+        logger.info("✅ Preprocessing completed successfully...")
         return data 
 
 
     def preprocess_generated_data(self, distance_matrix, regions, centroids, user_points, depots, agents, v_ver, v_hor, max_battery):
         data = super().preprocess_generated_data(distance_matrix, regions, centroids, user_points, depots, agents, v_ver, v_hor, max_battery)
         self.depots_for_agents = self.assign_agents_to_areas(len(self.agents), self.depots)
-        logger.debug("Preprocessing of generated data completed successfully...")
+        logger.debug("✅ Preprocessing of generated data completed successfully...")
         return data 
+
 
     def set_memory_limit(self, max_memory = 1024):
         return super().set_memory_limit(max_memory)
@@ -172,10 +174,10 @@ class Builder(MVMTSPConfig):
     def create_solution(self, cluster:Any):
         logger.debug(f"Cluster Time Frame is {cluster.timeframe}") 
         if pl.LpStatus[cluster.problem.status] != 'Optimal': 
-            logger.info("Problem is not optimal, returning None...")
+            logger.info("❌ Problem is not optimal, returning None...")
             sys.exit(1)
 
-        logger.info(f"Cluster bridge nodes are {cluster.bridge_nodes}")
+        logger.debug(f"Cluster bridge nodes are {cluster.bridge_nodes}")
         
         employed_agents = ["Agent_" + str(i) for i in cluster.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
@@ -197,7 +199,7 @@ class Builder(MVMTSPConfig):
 
                 for timestep in cluster.timeframe: 
                     if timestep < step: continue 
-                    print(f"Step : {step}")
+
                     for next_node in cluster.nodes_dict.keys(): 
                         if next_node == current_node: continue 
                         if cluster.x[current_node, next_node, agent_id].varValue != 1: continue 
@@ -278,7 +280,7 @@ class Builder(MVMTSPConfig):
                         break
                             
                 if not found_next:
-                    logger.warning(f"No valid move found for agent {agent_name} at iteration {iteration}. Ending early.")
+                    logger.warning(f"❌ No valid move found for agent {agent_name} at iteration {iteration}. Ending early.")
                     break
                 
                 if paths[agent_name] and paths[agent_name][-1][1] == cluster.depot_id:
@@ -289,16 +291,16 @@ class Builder(MVMTSPConfig):
             if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
                 paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
         print(paths) 
-        logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
+        logger.debug(f"✅ Solutions created for {len(cluster.employed_agents)} agents")
         self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
         self.clusters_times[cluster.id] = self.moment 
 
         memory_usage = self.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
-        logger.info("Optimal Solution Found!!!!!")
-        logger.debug("Validating solutions....")
+        logger.info("✅ Optimal Solution Found!!!!!")
+
         self.validate_paths(paths=paths, nodes_dict=cluster.nodes_dict, cluster=cluster)
-        logger.debug("Solutions validated successfully...")
+        logger.debug("✅ Solutions validated successfully...")
 
 
     def createGeoDataset(self, data):
@@ -313,16 +315,16 @@ class Builder(MVMTSPConfig):
             try: 
                 data, depots = self.separate_depots_from_clusters(data)
                 pbar.update(1)
-                logger.debug("Depots separated from clusters successfully...")
+                logger.debug("✅ Depots separated from clusters successfully...")
                 gdf = self.createGeoDataset(data)
                 pbar.update(1)
-                logger.debug("GeoDataset created successfully...")
+                logger.debug("✅ GeoDataset created successfully...")
                 clusters = self.regionalization(gdf)
                 pbar.update(1)
-                logger.debug("Clusters created successfully...")
+                logger.debug("✅ Clusters created successfully...")
                 
             except Exception as e:
-                logger.exception(f"Error occurred during regionalization: {e}")
+                logger.exception(f"❌ Error occurred during regionalization: {e}")
                 raise ValueError("Error occurred during regionalization.")
             
 
@@ -330,22 +332,22 @@ class Builder(MVMTSPConfig):
             try: 
                 priority = self.cluster_prioritization(clusters, cue_groups)
                 pbar.update(1)
-                logger.debug("Clusters prioritized successfully...")
+                logger.debug("✅ Clusters prioritized successfully...")
             except Exception as e:
-                logger.exception(f"Error occurred during clustering: {e}")
+                logger.exception(f"❌ Error occurred during clustering: {e}")
                 raise ValueError("Error occurred during clustering.")
 
             # Phase 3: Agent Assignment for all clusters 
             try: 
                 cluster_with_depots, same_depot_agents = self.assign_depot_to_cluster(clusters, depots)
                 pbar.update(1)
-                logger.debug("Depots assigned to clusters successfully...")
+                logger.debug("✅ Depots assigned to clusters successfully...")
                 assignments = self.allocate_agents_to_clusters(cluster_with_depots, priority, same_depot_agents)
                 pbar.update(1)
-                logger.debug("Total Initial Assignments of all agents to all clusters based on priority")
+
 
             except Exception as e:
-                logger.exception(f"Error occurred during agent assignment: {e}")
+                logger.exception(f"❌ Error occurred during agent assignment: {e}")
                 raise ValueError("Error occurred during agent assignment.") 
 
             # Phase 4: Final clusters refinement and memory deallocation 
@@ -364,16 +366,17 @@ class Builder(MVMTSPConfig):
                 deallocate_memory(cluster_with_depots)
                 deallocate_memory(same_depot_agents)
                 deallocate_memory(depots)
-                logger.debug("Final refinements added to clusters successfully...")
+                logger.debug("✅ Final refinements added to clusters successfully...")
 
             except Exception as e:
-                logger.exception(f"Error occurred during final cluster refinement: {e}")
+                logger.exception(f"❌ Error occurred during final cluster refinement: {e}")
                 raise ValueError("Error occurred during final cluster refinement.")
 
             pbar.update(1) 
 
         logger.info("Problem construction and solution follow...")
         paths = {} 
+        self.metrics.start_performance_timer() 
 
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
@@ -385,7 +388,7 @@ class Builder(MVMTSPConfig):
                         assignment=agents,
                           depot_id=cluster_tuple[1])
                 pbar.update(1)
-                logger.debug(f"Cluster {cluster_tuple[0]} solved successfully...")
+                logger.debug(f"✅ Cluster {cluster_tuple[0]} solved successfully...")
         
         # Step 6: Agent Generation for simulation
         
@@ -416,7 +419,7 @@ class Builder(MVMTSPConfig):
                 next_coords = (int(self.V['X_coords'].iloc[next_node]), int(self.V['Y_coords'].iloc[next_node]))
                 coordinates.append((current_coords, next_coords, point[2]))
             except IndexError:
-                logger.error(f"Node {point[0]} or {point[1]} not found in the dataframe.")
+                logger.error(f"❌ Node {point[0]} or {point[1]} not found in the dataframe.")
                 continue
         return coordinates
 
@@ -453,19 +456,24 @@ class Builder(MVMTSPConfig):
                 context=context, 
                 builder=self 
             )
+            logger.debug(f"✅ Context prepared for cluster {cluster_id} successfully...")
+            logger.debug(f"Cluster {cluster_id} has {cluster_object.__dict__}")
         except Exception as e: 
-            logger.exception(f"Error processing cluster {cluster_id}: {e}")
+            logger.exception(f"❌ Error processing cluster {cluster_id}: {e}")
             raise ValueError(f"Error processing cluster {cluster_id}: {e}")
 
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
 
+        if self.scenario == 'coverage':
+            self.get_cluster_coverage(cluster_object)
+
         # cluster_object.R_points = np.ones(len(cluster_object.nodes_dict))
         # Step 4: Create and configure the optimization problem 
         try: 
-            cluster_object.problem_formulation(builder=self) 
+            cluster_object.problem_formulation(builder=self, scenario=self.scenario) 
         except Exception as e:
-            logger.exception(f"Error creating problem for cluster {cluster_id}: {e}")
+            logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5 extract solution 
@@ -527,9 +535,9 @@ class Builder(MVMTSPConfig):
                         V_nodes=V_nodes,
                         list_of_agents=list_of_agents,
                     )
-                    logger.debug(f"Constraint {const} set successfully...")
+                    logger.debug(f"✅ Constraint {const} set successfully...")
                 except Exception as e:
-                    logger.exception(f"Error setting constraint {const} for cluster: {e}")
+                    logger.exception(f"❌ Error setting constraint {const} for cluster: {e}")
                     raise ValueError(f"Error setting constraint {const} for cluster")
 
 
@@ -693,5 +701,19 @@ class Builder(MVMTSPConfig):
             single_agent_paths_for_clusters[agent] = flattened_path
         
         return single_agent_paths_for_clusters
+    
+
+    def get_cluster_coverage(self, cluster:Any):
+                
+        altitude = 1250/1e3 
+        user_height = 12.5/1e3 
+        terrain_type = 'urban'
+        cluster.get_average_coverage(
+            user_points = self.user_points,
+            altitude = altitude,
+            user_height = user_height,
+            terrain_type = terrain_type,
+            metric=self.distance_metric
+        )
 
 

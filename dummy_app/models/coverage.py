@@ -29,7 +29,7 @@ def coverage_u2c(agent_to_user_dist, agent_altitude, user_altitude, agent_pos, t
         agent_pos=agent_pos
     )
     
-    logger.info(f"Pathloss = {pathloss_dB}")
+    logger.debug(f"Pathloss = {pathloss_dB}")
 
     g = 10 ** (-pathloss_dB / 10) 
     p = PU_W * g 

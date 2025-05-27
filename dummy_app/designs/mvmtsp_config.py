@@ -38,13 +38,13 @@ class MVMTSPConfig(ABC):
         self.max_battery_norm:float = 0.0
         self.average_energy:float = 0.0
         self.customers:np.ndarray = np.empty((0,0)) 
-        self.STEPS:list = [range(0,3600,1)]
         self.graph:nx.Graph = nx.Graph()
         self.depots:List[int] = []
         self.distance_metric:str = "euclidean"
         self.average_coverage_energy:float=0.0
         self.normalized_coverage_energy:float=0.0
-
+        self.user_points:Dict[int,Tuple[float,float]] = {}  # User points for regionalization
+        self.scenario:str = ""
 
     @abstractmethod
     def assign_agents_to_areas(self, plethos:int=0, depots:List[int]=[])->Dict[int,int]:
@@ -100,7 +100,7 @@ class MVMTSPConfig(ABC):
 
     
     @abstractmethod 
-    def preprocess(self, distances_path:Union[str,Path], energies_path:Union[str,Path], nodes_path:Union[Path, str], agents:int, customers_path:Union[Path,str], ground_users:Union[Path,str], max_battery:int)->pd.DataFrame:
+    def preprocess(self, distances_path:Union[str,Path], energies_path:Union[str,Path], nodes_path:Union[Path, str], agents:int, customers_path:Union[Path,str], ground_users:Any, max_battery:int)->pd.DataFrame:
 
         def normalize_data(df:pd.DataFrame)->pd.DataFrame:
             scaler = MinMaxScaler()
@@ -167,6 +167,8 @@ class MVMTSPConfig(ABC):
 
         # Format customers 
         self.customers = customers.to_numpy() 
+        self.user_points = ground_users if ground_users else {}
+
         # Setup visits allowed 
         # self.allowed_visits = np.full(self.v, len(self.agents), dtype=int)
 
@@ -316,8 +318,13 @@ class MVMTSPConfig(ABC):
         # Determine the maximum number of nodes per cluster based on battery
 
         # TODO: Calculate Maximum nodes based on Hover.
-        adjusted_energy = self.average_energy + self.average_coverage_energy 
-        max_nodes = int(self.max_battery / adjusted_energy)
+        max_nodes = 0 
+        if self.scenario == "coverage": 
+            adjusted_energy = self.average_energy + self.average_coverage_energy 
+            max_nodes = int(self.max_battery / adjusted_energy)
+        elif self.scenario == "energy": 
+            max_nodes = int(self.max_battery / self.average_energy)
+        
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
         charge_points = int(np.floor(self.v/max_nodes))
 

@@ -24,12 +24,15 @@ def frame_generator():
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 TRIALS = 300 
-MAX_BATTERY = 2500 #Wh 
+MAX_BATTERY = 2000 #Wh 
 NUMBER_OF_AGENTS = 4 # MIN 4. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
 NUMBER_OF_AREAS = 50 # NOTE: used for Voronoi map generation.
 VERTICAL_VELOCITY = 2.78 #m/s 
 HORIZONTAL_VELOCITY = 5.55 #m/s
+SCENARIO = "energy" # NOTE: Scenario to run
+
+logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {TRIALS}\n Number of Agents -> {NUMBER_OF_AGENTS}\n Max Battery -> {MAX_BATTERY} Wh\n Number of Areas -> {NUMBER_OF_AREAS}\n Vertical Velocity -> {VERTICAL_VELOCITY} m/s\n Horizontal Velocity -> {HORIZONTAL_VELOCITY} m/s\n Scenario -> {SCENARIO}")
 
 progress = tqdm(total=TRIALS, desc="Progress")
 
@@ -37,6 +40,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--generate", action="store_true", help="Generate new Voronoi map and save it to assets.")
 parser.add_argument("--show_map", action="store_true", help="Show the generated Voronoi map.")
 args = parser.parse_args()
+
+logger.debug(f"Arguments: Generate -> {args.generate}, Show Map -> {args.show_map}")
 
 # TODO: INCLUDE HOVER ENERGY OR COVERAGE ENERGY. 
 constraints = ['const_0 ', # NOTE: Constraint for many visits.
@@ -85,6 +90,7 @@ config = {
 }
 
 problem = Builder(config, TRIALS)
+logger.debug(f"BUilder Configuration: {problem.__dict__}")
 
 mobility_sim = EnvSim() 
 
@@ -97,6 +103,7 @@ if not args.generate:
 
     map = Map(data_path=areas_path, incremental=False)
     map.voronoi_tessellation()
+    logger.debug(f"Voronoi Map Initialized: {map.__dict__}")
 
     ground_users = GroundUserGroup(
         mobility_env=mobility_sim, 
@@ -105,11 +112,13 @@ if not args.generate:
         mean_velocity=2.0, 
         sigma=0.5
     )
+    logger.debug(f"Ground Users Group Initialized: {ground_users.__dict__}")
 
     ground_users.load_users_from_csv(
         data_path=gues_path,
         customers_path=customers_path
     )
+    logger.debug(f"Ground Users Loaded: {len(ground_users.group)} users")
 
     data = problem.preprocess(
         distances_path=dist_path, 
@@ -117,11 +126,11 @@ if not args.generate:
         nodes_path=areas_path, 
         agents=NUMBER_OF_AGENTS, 
         customers_path=customers_path,
-        ground_users=gues_path,
+        ground_users=ground_users.group,
         max_battery=MAX_BATTERY
     )
 
-    
+    logger.debug(f"Preprocessed Data: {data}")
 
     if map.vor_map is None:
         raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
@@ -168,11 +177,15 @@ else:
         high_long=13.6,
         seed=42
     )
-    map_generator.generate_points()
-    regions, centroids, user_points = map_generator.voronoi_polygons() 
-    distance_matrix = map_generator.calculate_centroid_distance(centroids)
+    logger.debug(f"Map Generator Initialized: {map_generator.__dict__}")
 
-    logger.debug(f"Distance Matrix (km): {distance_matrix}")
+    map_generator.generate_points()
+    logger.debug(f"Generated Points: {map_generator.points}")
+
+    regions, centroids, user_points = map_generator.voronoi_polygons() 
+    logger.debug(f"Voronoi Polygons: Regions -> {len(regions)}, Centroids -> {len(centroids)}, User Points -> {len(user_points)}")
+
+    distance_matrix = map_generator.calculate_centroid_distance(centroids)
     all_user_points = [point for points in user_points.values() for point in points]
 
     # if args.show_map: 
@@ -181,6 +194,7 @@ else:
         # map_generator.plot_map_3D(regions, centroids, user_points)
 
     depots = map_generator.get_central_depots(sites=centroids)
+    logger.debug(f"Depots from generated data: {depots}")
 
     ground_users = GroundUserGroup(
         mobility_env=mobility_sim, 
@@ -189,9 +203,10 @@ else:
         mean_velocity=2.0, 
         sigma=0.5
     )
-
+    logger.debug(f"Ground Users Group Initialized: {ground_users.__dict__}")
 
     ground_users.get_generated_users(user_points=user_points)
+    logger.debug(f"Ground Users Loaded: {len(ground_users.group)} users")    
     
     if map_generator.vor_map is None:
         raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
@@ -219,6 +234,7 @@ else:
         v_ver=VERTICAL_VELOCITY,
         max_battery=MAX_BATTERY
     )
+    logger.debug(f"Preprocessed Data: {data}")  
     
     try: 
         ani = FuncAnimation(
@@ -249,27 +265,4 @@ else:
         plt.close(mobility_sim.fig)
         logger.exception(f"Exception: {e}")
         exit(1)
-        
-    
-# mobility_sim.simulations(
-#     constructor=problem,
-#     cues=ground_users, 
-#     map=map.vor_map,
-#     data=data, 
-#     trials=trials
-# )
-# Create tqdm iterator
-
-    # raise StopIteration
-
-
-# mobility_sim.simulations(
-#     frame=None,
-#     constructor=problem,
-#     cues=ground_users,
-#     data=data,
-#     trials=trials,
-#     map=map.vor_map
-# ) 
-
 

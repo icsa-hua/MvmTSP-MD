@@ -4,7 +4,9 @@ import pandas as pd
 import numpy as np 
 import pulp as pl 
 import networkx as nx 
-from typing import Dict, Tuple, List, Union, Any
+from collections import defaultdict
+from typing import Dict, Tuple, List, Any
+from geopy.distance import geodesic
 from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.logger import logger
 from dummy_app.models.coverage import coverage_u2c
@@ -31,6 +33,8 @@ class Cluster:
         self.R_points = []
         # self.paths =  {(id,agent):[] for agent in self.employed_agents}
         self.problem = pl.LpProblem()
+        self.R = defaultdict(float) 
+        self.sinr = defaultdict(float)
 
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -89,7 +93,7 @@ class Cluster:
         self.timeframe = list(range(0, total_time + 1))
 
 
-    def problem_formulation(self, builder): 
+    def problem_formulation(self, builder, scenario:str='energy'): 
 
         V_nodes = list(self.nodes_dict.keys())
 
@@ -97,11 +101,18 @@ class Cluster:
         self.create_problem() 
 
         # Set the loss function 
-        self.set_objective(
-            distance=self.cost['distance'],
-            energy=self.cost['energy'], 
-            time=self.cost['travel_time'],
-        )
+        if scenario == 'energy':
+            self.set_objective(
+                distance=self.cost['distance'],
+                energy=self.cost['energy'], 
+                time=self.cost['travel_time'],
+            )
+            logger.info(f"Objective function set for energy scenario in cluster {self.id}")
+        elif scenario == 'coverage':
+            self.set_coverage_objective()
+            logger.info(f"Objective function set for coverage scenario in cluster {self.id}")
+
+
         if not hasattr(builder, 'get_travel_time'):
             logger.error("Builder does not have get_travel_time method") 
             raise ValueError("Builder does not have get_travel_time method")    
@@ -112,14 +123,12 @@ class Cluster:
             logger.error("Builder does not have set_constraints_for_multi_agent method") 
             raise ValueError("Builder does not have set_constraints_for_multi_agent method")
         
-        if len(self.employed_agents) > 1: 
-            builder.set_constraints_for_multi_agent(self)
+        # if len(self.employed_agents) > 1: 
+        #     builder.set_constraints_for_multi_agent(self)
         
-        else: 
-            pass 
-
-        import pdb;pdb.set_trace()
-
+        # else: 
+        #     pass 
+        builder.set_constraints_for_multi_agent(self)
         builder.solve_problem(self) 
         builder.create_solution(self)
 
@@ -173,10 +182,14 @@ class Cluster:
         return paths
     
 
-    def create_problem(self): 
+    def create_problem(self, scenario:str='energy')->None: 
         V = list(self.nodes_dict.keys())
-        # self.problem = pl.LpProblem("ContrainedMVMTSP", pl.LpMinimize)
-        self.problem = pl.LpProblem("ClusterOptimization", pl.LpMaximize)
+        
+        if scenario == 'energy': 
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
+        elif scenario == 'coverage':
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
+        
         self.x = pl.LpVariable.dicts("x", ((i,j,v) for i in V for j in V for v in self.employed_agents), cat='Binary')
         self.t = pl.LpVariable.dicts("t", ((i, j, v, ts) for i in V for j in V for v in self.employed_agents for ts in self.timeframe), cat='Binary')
         
@@ -213,23 +226,58 @@ class Cluster:
         )
 
 
-    def set_coverage_objective(self, coverage)->None:
+    def set_coverage_objective(self)->None:
         V_nodes = list(self.nodes_dict.keys()) 
         self.problem.setObjective(
-           pl.lpSum(coverage[i, t] * self.wait[v, t]
+           pl.lpSum(self.R[i] * self.wait[v, t]
                    for i in V_nodes
                    for v in self.employed_agents
                    for t in self.timeframe)
         )
 
 
-    def get_average_coverage(self):
+    def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural', metric="euclidean"):
+        # for Area with id 
+        average_R = defaultdict(float)
+        average_sinr = defaultdict(float)
+        R = defaultdict(list) 
+        sinr = defaultdict(list) 
         for i in self.nodes_dict.keys():
-            agent_position = self.nodes_dict[i]
-        coverage = {
-            (i, t): average_throughput_at_node_i_at_t  # could be constant if static
-        }
-    
+            area = self.nodes_dict[i]
+            coords = self.cluster.loc[self.cluster['Area_id'] == area, ['X_coords', 'Y_coords']].values
+            if area not in user_points: continue
+            for user in user_points[area]:
+                user_coords = (user.x, user.y)
+                horizontal_distance = 0.0 
+                if metric == "geodesic":
+                    horizontal_distance = geodesic(coords, user_coords).km
+                
+                elif metric == "euclidean":
+                    horizontal_distance = np.linalg.norm(np.array(coords) - np.array(user_coords))
+                    horizontal_distance = horizontal_distance / 1e3 # Convert to km
+
+                height_difference = altitude - user_height
+                dist = np.sqrt(horizontal_distance**2 + height_difference**2)
+
+                r_value, sinr_value = coverage_u2c(
+                    agent_to_user_dist=dist, 
+                    agent_altitude=altitude, 
+                    user_altitude=user_height, 
+                    agent_pos=coords, 
+                    terrain_type=terrain_type
+                )
+                
+                R[i].append(r_value)
+                sinr[i].append(sinr_value)
+            # Convert to numpy arrays for easier calculations
+            average_R[i] = float(np.mean(R[i])/1e6) # Convert to Mbps
+            average_sinr[i] = float(np.mean(sinr[i]))
+            logger.info(f"R: {average_R[i] } Mbps, SINR: {average_sinr[i]} dB for area {area}")
+
+        self.R = average_R
+        self.sinr = average_sinr
+
+
 
 
 

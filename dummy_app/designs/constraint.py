@@ -84,13 +84,14 @@ def constraint_2(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
         #                  for t in cluster.timeframe[-(max(cluster.tr_times[(i, depot_ind)] + 1, 1)):]) == 1,
         # )
 
+
         cluster.problem.addConstraint(
             name=f"{k}_enters_depot_{depot_ind}_at_specific_interval",
             constraint= pl.lpSum(cluster.t[i, depot_ind, v, cluster.timeframe[-1]]
                                   for i in V_nodes if depot_ind != i ) == 1, 
         )
 
-    # for k, v in list_of_agents.items():
+
         # for j in V_nodes:
         #     if j == depot_ind: continue 
         #     valid_departure_window = cluster.timeframe[:-(cluster.tr_times[(depot_ind, j)] + cluster.tr_times[(j, depot_ind)])]
@@ -402,20 +403,21 @@ def constraint_12(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
                 constraint=cluster.e[i,v] >= builder.normalized_battery[source][cluster.nodes_dict[depot_ind]-1] * cluster.x[i, depot_ind, v],
             )
 
-        for t in cluster.timeframe: 
-            for i in V_nodes: 
-                if i == depot_ind: continue 
-                # Subtract coverage energy from remaining battery
-                cluster.problem.addConstraint(
-                    name=f"Update_remaining_energy_comm_{i}_at_{t}_for_{k}",
-                    constraint=cluster.e[i, v] >= cluster.e[i, v] - builder.normalized_coverage_energy * cluster.wait[v, t],
-                )
+        if builder.scenario == 'coverage':
+            for t in cluster.timeframe: 
+                for i in V_nodes: 
+                    if i == depot_ind: continue 
+                    # Subtract coverage energy from remaining battery
+                    cluster.problem.addConstraint(
+                        name=f"Update_remaining_energy_comm_{i}_at_{t}_for_{k}",
+                        constraint=cluster.e[i, v] >= cluster.e[i, v] - builder.normalized_coverage_energy * cluster.wait[v, t],
+                    )
 
-                # Optional: ensure energy is enough before waiting
-                cluster.problem.addConstraint(
-                    name=f"No_wait_if_low_energy_{i}_at_{t}_for_{k}",
-                    constraint=cluster.e[i, v] >= builder.normalized_coverage_energy * cluster.wait[v, t],
-                )
+                    # Optional: ensure energy is enough before waiting
+                    cluster.problem.addConstraint(
+                        name=f"No_wait_if_low_energy_{i}_at_{t}_for_{k}",
+                        constraint=cluster.e[i, v] >= builder.normalized_coverage_energy * cluster.wait[v, t],
+                    )
 
                
     logger.debug(f"Constraint 12: {len(cluster.problem.constraints)}")
