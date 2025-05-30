@@ -29,7 +29,6 @@ class MVMTSPConfig(ABC):
         self.problem = pl.LpProblem() 
         self.V:pd.DataFrame = pd.DataFrame()
         self.agents:List[int] = [] 
-        self.moment:int = 0 
         self.travel_cost:np.ndarray = np.empty((0,0))
         self.distance_columns:List[str] = []
         self.energy_columns:List[str] = []
@@ -37,14 +36,13 @@ class MVMTSPConfig(ABC):
         self.normalized_battery:np.ndarray = np.ndarray((0,0))
         self.max_battery_norm:float = 0.0
         self.average_energy:float = 0.0
-        self.customers:np.ndarray = np.empty((0,0)) 
-        self.graph:nx.Graph = nx.Graph()
         self.depots:List[int] = []
         self.distance_metric:str = "euclidean"
         self.average_coverage_energy:float=0.0
         self.normalized_coverage_energy:float=0.0
         self.user_points:Dict[int,Tuple[float,float]] = {}  # User points for regionalization
         self.scenario:str = ""
+
 
     @abstractmethod
     def assign_agents_to_areas(self, plethos:int=0, depots:List[int]=[])->Dict[int,int]:
@@ -131,8 +129,14 @@ class MVMTSPConfig(ABC):
         temporary_dataframe_energy.drop([len(energies)], inplace=True)
         self.normalized_battery = temporary_dataframe_energy.values
         self.max_battery_norm = max_battery_norm.iloc[0]
-        
+
         energy_model = DroneEnergyModel()
+        print(energy_model.ascend_energy(current_node=1, next_node=20, altitude=1250, distance_matrix=distances.to_numpy()/1e3)/3600)
+        print(energy_model.hover_energy()/3600)
+        print(energy_model.coverage_energy(1250)/3600) 
+        print(energy_model.descend_energy(current_node=20,next_node=1,altitude=1250,distance_matrix=distances.to_numpy()/1e3)/3600)
+        print(energy_model.move_energy(current_node=20,next_node=13,distance_matrix=distances.to_numpy()/1e3)/3600)
+
         self.average_coverage_energy = energy_model.coverage_energy(1250) # In J 
         self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
         self.normalized_coverage_energy = self.average_coverage_energy / max_battery  # Normalize coverage energy
@@ -166,7 +170,6 @@ class MVMTSPConfig(ABC):
         travel_times = normalize_data(travel_times)
 
         # Format customers 
-        self.customers = customers.to_numpy() 
         self.user_points = ground_users if ground_users else {}
 
         # Setup visits allowed 
@@ -252,7 +255,6 @@ class MVMTSPConfig(ABC):
         distances = normalize_data(distances)
         energies = normalize_data(energies)
         travel_times = normalize_data(travel_times)
-        self.customers = np.array(list(user_points.keys()))
 
         self.distance_columns = distances.columns.tolist()
         self.energy_columns = energies.columns.tolist()
@@ -299,7 +301,7 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod
-    def create_solution(self, cluster:Any)->None: 
+    def create_solution(self, cluster:Any)->Dict[str,List[int]]: 
         pass 
 
 
@@ -319,12 +321,15 @@ class MVMTSPConfig(ABC):
 
         # TODO: Calculate Maximum nodes based on Hover.
         max_nodes = 0 
-        if self.scenario == "coverage": 
-            adjusted_energy = self.average_energy + self.average_coverage_energy 
-            max_nodes = int(self.max_battery / adjusted_energy)
-        elif self.scenario == "energy": 
-            max_nodes = int(self.max_battery / self.average_energy)
+        # if self.scenario == "coverage": 
+        #     adjusted_energy = self.average_energy + self.average_coverage_energy 
+        #     max_nodes = int(self.max_battery / adjusted_energy)
+        # elif self.scenario == "energy": 
+        #     max_nodes = int(self.max_battery / self.average_energy)
         
+        adjusted_energy = self.average_energy + self.average_coverage_energy 
+        max_nodes = int(self.max_battery / adjusted_energy)
+
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
         charge_points = int(np.floor(self.v/max_nodes))
 
@@ -339,8 +344,11 @@ class MVMTSPConfig(ABC):
             non_depot_gdf[self.travel_time_columns]
         ], axis=1)
 
-        n_clusters = len(self.agents) # NOTE: Why is this n_clusters = 4 e.g.? 
-
+        # n_clusters = len(self.agents) # NOTE: Why is this n_clusters = 4 e.g.? 
+        # Determine total demand (total nodes to cover)
+        total_nodes = len(GDF) - len(self.depots) if self.depots else len(GDF)
+        n_clusters = int(np.ceil(total_nodes / max_nodes))
+        logger.info(f"Total Nodes: {total_nodes}, Clusters: {n_clusters}")
         kmeans = KMeansConstrained(
             n_clusters=n_clusters, 
             size_min=charge_points, 

@@ -180,7 +180,6 @@ class MapGenerator(Map):
         if self.vor_map is None:
            raise ValueError("Voronoi map is not initialized. Call 'voronoi_tessellation()' first.")
         
-
         for poly in regions:
                     x, y = poly.exterior.xy
                     ax.fill(x, y, alpha=0.3, edgecolor='black')

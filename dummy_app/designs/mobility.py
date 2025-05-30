@@ -16,7 +16,6 @@ This function generates uniform random values between MIN and MAX for each eleme
 in `SAMPLES.shape`. It is used to initialize the starting position and directions of nodes. 
 """
 U = lambda MIN, MAX, SAMPLES: np.random.rand(*SAMPLES.shape) * (MAX-MIN) + MIN 
-transformer = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
 
 class GroundUser: 
 

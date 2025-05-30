@@ -14,24 +14,21 @@ from dummy_app.models.coverage import coverage_u2c
 
 class Cluster: 
 
-    def __init__(self, cluster:pd.DataFrame, id:int, assignment:List[int], depot_id:int): 
+    def __init__(self, cluster:pd.DataFrame, id:int, assignment:List[int], depot_id:int, max_battery): 
         self.cluster = cluster 
         self.id = id
         self.employed_agents:List[int] = assignment 
         if self.employed_agents is None: 
             logger.error(f"No agents assigned to cluster {self.id}")
-        self.max_battery = 1500
+        self.max_battery = max_battery
         self.nodes_dict = {} 
         self.timeframe = [] 
-        self.start_time = 0 
         self.bridge_nodes:List[int] = []
         self.initial_population:Dict[int, Tuple[List[int], float]] = {} 
-        self.cue_groups = {} 
         self.depot_id = depot_id
         self.tr_times:Dict[(Tuple[int,int],int)] = {}
         self.cost = {}
         self.R_points = []
-        # self.paths =  {(id,agent):[] for agent in self.employed_agents}
         self.problem = pl.LpProblem()
         self.R = defaultdict(float) 
         self.sinr = defaultdict(float)
@@ -80,11 +77,12 @@ class Cluster:
         else: 
             best_agent = min(self.initial_population.items(), key=lambda item: item[1][1])
             best_path = best_agent[1][0]
+            num_travels = len(best_path) - 1
             if hasattr(builder, 'get_travel_time'):
                 total_time = math.ceil(sum(
                     builder.get_travel_time(i, i+1, best_path)
                     for i in range(len(best_path)-1)
-                ))
+                )) + num_travels 
 
         if total_time == 0: 
             logger.error(f"Total time is 0 for cluster {self.id}")
@@ -98,7 +96,8 @@ class Cluster:
         V_nodes = list(self.nodes_dict.keys())
 
         # Set the decision variables 
-        self.create_problem() 
+        self.create_problem(scenario=scenario) 
+        self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
 
         # Set the loss function 
         if scenario == 'energy':
@@ -106,6 +105,7 @@ class Cluster:
                 distance=self.cost['distance'],
                 energy=self.cost['energy'], 
                 time=self.cost['travel_time'],
+                wait_energy=builder.normalized_coverage_energy
             )
             logger.info(f"Objective function set for energy scenario in cluster {self.id}")
         elif scenario == 'coverage':
@@ -117,7 +117,6 @@ class Cluster:
             logger.error("Builder does not have get_travel_time method") 
             raise ValueError("Builder does not have get_travel_time method")    
         
-        self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
         
         if not hasattr(builder, 'set_constraints_for_multi_agent'):
             logger.error("Builder does not have set_constraints_for_multi_agent method") 
@@ -130,7 +129,7 @@ class Cluster:
         #     pass 
         builder.set_constraints_for_multi_agent(self)
         builder.solve_problem(self) 
-        builder.create_solution(self)
+        return builder.create_solution(self)
 
 
     def get_solution(self): # Test Trial #TODO: Implement this to extract the solution from the MILP problem. 
@@ -205,31 +204,44 @@ class Cluster:
 
         self.active_agents = pl.LpVariable.dicts("active_agents", (v for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
 
+        self.return_step = pl.LpVariable.dicts("return_step", (v for v in self.employed_agents), lowBound=0, upBound=self.timeframe[-1], cat='Integer')
 
-    def set_objective(self, distance, energy, time): 
+        self.visit = pl.LpVariable.dicts("visit", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
+
+        self.visit_miss = pl.LpVariable.dicts("visit_miss", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
+
+
+    def set_objective(self, distance, energy, time, wait_energy): 
         V_nodes = list(self.nodes_dict.keys())
-        penalty = 0.8
+        penalty = 1000
         alpha = 0.3
         self.problem.setObjective(
             pl.lpSum(
-                penalty * self.y[j,v] + 
-                alpha * self.y[j,v] * self.R_points[j] +
-                distance[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
-                + energy[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
-                + time[self.nodes_dict[i]][self.nodes_dict[j]-1] * self.t[i,j,v,t]
-                for t in self.timeframe
-                for i in V_nodes
+                # penalty * self.y[j,v] + 
+                # alpha * self.y[j,v] * self.R_points[j] +
+                penalty * self.visit_miss[j, v] 
                 for j in V_nodes
-                if i != j 
                 for v in self.employed_agents
+            ) + pl.lpSum(
+                    self.t[i,j,v,t] * energy[self.nodes_dict[i]][self.nodes_dict[j]-1]/self.tr_times[(i,j)] +
+                    self.t[i,j,v,t] * distance[self.nodes_dict[i]][self.nodes_dict[j]-1]/self.tr_times[(i,j)]
+                    for i in V_nodes
+                    for j in V_nodes if i != j
+                    for t in self.timeframe
+                    for v in self.employed_agents
+            ) + pl.lpSum(
+                    self.wait[v, t] * wait_energy
+                    for v in self.employed_agents
+                    for t in self.timeframe
             )
         )
+        
 
 
     def set_coverage_objective(self)->None:
         V_nodes = list(self.nodes_dict.keys()) 
         self.problem.setObjective(
-           pl.lpSum(self.R[i] * self.wait[v, t]
+           pl.lpSum(self.R[i] * self.visit[i, v]
                    for i in V_nodes
                    for v in self.employed_agents
                    for t in self.timeframe)

@@ -10,6 +10,7 @@ from typing import Any, List, Dict, Union, Tuple, Mapping
 import sys
 import math
 import pdb
+import time
 import pulp as pl 
 import numpy as np 
 import pandas as pd
@@ -31,12 +32,13 @@ class Builder(MVMTSPConfig):
         self.constraints:List[str] = config['constraints']
         self.V:pd.DataFrame = pd.DataFrame() 
         self.v:int = 0 
-        self.best_path:List[int] = [] 
-        self.TimeFrame:List[int] = list(range(0, trials, 1))
         self.metrics = Metrics(verbose=True) 
-        self.clusters_times:Dict[int, int] = {} 
         self.recharge_time_window:int = 5 #descrete time steps
         self.scenario:str = scenario 
+        self.num_constraints = 0 
+        self.variables_count = 0
+
+
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
@@ -150,7 +152,7 @@ class Builder(MVMTSPConfig):
 
     @timeout_decorator.timeout(3600)
     def solve_problem(self, cluster:Any):
-        cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
+        cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
     
     
     def preprocess(self, distances_path, energies_path, nodes_path, agents, customers_path, ground_users, max_battery):
@@ -171,20 +173,29 @@ class Builder(MVMTSPConfig):
         return super().set_memory_limit(max_memory)
     
     
-    def create_solution(self, cluster:Any):
+    def create_solution(self, cluster:Any)->Dict[str,List[int]]:
         logger.debug(f"Cluster Time Frame is {cluster.timeframe}") 
         if pl.LpStatus[cluster.problem.status] != 'Optimal': 
             logger.info("❌ Problem is not optimal, returning None...")
             sys.exit(1)
 
         logger.debug(f"Cluster bridge nodes are {cluster.bridge_nodes}")
-        
+
         employed_agents = ["Agent_" + str(i) for i in cluster.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
         reverse_dict = {v: k for k, v in cluster.nodes_dict.items()}
         paths = {agent: [] for agent in employed_agents}
         max_iterations = len(cluster.nodes_dict.keys())*len(cluster.timeframe) + 1 + self.recharge_time_window
-        V_nodes = list(cluster.nodes_dict.keys())
+
+        visit_nodes = defaultdict(list)
+        for i in cluster.nodes_dict.keys(): 
+            for k,v in list_of_agents.items(): 
+                if cluster.visit[i,v].varValue == 1:
+                    visit_nodes[k].append(cluster.nodes_dict[i])
+
+        for agent in list_of_agents.keys():
+            if len(visit_nodes[agent]) != len(cluster.nodes_dict.keys()):
+                logger.debug(f"❌ Based on Cluster.Visits Agent {agent} has not visited all nodes, returning None...")
 
         for agent_name, agent_id in list_of_agents.items():
             edges = set()
@@ -218,7 +229,6 @@ class Builder(MVMTSPConfig):
                                 timestep,
                             )
 
-                          
                             if triplet in edges:
                                 logger.debug(f"Edge {triplet[0], triplet[1]} already seen for agent {agent_name}")
                                 continue
@@ -232,49 +242,11 @@ class Builder(MVMTSPConfig):
                                 wait_triplet = (cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], wait_step)
                                 paths[agent_name].append(wait_triplet)
 
-
-
-
                             edges.add(triplet)
                             current_node = reverse_dict[triplet[1]]
                             step = timestep + duration +1
                             found_next = True
                             break  # next timestep
-                                
-                        # if cluster.t[current_node, next_node, agent_id, timestep].varValue != 1: continue
-                        
-                        # logger.debug(f"Agent_{agent_id} | Cluster_X->[{cluster.nodes_dict[current_node],cluster.nodes_dict[next_node]}]")
-                        # logger.debug(f"Agent_{agent_id} | Cluster_T->[{cluster.nodes_dict[current_node],cluster.nodes_dict[next_node],timestep}]")
-                        
-
-                    #     triplet = (
-                    #         cluster.nodes_dict[current_node],
-                    #         cluster.nodes_dict[next_node],
-                    #         timestep
-                    #     )
-                    #     break
-                    
-                    # print(f"Step: {step} | Triplet: {triplet}")
-                    
-                    # if triplet == (0,0,0):
-                    #     logger.debug(f"Triplet is empty for agent {agent_name}")
-                    #     continue
-                    
-                    # if triplet in edges:
-                    #     logger.debug(f"Edge {triplet[0], triplet[1]} already seen for agent {agent_name}")
-                    #     # continue
-
-                    # # duration = cluster.tr_times[(current_node,next_node)]
-            
-                    # edges.add((triplet))
-                    # paths[agent_name].extend(([triplet]))
-                    
-                    # current_node = reverse_dict[triplet[1]]
-                    # step = timestep + 1
-                    # found_next = True
-
-
-                    # break
 
                     if found_next:
                         break
@@ -292,16 +264,15 @@ class Builder(MVMTSPConfig):
                 paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
         print(paths) 
         logger.debug(f"✅ Solutions created for {len(cluster.employed_agents)} agents")
-        self.moment += len(cluster.nodes_dict.keys()) + 1 + self.recharge_time_window
-        self.clusters_times[cluster.id] = self.moment 
-
+        
         memory_usage = self.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
         logger.info("✅ Optimal Solution Found!!!!!")
-
+        self.num_constraints += len(cluster.problem.constraints)
+        self.variables_count += len(cluster.problem.variables())
         self.validate_paths(paths=paths, nodes_dict=cluster.nodes_dict, cluster=cluster)
         logger.debug("✅ Solutions validated successfully...")
-
+        return paths 
 
     def createGeoDataset(self, data):
         return super().createGeoDataset(data)
@@ -381,17 +352,20 @@ class Builder(MVMTSPConfig):
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
-
                 paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
                     cluster=cluster,
                       cluster_id=cluster_tuple[0],
                         assignment=agents,
                           depot_id=cluster_tuple[1])
                 pbar.update(1)
+                time.sleep(2)
                 logger.debug(f"✅ Cluster {cluster_tuple[0]} solved successfully...")
         
         # Step 6: Agent Generation for simulation
-        
+        self.metrics.end_performance_timer() 
+        logger.info("Total Number of Constraints : {}".format(self.num_constraints))
+        logger.info("Total Number of Variables : {}".format(self.variables_count))
+        pdb.set_trace()
         # Step 6: Flatten all the paths to form a single path for each agent
         paths = self.flatten_paths_on_time(paths)  
        
@@ -439,7 +413,8 @@ class Builder(MVMTSPConfig):
             cluster=cluster, 
             id=cluster_id, 
             assignment=assignment, 
-            depot_id=depot_id
+            depot_id=depot_id, 
+            max_battery=self.max_battery
         )
 
         context = cluster_object.get_cluster_content(
@@ -468,23 +443,19 @@ class Builder(MVMTSPConfig):
         if self.scenario == 'coverage':
             self.get_cluster_coverage(cluster_object)
 
-        # cluster_object.R_points = np.ones(len(cluster_object.nodes_dict))
+        cluster_object.R_points = list(np.ones(len(cluster_object.nodes_dict)))
         # Step 4: Create and configure the optimization problem 
         try: 
-            cluster_object.problem_formulation(builder=self, scenario=self.scenario) 
+            paths = cluster_object.problem_formulation(builder=self, scenario=self.scenario) 
         except Exception as e:
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5 extract solution 
-        paths = cluster_object.get_solution()
-
+        # paths = cluster_object.get_solution()
         # Step 6: Add the recharge phase & synchronize agents 
         paths = self.synchronize_agent_paths(paths, cluster_object, depot_id)
-        
-        self.moment = len(cluster_object.nodes_dict.keys()) + 1 + self.recharge_time_window
-        self.clusters_times[cluster_id] = self.moment
-
+        deallocate_memory(cluster_object)
         return paths 
 
 
@@ -508,7 +479,6 @@ class Builder(MVMTSPConfig):
             "const_30":constraint_30, "const_31":constraint_31,
             "const_32":constraint_32, "const_33":constraint_33,
             "const_34":constraint_34, "const_35":constraint_35
-
         }
 
         logger.info(f"Setting constraints for multi-agent problem...")
@@ -539,8 +509,6 @@ class Builder(MVMTSPConfig):
                 except Exception as e:
                     logger.exception(f"❌ Error setting constraint {const} for cluster: {e}")
                     raise ValueError(f"Error setting constraint {const} for cluster")
-
-
 
 
     def get_depot_index(self, ordered_nodes, k): 
@@ -580,12 +548,10 @@ class Builder(MVMTSPConfig):
                 if keypoint in key_points and target_node != nodes_dict[depot_ind] and source_node!=nodes_dict[depot_ind]: 
                     logger.debug(f"Collision: Agent {agent_id} and Agent {key_points[keypoint]} from node {source_node} at node {keypoint[0]} at time {keypoint[1]}")
 
-
                 key_points[keypoint] = agent_id
                 
                 if edge in seen_edges: 
                     logger.debug(f"Edge {edge} already seen for agent {agent_id}")
-                    
 
                 seen_edges.add(edge)
                 next_step = path[i+1]
@@ -616,6 +582,9 @@ class Builder(MVMTSPConfig):
 
             if len(visit_nodes) != len(nodes_dict)-1 : 
                 logger.debug(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
+
+            logger.info(f"Agent {agent_id} | Visited_nodes == > {sorted(visit_nodes)} | Cluster_nodes == > {cluster.nodes_dict.values()} | Bridge Nodes == > {cluster.bridge_nodes}")
+
 
         agent_ids = list(all_paths.keys()) 
         for i in range(len(agent_ids)): 
@@ -666,7 +635,14 @@ class Builder(MVMTSPConfig):
     
 
     def synchronize_agent_paths(self, paths:Dict ,cluster:Any, depot_id:int)->Dict: 
-        
+        tmp_time_frame = 1000000000
+        tmp_agent = None
+        for agent, path in paths.items():
+            if len(path) < tmp_time_frame:
+                tmp_time_frame = (len(path))
+                tmp_agent = agent
+        logger.info(f"The shortest path length is {tmp_time_frame} for agent {tmp_agent}")
+        cluster.timeframe = list(range(0,tmp_time_frame))
         for agent, path in paths.items(): 
             for t in range(self.recharge_time_window): 
                 if len(path) < cluster.timeframe[-1]: 

@@ -5,6 +5,7 @@ import numpy as np
 import networkx as nx 
 from typing import Any, List, Dict, Union
 from dummy_app.models.central_hubs import CentralHub
+from dummy_app.tools.graphs import is_eulerian_digraph
 import logging 
 
 
@@ -43,6 +44,11 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
         nodes=nodes_dict,
         weights=get_weights() 
     )
+
+    try:
+        is_eulerian_digraph(graph)
+    except:
+        raise ValueError("Graph is not eulerian")
 
     hub = CentralHub()
     
@@ -97,7 +103,7 @@ def jupyter_logger(level=logging.INFO)->logging.StreamHandler:
 
 
 def create_model_graph(cost:Dict[str,Dict[int,np.ndarray]], nodes:Dict[int,int], weights): 
-    graph = nx.Graph()
+    graph = nx.DiGraph()
     for source_node in nodes.values(): 
         for target_node in nodes.values(): 
             if source_node == target_node: continue 

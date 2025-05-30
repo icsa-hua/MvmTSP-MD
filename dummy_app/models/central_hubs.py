@@ -13,18 +13,16 @@ class CentralHub:
         self.distance_centroid:np.ndarray = np.array([])   
         self.number_allowed_visits:Dict[int,int] = {}
 
-    def calculate_betweeness(self, G:nx.Graph, cluster_nodes:List[int], nodes_dict, cost_dist)->None:
-
+    def calculate_betweeness(self, G:nx.DiGraph, cluster_nodes:List[int], nodes_dict, cost_dist)->None:
+        if not nx.is_strongly_connected(G):
+            print("Directed graph is not strongly connected.")
+            return
+        
         if len(cluster_nodes) < 25: 
             centrality = nx.closeness_centrality(G, distance='cost')
         else: 
             # TODO: Change this one to walk centrality for larger graphs. 
             centrality = nx.betweenness_centrality(G, weight='cost')
-        
-        if not nx.is_connected(G):
-            print("Graph is not connected.")
-            return 
-        
         
         self.betweeness = np.array([centrality[nodes_dict[n]] for n in cluster_nodes]).reshape(-1, 1)
         
@@ -55,7 +53,7 @@ class CentralHub:
 
             
 
-    def get_bridge_nodes(self, graph:nx.Graph, cluster_nodes:List[int], cost_dist:Dict[int,np.ndarray], nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
+    def get_bridge_nodes(self, graph:nx.DiGraph, cluster_nodes:List[int], cost_dist:Dict[int,np.ndarray], nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
         self.calculate_betweeness(graph, cluster_nodes, nodes_dict,cost_dist)
         self.get_node_with_min_total_distance(cluster_nodes, cost_dist, nodes_dict)
         self.normalize_values() 

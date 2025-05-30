@@ -6,7 +6,7 @@ import geopandas as gpd
 from geopy.distance import geodesic
 
 # Generate realistic latitude and longitude points (e.g., around Berlin)
-num_areas = 100
+num_areas = 50
 np.random.seed(0)
 latitudes = np.random.uniform(52.3, 52.6, num_areas)
 longitudes = np.random.uniform(13.2, 13.6, num_areas)
@@ -71,8 +71,9 @@ for poly in regions:
 
 # Plot centroids with altitude
 for i, (lon, lat) in enumerate(centroids):
-    ax.scatter(lon, lat, altitudes[i], c='red', marker='x', s=50)
-    ax.text(lon, lat, altitudes[i] + 5, f'A{i}', color='black')
+    ax.scatter(lon, lat, 0, c='red', marker='x', s=50)
+    ax.scatter(lon, lat, altitudes[i], c='black', s=30)
+    ax.text(lon, lat, 5, f'A{i}', color='black')
 
 # Plot user points at ground level (z=0)
 for (x, y) in user_points:
@@ -84,7 +85,7 @@ for i in range(len(centroids)):
         x_vals = [centroids[i][0], centroids[j][0]]
         y_vals = [centroids[i][1], centroids[j][1]]
         z_vals = [altitudes[i], altitudes[j]]
-        ax.plot(x_vals, y_vals, z_vals, 'blue', alpha=0.3)
+        ax.plot(x_vals, y_vals, z_vals, 'blue', alpha=0.1)
 
 # Axis labels
 ax.set_xlabel('Longitude')
