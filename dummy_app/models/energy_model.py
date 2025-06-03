@@ -60,7 +60,6 @@ class DroneEnergyModel:
         
         E_asc = E_hor + E_u + E_r # This is in Joules
 
-        logger.info(f"E_hor {E_hor} | E_r {E_r} | E_u {E_u}")
         return E_asc
         
 
@@ -68,6 +67,7 @@ class DroneEnergyModel:
         T = self.g * self.mass 
         P_hov = ((T**(3/2))/np.sqrt(2*self.num_rot*self.p*self.alpha)) 
         E_hov = P_hov * self.dt
+        
         return E_hov
         
 
@@ -76,6 +76,7 @@ class DroneEnergyModel:
         motor_speed_multiplier = 10.5 
         P_total = self.min_hover + (motor_speed_multiplier*altitude/100) + P_BS # In W
         E_cov = P_total * self.dt 
+        
         return E_cov
         
     
@@ -131,10 +132,11 @@ class DroneEnergyModel:
         E_r = (self.lambda_coef * self.p * self.alpha * (self.horizontal_velocity**3) * dt_hor) / 8  # J
 
         E_move = E_r + E_hor
+
         return E_move
 
 
     def horizontal_distance(self,current_node_id,next_node_id, distance_matrix):
-        return 1000 * distance_matrix[current_node_id, next_node_id]
+        return 1000 * distance_matrix[current_node_id, next_node_id] # from km to meters
 
 

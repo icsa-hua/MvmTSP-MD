@@ -13,8 +13,12 @@ from collections import defaultdict
 from scipy.spatial.distance import pdist, squareform 
 from geopy.distance import distance
 from geopy import Point 
+from pyproj import Transformer 
 
+from dummy_app.tools.logger import logger 
 
+transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
+transformer_to_latlon = Transformer.from_crs("EPSG:32633", "EPSG:4326", always_xy=True)
 
 
 class Map: 
@@ -86,38 +90,91 @@ class Map:
         
 class MapGenerator(Map): 
 
-    def __init__(self, num_areas:int=30, users_per_area:int=5, low_lat:float=52.5, high_lat:float=52.6, low_long:float=13.5, high_long:float=13.6, seed:int=0): 
-
+    def __init__(self, ax, num_areas:int=30, users_per_area:int=5, lat:float=13.5, lon:float=33.3, seed:int=0): 
+        
+        logger.debug("Map Generator initialized...")
+        # Transform lon and lat into UTM for better point management. 
+        self.lat, self.lon = transformer_to_utm.transform(lon,lat)
+        self.lat_wgs84 = lat 
+        self.lon_wsg84 = lon 
         self.num_areas = num_areas 
-        self.low_lat = low_lat
-        self.high_lat = high_lat
-        self.low_long = low_long
-        self.high_long = high_long
         self.seed = seed 
         self.vor_map = None
         self.users_per_area = users_per_area
+        self.ax = ax 
+        
+    
+    def create_environment(self, show_map:bool=False, show_3d_map:bool=False): 
+        try: 
+            # Generate points in both utm
+            points_utm = self.generate_points()
 
+            # Fixed plot window based on the UTM coords 
+            self.set_boundaries(points_utm)
+
+            # Voronoi Map returns applicable regions to generate user points 
+            regions, centroids, user_points = self.voronoi_polygons()
+
+            # Transform centroids into WGS84 
+            centroids_wgs84 = np.array([transformer_to_latlon.transform(lon,lat) for lon, lat in centroids])
+            
+            # calculate distances in both UTM and WGS84
+            distance_matrix_utm = distance_matrix(centroids, centroids)
+            distance_matrix_wgs84 = squareform(pdist(centroids_wgs84, lambda u, v: geodesic(u, v).km))
+            
+            # Get central areas based on WGS84 coordinates 
+            depots = self.get_central_depots(sites=centroids_wgs84)
+            all_user_points = [point for points in user_points.values() for point in points]
+        
+        except Exception as E: 
+            logger.exception("Raised exception {E}.")
+
+        if show_map: 
+            self.plot_map(
+                ax = self.ax, 
+                regions=regions, 
+                centroids=centroids, 
+                user_points=all_user_points
+            )
+                          
+        if show_3d_map: 
+            self.plot_map_3D(
+                regions=regions, 
+                centroids=centroids, 
+                user_points=all_user_points
+            )
+
+        return regions, centroids, user_points, depots, distance_matrix_wgs84, all_user_points
+        
 
     def generate_points(self): 
+        
+        # Generate points based on UTM Lat Lon coordinates 
         np.random.seed(self.seed) 
-        latitudes = np.random.uniform(self.low_lat, self.high_lat, self.num_areas)
-        longitudes = np.random.uniform(self.low_long, self.high_long, self.num_areas)
-        self.points = np.column_stack((longitudes, latitudes))
-        self.vor_map = Voronoi(self.points) 
-        self.points = pd.DataFrame(self.points, columns=['X_coords', 'Y_coords'])
-        self.set_boundaries()
-
+        latitudes = self.lat + np.random.uniform(-1500, 1500, self.num_areas)
+        longitudes = self.lon + np.random.uniform(-1500, 1500, self.num_areas)        
+        
+        # Points in UTM format to handle user generation and voronoi map more easily
+        points = np.column_stack((longitudes, latitudes))
+        self.vor_map = Voronoi(points) 
+        points_utm = pd.DataFrame(points, columns=['X_coords', 'Y_coords'])
+        
+        return points_utm
     
+
     def generate_bb(self): 
-        low_lat = self.low_lat-0.05
-        low_long = self.low_long - 0.05 
-        high_lat = self.high_lat+0.05 
-        high_long = self.high_long+0.05 
+
+        # For bb generation lat/lon are in UTM 
+        low_lat = self.lat - 1600 
+        high_lat = self.lat + 1600 
+        low_lon = self.lon - 1600 
+        high_lon = self.lon + 1600 
+        
         return Polygon([
-            (low_long, low_lat), 
-            (high_long, low_lat), 
-            (high_long, high_lat), 
-            (low_long, high_lat)
+            (low_lon, low_lat), 
+            (high_lon, low_lat), 
+            (high_lon, high_lat), 
+            (low_lon, high_lat)
         ])
     
 
@@ -125,7 +182,6 @@ class MapGenerator(Map):
 
         if self.vor_map is None:
            raise ValueError("Voronoi map is not initialized. Call 'voronoi_tessellation()' first.")
-        
 
         bbox = self.generate_bb() 
         regions = [] 
@@ -136,21 +192,17 @@ class MapGenerator(Map):
             region = self.vor_map.regions[region_idx]
             if not -1 in region and len(region) > 0:
                 poly_points = [self.vor_map.vertices[i] for i in region]
+                
                 poly = Polygon(poly_points)
                 poly = poly.intersection(bbox)
                 if poly.is_empty or not poly.is_valid or poly.area == 0: continue
 
                 regions.append(poly)
-                centroids.append(poly.centroid.coords[0])
+                centroids.append(poly.centroid.coords[0]) # This is in UTM 
                 user_points[unified_id]= self.generate_users(poly, user_points[unified_id]) 
                 unified_id += 1 
+
         return regions, centroids, user_points
-
-
-    def calculate_centroid_distance(self, centroids): 
-
-        dist_matrix = squareform(pdist(centroids, lambda u, v: geodesic(u, v).km))
-        return dist_matrix
 
 
     def generate_users(self, poly, user_points):
@@ -174,8 +226,6 @@ class MapGenerator(Map):
         
         
     def plot_map(self, ax, regions, centroids, user_points): 
-        # Plot results
-        # fig, ax = plt.subplots(figsize=(10, 10))
 
         if self.vor_map is None:
            raise ValueError("Voronoi map is not initialized. Call 'voronoi_tessellation()' first.")
@@ -183,6 +233,7 @@ class MapGenerator(Map):
         for poly in regions:
                     x, y = poly.exterior.xy
                     ax.fill(x, y, alpha=0.3, edgecolor='black')
+        
         x = [point[0] for point in centroids]
         y = [point[1] for point in centroids]
         labels = [f"A{i}" for i,_ in enumerate(centroids) ]
@@ -254,15 +305,35 @@ class MapGenerator(Map):
         avg_distances = np.mean(dist_matrix, axis=1)
         central_indices = np.argsort(avg_distances)[:number_of_areas]
         return central_indices
+    
+    
+    def clip_voronoi_to_box(self)->Dict[int, Polygon]: 
+        bounding_box = self.generate_bb()
+        if self.vor_map is None:
+            raise ValueError("Voronoi map is not initialized. Call 'voronoi_tessellation()' first.")
+        
+        regions = {} 
+        for i, region in enumerate(self.vor_map.regions): 
+            if -1 not in region and region: 
+                polygon = Polygon(self.vor_map.vertices[v] for v in region)
+                clipped = polygon.intersection(bounding_box)
+                if not clipped.is_empty:
+                    regions[i] = clipped
+        
+        return regions 
 
 
-    def set_boundaries(self, buffer_m:int=200): 
-
+    def set_boundaries(self, points_utm, buffer_m:int=200): 
+        self.MAX_X = points_utm['X_coords'].max() 
+        self.MAX_Y = points_utm['Y_coords'].max() 
+        self.MIN_Y = points_utm['Y_coords'].min()
+        self.MIN_X = points_utm['X_coords'].min()
+        return
         lat_min = self.points['Y_coords'].min()
         lat_max = self.points['Y_coords'].max()
         lon_min = self.points['X_coords'].min()
         lon_max = self.points['X_coords'].max()
-
+       
         # Create bounding points
         south = distance(meters=buffer_m).destination(Point(lat_min, (lon_min + lon_max) / 2), bearing=180)
         north = distance(meters=buffer_m).destination(Point(lat_max, (lon_min + lon_max) / 2), bearing=0)

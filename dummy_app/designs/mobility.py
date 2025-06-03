@@ -1,15 +1,19 @@
 import numpy as np 
 import pandas as pd 
 import pdb
-from typing import Union, Any, Tuple
+from typing import Union, Any, Tuple, Dict
 from pathlib import Path
 import matplotlib.pyplot as plt
-from dummy_app.designs.voronoi_map import Map
 from scipy.spatial import Voronoi, voronoi_plot_2d 
 from shapely.geometry import Point
+
 from geopy.distance import distance
 from geopy import Point as GeoPoint
+
 from pyproj import Transformer
+
+from dummy_app.designs.voronoi_map import Map
+from dummy_app.tools.logger import logger 
 
 """ 
 This function generates uniform random values between MIN and MAX for each element 
@@ -26,8 +30,8 @@ class GroundUser:
         self.theta:float = 0.0 
         self.angle_mean:float = 0.0
         self.current_area:int = 0 
-        self.distance_metric:str = 'euclidean'  # Default distance metric
     
+
     def move(self, map_obj:Map)->Point: 
 
         self.x += self.velocity * np.cos(self.theta)
@@ -45,13 +49,19 @@ class GroundUser:
             self.angle_mean = -self.angle_mean
 
         # Update region 
-        point = Point(self.x, self.y) 
-        return point 
+        return Point(self.x, self.y) 
     
 
 class GroundUserGroup: 
 
-    def __init__(self, mobility_env, map_obj:Map, alpha:float, mean_velocity:float=1.0, sigma:float=0.5)->None:
+    def __init__(
+        self,
+        mobility_env:Any,
+        map_obj:Map,
+        alpha:float,
+        mean_velocity:float=1.0,
+        sigma:float=0.5
+    )->None:
         self.mobility_env = mobility_env
         self.map_obj = map_obj
         self.alpha = alpha
@@ -61,12 +71,11 @@ class GroundUserGroup:
         self.alpha2 = 1.0 - self.alpha
         self.alpha3 = np.sqrt(1.0 - self.alpha * self.alpha) * self.sigma
 
-        self.group = {}
+        self.group: Dict[int, list[GroundUser]] = {}
         self.fig = self.mobility_env.fig 
         self.ax = self.mobility_env.ax
         self.scatter = None 
         self.process = self.mobility_env.env.process(self.simulate())
-        self.distance_metric = 'euclidean'
 
 
     def load_users_from_csv(self, data_path:Union[str,Path], customers_path:Union[Path,str])->None: 
@@ -74,29 +83,24 @@ class GroundUserGroup:
         customers = pd.read_csv(customers_path)
 
         df = df.set_index(customers['Customers ids'])
-        df.columns = [i for i in range(1, len(df.columns)+1)]
+        df.columns = list(range(1, len(df.columns)+1))
 
         self.group = {area_id : [] for area_id in df.index}
         theta = U(0, 2*np.pi, df)
-        theta = [theta[i][0] for i in range(len(theta))]
     
-        for idx in df.index: 
-            counter = 0 
-            for x_val, y_val in zip(df.loc[idx, 1:10], df.loc[idx,11:20]): 
-                user = GroundUser(x_val, y_val, self.mean_velocity)
-                user.theta = theta[counter]
+        for idx in df.index:
+            for i in range(10):  # Assumes 10 users per area: x in cols 1–10, y in 11–20
+                user = GroundUser(df.loc[idx, i + 1], df.loc[idx, i + 11], self.mean_velocity)
+                user.theta = theta[idx][0]  # All users in area share same theta
                 user.angle_mean = user.theta
+                user.current_area = idx
+                self.group[idx].append(user) 
 
-                user.current_area = idx 
-                self.group[idx].append(user)
-                counter += 1  
+        
 
 
     def get_generated_users(self, user_points)->None:
-        self.distance_metric = 'geodesic'
-
-        df = pd.DataFrame(user_points)
-        df = df.T
+        df = pd.DataFrame(user_points).T
 
         self.group = {area_id : [] for area_id in user_points.keys()}
         theta = U(0, 2*np.pi, df)
@@ -106,20 +110,11 @@ class GroundUserGroup:
                 user = GroundUser(x_val, y_val, self.mean_velocity)
                 user.theta = theta[area_id][i]
                 user.angle_mean = user.theta
-                user.distance_metric = self.distance_metric
                 user.current_area = area_id
                 self.group[area_id].append(user)
 
 
     def get_coords(self)->np.ndarray: 
-
-        if self.distance_metric == 'geodesic':
-            # Convert to GeoPoint for geodesic distance calculations
-            x = [float(user.x) for area in self.group.values() for user in area]
-            y = [float(user.y) for area in self.group.values() for user in area]
-
-            return np.column_stack((x, y))
-        
         x = [user.x for area in self.group.values() for user in area]
         y = [user.y for area in self.group.values() for user in area]
         return np.column_stack((x,y))

@@ -14,6 +14,6 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="", 
     packages=setuptools.find_packages(include=['dummy_mvmtsp', 'dummy_mvmtsp.*']),
-    # install_requires=requirements,
+    install_requires=requirements,
     python_requires='>=3.9'
 )

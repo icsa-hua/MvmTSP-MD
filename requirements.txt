@@ -18,3 +18,6 @@ requests
 seaborn 
 python-gnupg 
 ipykernel
+geopy 
+notebook
+jupyterlab

@@ -3,10 +3,11 @@ import sys
 import pandas as pd 
 import numpy as np 
 import networkx as nx 
-from typing import Any, List, Dict, Union
+import logging 
+
+from typing import Any, List, Dict, Union, Tuple
 from dummy_app.models.central_hubs import CentralHub
 from dummy_app.tools.graphs import is_eulerian_digraph
-import logging 
 
 
 def deallocate_memory(variable:Any)->None:
@@ -136,3 +137,46 @@ def get_session_duration(paths):
 
     session_duration = max(agent_times)
     return session_duration
+
+
+def calculate_totals_from_paths(
+    paths: Any,
+    distance_costs: np.ndarray,
+    energy_costs: np.ndarray,
+    time_costs: np.ndarray
+) -> Tuple:
+    """
+    Aggregate total distance, energy, and time across all agents' paths.
+    """
+    total_distance = 0.0
+    total_energy = 0.0
+    total_time = 0.0
+
+    for agent in paths:
+        for current_node, next_node, _ in paths[agent]:
+            total_distance += distance_costs[current_node, next_node]
+            total_energy += energy_costs[current_node, next_node]
+            total_time += time_costs[current_node, next_node]
+
+    return total_distance, total_energy, total_time
+
+
+
+def extract_per_agent_metrics(
+    paths: Any,
+    distance_costs: np.ndarray,
+    energy_costs: np.ndarray,
+    time_costs: np.ndarray
+) -> List[Dict[str, float]]:
+    """
+    Return individual distance, energy, and time for each agent's path.
+    """
+    results = []
+    for agent in paths:
+        dist = sum(distance_costs[i, j] for i, j, _ in agent)
+        energy = sum(energy_costs[i, j] for i, j, _ in agent)
+        duration = sum(time_costs[i, j] for i, j, _ in agent)
+
+        results.append({'distance': dist, 'energy': energy, 'time': duration})
+
+    return results

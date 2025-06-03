@@ -1,5 +1,5 @@
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
-from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+from dummy_app.tools.common import deallocate_memory, extract_per_agent_metrics, calculate_totals_from_paths
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
 from dummy_app.designs.agents import TSPAgent 
@@ -25,9 +25,8 @@ from geopy.distance import geodesic
 class Builder(MVMTSPConfig):
 
     def __init__(self, config:Dict[str,Any], trials:int, scenario:str='energy'): 
-        super().__init__(config)
+        super().__init__()
         
-        self.allow_regionalization:bool = config['regionalization']
         self.enable_ga:bool = config['genetic_algorithm']
         self.constraints:List[str] = config['constraints']
         self.V:pd.DataFrame = pd.DataFrame() 
@@ -37,7 +36,7 @@ class Builder(MVMTSPConfig):
         self.scenario:str = scenario 
         self.num_constraints = 0 
         self.variables_count = 0
-
+        self.Time = 0 
 
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
@@ -162,8 +161,8 @@ class Builder(MVMTSPConfig):
         return data 
 
 
-    def preprocess_generated_data(self, distance_matrix, regions, centroids, user_points, depots, agents, v_ver, v_hor, max_battery):
-        data = super().preprocess_generated_data(distance_matrix, regions, centroids, user_points, depots, agents, v_ver, v_hor, max_battery)
+    def preprocess_generated_data(self, distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude):
+        data = super().preprocess_generated_data(distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude)
         self.depots_for_agents = self.assign_agents_to_areas(len(self.agents), self.depots)
         logger.debug("✅ Preprocessing of generated data completed successfully...")
         return data 
@@ -191,7 +190,7 @@ class Builder(MVMTSPConfig):
         for i in cluster.nodes_dict.keys(): 
             for k,v in list_of_agents.items(): 
                 if cluster.visit[i,v].varValue == 1:
-                    visit_nodes[k].append(cluster.nodes_dict[i])
+                    visit_nodes[k].append(int(cluster.nodes_dict[i]))
 
         for agent in list_of_agents.keys():
             if len(visit_nodes[agent]) != len(cluster.nodes_dict.keys()):
@@ -211,12 +210,21 @@ class Builder(MVMTSPConfig):
                 for timestep in cluster.timeframe: 
                     if timestep < step: continue 
 
+                    
                     for next_node in cluster.nodes_dict.keys(): 
                         if next_node == current_node: continue 
                         if cluster.x[current_node, next_node, agent_id].varValue != 1: continue 
                         
                         duration = cluster.tr_times[(current_node, next_node)]
+                        # duble = (cluster.nodes_dict[current_node],cluster.nodes_dict[next_node])
+                        # paths[agent_name].append(duble)
                         
+                        # if duble in edges: 
+                        #     logger.debug(f"Edge {duble[0],duble[1]} already visited")
+                        
+                        # current_node = reverse_dict[duble[1]]
+                        # found_next = True
+
                         if all(
                             cluster.t[current_node, next_node, agent_id, t].varValue == 1
                             for t in range(timestep, timestep + duration)
@@ -250,7 +258,7 @@ class Builder(MVMTSPConfig):
 
                     if found_next:
                         break
-                            
+                           
                 if not found_next:
                     logger.warning(f"❌ No valid move found for agent {agent_name} at iteration {iteration}. Ending early.")
                     break
@@ -260,16 +268,25 @@ class Builder(MVMTSPConfig):
 
                 iteration += 1
             # Force return to depot if path doesn't end there
-            if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
-                paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
+            # if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
+            #     paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
         print(paths) 
         logger.debug(f"✅ Solutions created for {len(cluster.employed_agents)} agents")
+        unique_nodes_among_paths = set()
         
+        for path in paths: 
+            for duble in paths[path]:
+                if duble[0] not in unique_nodes_among_paths: 
+                    unique_nodes_among_paths.add(duble[0]) 
+                if duble[1] not in unique_nodes_among_paths:  
+                    unique_nodes_among_paths.add(duble[1])
+        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(cluster.nodes_dict.values())}")
         memory_usage = self.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
         logger.info("✅ Optimal Solution Found!!!!!")
         self.num_constraints += len(cluster.problem.constraints)
         self.variables_count += len(cluster.problem.variables())
+        logger.info(f"Cluster has nodes _dict {cluster.nodes_dict.values()} with length {len(cluster.nodes_dict.values())}")
         self.validate_paths(paths=paths, nodes_dict=cluster.nodes_dict, cluster=cluster)
         logger.debug("✅ Solutions validated successfully...")
         return paths 
@@ -278,7 +295,7 @@ class Builder(MVMTSPConfig):
         return super().createGeoDataset(data)
      
 
-    def run_model(self, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Dict:
+    def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Dict:
         logger.debug("Running combinatorial problem constructor...")
         with tqdm (total=8, desc="Preparing Problem with clustering") as pbar: 
 
@@ -345,7 +362,6 @@ class Builder(MVMTSPConfig):
 
             pbar.update(1) 
 
-        logger.info("Problem construction and solution follow...")
         paths = {} 
         self.metrics.start_performance_timer() 
 
@@ -379,7 +395,10 @@ class Builder(MVMTSPConfig):
             
         # Step 8: Add interpolation steps for the paths (visualizatino) 
         agents_paths_clusters = self.post_process_interpolation(agents_paths_clusters)
-
+        path_times = []
+        for agent in agents_paths_clusters.keys(): 
+            path_times.append(len(agents_paths_clusters[agent]))
+        
         return agents_paths_clusters     
     
 
@@ -432,7 +451,6 @@ class Builder(MVMTSPConfig):
                 builder=self 
             )
             logger.debug(f"✅ Context prepared for cluster {cluster_id} successfully...")
-            logger.debug(f"Cluster {cluster_id} has {cluster_object.__dict__}")
         except Exception as e: 
             logger.exception(f"❌ Error processing cluster {cluster_id}: {e}")
             raise ValueError(f"Error processing cluster {cluster_id}: {e}")
@@ -454,6 +472,12 @@ class Builder(MVMTSPConfig):
         # Step 5 extract solution 
         # paths = cluster_object.get_solution()
         # Step 6: Add the recharge phase & synchronize agents 
+        
+        extract_per_agent_metrics(
+            paths=paths, 
+            distance_costs=
+        )
+        pdb.set_trace()
         paths = self.synchronize_agent_paths(paths, cluster_object, depot_id)
         deallocate_memory(cluster_object)
         return paths 
@@ -481,7 +505,6 @@ class Builder(MVMTSPConfig):
             "const_34":constraint_34, "const_35":constraint_35
         }
 
-        logger.info(f"Setting constraints for multi-agent problem...")
         
         employed_agents = ["Agent_" + str(agent_id) for agent_id in cluster.employed_agents]
         list_of_agents = {x:int(x.split('_')[-1]) for x in employed_agents}
@@ -495,20 +518,22 @@ class Builder(MVMTSPConfig):
                       node = reverse_nodes[cluster.initial_population[a][0][i]]
                       next_node = reverse_nodes[cluster.initial_population[a][0][i+1]] 
                       cluster.x[node, next_node, header].setInitialValue(1) 
+        
+        logger.info(f"Running Through Constraints |")
 
-        for const in available_constraints:
-            if const in self.constraints:
-                try: 
-                    available_constraints[const](
-                        cluster=cluster,
-                        builder=self,
-                        V_nodes=V_nodes,
-                        list_of_agents=list_of_agents,
-                    )
-                    logger.debug(f"✅ Constraint {const} set successfully...")
-                except Exception as e:
-                    logger.exception(f"❌ Error setting constraint {const} for cluster: {e}")
-                    raise ValueError(f"Error setting constraint {const} for cluster")
+        for const in tqdm(available_constraints):
+            if const not in self.constraints: continue
+            try: 
+                available_constraints[const](
+                    cluster=cluster,
+                    builder=self,
+                    V_nodes=V_nodes,
+                    list_of_agents=list_of_agents,
+                )
+                logger.debug(f"✅ Constraint {const} set successfully...")
+            except Exception as e:
+                logger.exception(f"❌ Error setting constraint {const} for cluster: {e}")
+                raise ValueError(f"Error setting constraint {const} for cluster")
 
 
     def get_depot_index(self, ordered_nodes, k): 
@@ -647,9 +672,9 @@ class Builder(MVMTSPConfig):
             for t in range(self.recharge_time_window): 
                 if len(path) < cluster.timeframe[-1]: 
                     time_diff = cluster.timeframe[-1] - len(path) +1
-                    idle = [(depot_id,depot_id,path[-1][2]+step) for step in range(time_diff)] 
+                    idle = [(int(depot_id),int(depot_id),path[-1][2]+step) for step in range(time_diff)] 
                     path.extend(idle)
-                path.append((depot_id,depot_id,cluster.timeframe[-1]+t))
+                path.append((int(depot_id),int(depot_id),cluster.timeframe[-1]+t))
 
         return paths 
     

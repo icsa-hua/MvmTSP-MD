@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-
+from typing import Any 
 
 
 class TSPAgent: 
@@ -24,31 +24,40 @@ class TSPAgent:
 
 class TSPAgents: 
 
-    def __init__(self, mobility_env, agent_paths):
-        self.mobility_env = mobility_env
-        self.ax = self.mobility_env.ax
-        agent_paths = agent_paths or {}
-
+    def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False):
         
-        self.agents = [TSPAgent(id, path) for (id), path in agent_paths.items()]
-        
-        self.path_lines = []  # To store line objects for each agent
+        if empty: 
+            self.mobility_env = mobility_env
+            self.ax = None 
+            self.agents = []
+            self.path_lines = [] 
+            self.agent_colors = [] 
+            self.scatter:Any = None 
 
-        for agent in self.agents:
-            # Initially empty line plot for each agent
-            line, = self.ax.plot([], [], linestyle='--', linewidth=2)
-            self.path_lines.append(line)
+        else: 
+            self.mobility_env = mobility_env
+            self.ax = self.mobility_env.ax
+            agent_paths = agent_paths or {}
+            
+            self.agents = [TSPAgent(id, path) for (id), path in agent_paths.items()]
+            
+            self.path_lines = []  # To store line objects for each agent
 
-        n_agents = len(self.agents)
-        self.agent_colors = cm.get_cmap('tab10', n_agents)(range(n_agents))
-        self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
-        
-        for i, agent in enumerate(self.agents):
-            self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
-        self.ax.legend()
+            for agent in self.agents:
+                # Initially empty line plot for each agent
+                line, = self.ax.plot([], [], linestyle='--', linewidth=2.5 , zorder=5)
+                self.path_lines.append(line)
 
-        # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
-        self.process = self.mobility_env.env.process(self.simulate())
+            n_agents = len(self.agents)
+            self.agent_colors = cm.get_cmap('tab10', n_agents)(range(n_agents))
+            self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
+            
+            for i, agent in enumerate(self.agents):
+                self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
+            self.ax.legend()
+
+            # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
+            self.process = self.mobility_env.env.process(self.simulate())
 
 
     def get_coords(self):
@@ -66,7 +75,7 @@ class TSPAgents:
 
     def simulate(self):
         while True:
-            timestep = self.mobility_env.env.now
+            timestep = self.mobility_env.timestep 
             for i, agent in enumerate(self.agents):
                 agent.update_position(timestep)
 
@@ -74,7 +83,9 @@ class TSPAgents:
                 if path:
                     x_vals, y_vals, _ = zip(*path)
                     self.path_lines[i].set_data(x_vals, y_vals)
-
+            
             self.update_plot()
             plt.draw()
+            if hasattr(self.mobility_env, "timestep"):
+                self.mobility_env.timestep += 1 
             yield self.mobility_env.env.timeout(1)
