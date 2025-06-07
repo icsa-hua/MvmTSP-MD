@@ -27,7 +27,7 @@ PROJECT_DIR = os.getcwd()
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 TRIALS = 300 
 MAX_BATTERY = 2000 #Wh 
-NUMBER_OF_AGENTS = 4 # MIN 4. 
+NUMBER_OF_AGENTS = 4 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
 NUMBER_OF_AREAS = 50 # NOTE: used for Voronoi map generation.
 NUMBER_OF_USERS = 7
@@ -57,43 +57,98 @@ SCENARIO = args.scenario # NOTE: Scenario to run
 logger.debug(f"Arguments: Generate -> {args.gen_areas}, Show Map -> {args.show_map}")
 
 # Declare which constraints to use 
-constraints = ['const_0', # NOTE: Constraint for many visits.
-               'const_1', # NOTE: Constraint for entering and leaving the once.
-                # 'const_2', # NOTE: Constraint to have dynamic start and end time on the depot for each agent. 
-                'const_3', # NOTE: Constraint to enforce that only a single enter and exit can happen at a depot. 
-                'const_4', # NOTE: Constraint to stop depot looping. 
-                'const_5', # NOTE: Constraint to ensure single travel between nodes (except for bridge nodes) which we can enter and exit more times towards different nodes. 
-             #  'const_6', # NOTE: Constraint for collision avoidance and unique agent per node. This is a constraint that excludes depot and bridge nodes, as the agents can co exist there at the same time. 
-                # 'const_7', # NOTE: Constraint 
-                'const_8', # NOTE: Constraint to synchronize the time and space decision variables. 
-                # 'const_9', # NOTE: Constraint to allow a single travel from i to j for time variable. However consider that the problem has to return the paths including duration of travel. 
-        #     #  'const_10', # NOTE: Synchronization of depots for spatial and time variables
-        #     #    'const_11', # NOTE: Constraint to ensure colision avoidance between agents on the time variable, excluding bridge nodes and depots. 
-                'const_12', # NOTE: Constraint to ensure that the agent has enough energy to travel from i to j.
-                'const_13', # NOTE: Constraint to ensure that the agent starts from the depot with enough energy.
-                'const_14',  # NOTE: Constraint to ensure that the agent is idle before departue. 
-                'const_15', # NOTE: Consrtaint to model time progression through agent business. 
-                'const_16', # NOTE: Constraint to combine the wait and busy variables ensuring that the agent is either busy or waiting.
-                'const_17', # NOTE: Constraint to ensure that the travel from depot to a node is synchronized correctly between time and space variables. 
-            #  'const_18', 
-            #    'const_19',
-            #  'const_20', 
-                # 'const_21',
-                'const_22',
-                'const_23', 
-                'const_26',
-                'const_27',
-                # 'const_28',
-            # 'const_29',
-            'const_30',
-            #   'const_31',
-            #   'const_32', # This created a solution were not all agents visited collectively all nodes. 
-            #   'const_33',
-              'const_34',  
-            #   'const_35' 
-                                                                           
+"""
+Const 0 --> Enables Multiple Visits per node in the 
+Const 1 --> Only allow a single travel from depot to all nodes and reverse. (Per Agent & all agents)
+Const 2 --> Allow dynamic return and static departure based on time
+Const 3 --> Single Journey between nodes and depot
+Const 4 --> Prohibit Depot Looping 
+Const 5 --> Enable Arcs for all nodes 
+Const 6 --> Collision Avoidance (Unique time visits)
+Const 7 --> Miss Indicator per node 
+Const 8 --> Synchronization between spatial and time variable
+Const 9 --> Time dependency for travel (consider duration) 
+Const 10 --> Account for visits per agent 
+Const 11 --> Load Balancing for all agents 
+Const 12 --> Energy Management (Including Move & Coverage) 
+Const 13 --> Energy at Depot and non-negative 
+Const 14 --> Positional dependency for start and finish of time frame 
+Const 15 --> Busy and Wait decleration per agent for valid arcs 
+Const 16 --> Connect busy and wait activity 
+Const 17 --> Dynamic Time enforcement for departure and return (time based)
+Const 18 --> Symmetry keeping (equal load balancing)
+Const 19 --> Busy constraint (Double enforce) 
+Const 20 --> Strict Wait after travel (Double enforce) 
+Const 21 --> Penalize repeat nodes (energy objective)
+Const 22 --> Flow Conservation Not time expanded 
+Const 23 --> No loops in path 
+Const 24 --> Minimum visits per agent (dual constraint accounting for single agent travel)
+Const 25 --> Target Edge count (the number of arcs enabled by x) 
+"""                                                              
 
-]
+
+if SCENARIO == "energy": 
+    constraints = [
+        # 'const_0', 
+        'const_1', 
+        'const_2', 
+        'const_3', 
+        'const_4', 
+        'const_5', 
+        # 'const_6', 
+        'const_7', 
+        'const_8', 
+        # 'const_9', 
+        'const_10', 
+        'const_11', 
+        'const_12', 
+        'const_13', 
+        'const_14', 
+        'const_15', 
+        'const_16', 
+        'const_17', 
+        'const_18', 
+        'const_19', 
+        'const_20', 
+        'const_21', 
+        'const_22', 
+        'const_23', 
+        'const_24',
+        # 'const_25'
+        # 'const_26',
+        # 'const_28'    
+    ] 
+
+else: 
+    constraints = [
+        # 'const_0',
+        # 'const_1', 
+        # 'const_2', 
+        # 'const_3', 
+        # 'const_4', 
+        'const_5', 
+        # 'const_6', 
+        'const_8', 
+        # 'const_9', 
+        # 'const_10', 
+        # 'const_11', 
+        # 'const_12', 
+        # 'const_13', 
+        # 'const_14', 
+        # 'const_15', 
+        # 'const_16', 
+        'const_17', 
+        # 'const_18', 
+        # 'const_19', 
+        # 'const_20', 
+        'const_22', 
+        'const_23', 
+        # 'const_24',
+        # 'const_26',
+        # 'const_27',
+        # 'const_28',
+        # "const_29"
+    ]  
 
 config = {
     "genetic_algorithm": True if args.enable_ga=='yes' else False, 
@@ -102,8 +157,7 @@ config = {
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 
 problem = Builder(config, TRIALS, scenario=SCENARIO)
-logger.debug(f"BUilder Configuration: {problem.__dict__}")
-
+logger.info(f"Constraints Utilized --> {constraints}")
 # Create Simulation environment to simulate mobility for users and agents
 mobility_sim = EnvSim(trials=TRIALS) 
 
@@ -117,7 +171,7 @@ if not args.gen_areas:
 
     map = Map(data_path=areas_path, incremental=False)
     map.voronoi_tessellation()
-    logger.debug(f"Voronoi Map Initialized: {map.__dict__}")
+    logger.debug(f"✅Voronoi Map Initialized")
 
     ground_users = GroundUserGroup(
         mobility_env=mobility_sim, 
@@ -126,13 +180,13 @@ if not args.gen_areas:
         mean_velocity=2.0, 
         sigma=0.5
     )
-    logger.debug(f"Ground Users Group Initialized: {ground_users.__dict__}")
+    logger.debug(f"✅Ground Users Group Initialized: {ground_users.__dict__}")
 
     ground_users.load_users_from_csv(
         data_path=gues_path,
         customers_path=customers_path
     )
-    logger.debug(f"Ground Users Loaded: {len(ground_users.group)} users")
+    logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")
 
     data = problem.preprocess(
         distances_path=dist_path, 
@@ -144,7 +198,7 @@ if not args.gen_areas:
         max_battery=MAX_BATTERY
     )
 
-    logger.debug(f"Preprocessed Data: {data}")
+    logger.debug(f"✅Preprocessed Data: {data}")
 
     if map.vor_map is None:
         raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
@@ -210,7 +264,7 @@ else: # Default Choice to Generate all points on the map and on the users.
 
     # Extract the Ground Users as separate entities with individual velocity and angle
     ground_users.get_generated_users(user_points=user_points)
-    logger.debug(f"Ground Users Loaded: {len(ground_users.group)} users")    
+    logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")    
 
     if map_generator.vor_map is None:
         raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")

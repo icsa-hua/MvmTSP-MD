@@ -18,7 +18,7 @@ import random
 import networkx as nx
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler 
-
+from collections import defaultdict
 import pdb
 from k_means_constrained import KMeansConstrained
 
@@ -36,17 +36,15 @@ class MVMTSPConfig(ABC):
         self.distance_columns:List[str] = []
         self.energy_columns:List[str] = []
         self.travel_time_columns:List[str] = []
-        self.normalized_battery:np.ndarray = np.ndarray((0,0))
-        self.max_battery_norm:float = 0.0
+        self.move_energy:np.ndarray = np.ndarray((0,0))
         self.average_energy:float = 0.0
         self.depots:Optional[np.ndarray] = None
         self.distance_metric:str = "euclidean"
         self.average_coverage_energy:float=0.0
-        self.normalized_coverage_energy:float=0.0
         self.user_points:Dict[int,Tuple[float,float]] = {}  # User points for regionalization
         self.scenario:str = ""
-        self.ascend_avg_energy:float = 0.0
-        self.descend_avg_energy:float = 0.0 
+        self.ascend_energy = pd.DataFrame
+        self.descend_energy= pd.DataFrame
       
 
     @abstractmethod
@@ -103,7 +101,19 @@ class MVMTSPConfig(ABC):
 
     
     @abstractmethod 
-    def preprocess(self, distances_path:Union[str,Path], energies_path:Union[str,Path], nodes_path:Union[Path, str], agents:int, customers_path:Union[Path,str], ground_users:Any, max_battery:int)->pd.DataFrame:
+    def preprocess(
+        self,
+        distances_path:Union[str,Path],
+        energies_path:Union[str,Path], 
+        nodes_path:Union[Path, str], 
+        num_of_agents:int, 
+        v_ver:float, 
+        v_hor:float, 
+        customers_path:Union[Path,str], 
+        user_points:Any, 
+        max_battery:int, 
+        altitude:int
+    )->pd.DataFrame:
 
         def normalize_data(df:pd.DataFrame)->pd.DataFrame:
             
@@ -125,17 +135,8 @@ class MVMTSPConfig(ABC):
         self.V = nodes 
         self.v = len(self.V)
         
-        self.agents = list(range(1,agents+1))
+        self.agents = list(range(1,num_of_agents+1))
         self.max_battery = max_battery
-        max_battery_norm = np.ones(len(energies.columns)) * max_battery 
-
-        temporary_dataframe_energy = energies.copy() 
-        temporary_dataframe_energy.loc[len(energies)] = max_battery_norm
-        temporary_dataframe_energy = normalize_data(temporary_dataframe_energy)
-        max_battery_norm = temporary_dataframe_energy.iloc[-1]
-        temporary_dataframe_energy.drop([len(energies)], inplace=True)
-        self.normalized_battery = temporary_dataframe_energy.values
-        self.max_battery_norm = max_battery_norm.iloc[0]
 
         energy_model = DroneEnergyModel()
         
@@ -144,9 +145,6 @@ class MVMTSPConfig(ABC):
         self.normalized_coverage_energy = self.average_coverage_energy / max_battery  # Normalize coverage energy
         logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
 
-        deallocate_memory(temporary_dataframe_energy)
-        deallocate_memory(max_battery)
-        deallocate_memory(max_battery_norm)
 
         # Prepare Matrices 
         dist_columns = [f'dist_{i}' for i in range(1, self.v + 1)]
@@ -170,9 +168,6 @@ class MVMTSPConfig(ABC):
         distances = normalize_data(distances)
         energies = normalize_data(energies)
         travel_times = normalize_data(travel_times)
-
-        # Format customers 
-        self.user_points = ground_users if ground_users else {}
 
         # Setup visits allowed 
         # self.allowed_visits = np.full(self.v, len(self.agents), dtype=int)
@@ -217,11 +212,15 @@ class MVMTSPConfig(ABC):
             
             return pd.DataFrame(scaled_data, columns=df.columns, index=df.index)
 
+        data_path = f"{os.getcwd()}/assets/data"
+        if not os.path.exists(data_path):
+            os.mkdir(data_path)
 
         self.max_battery = max_battery
 
         distances = pd.DataFrame(distance_matrix, columns=[f'dist_{i}' for i in range(1, len(distance_matrix)+1)])
-        
+        distances.to_csv(f"{data_path}/distances.csv")
+
         energy_model = DroneEnergyModel(
             v_hor=v_hor, 
             v_ver=v_ver,
@@ -239,24 +238,13 @@ class MVMTSPConfig(ABC):
 
         # NOTE: To convert it to Wh 
         energies = energies / 3600.0
-
-        max_battery_norm = np.ones(len(energies.columns)) * max_battery 
-        temporary_dataframe_energy = energies.copy() 
-        temporary_dataframe_energy.loc[len(energies)] = max_battery_norm
-        temporary_dataframe_energy = normalize_data(temporary_dataframe_energy)
-        max_battery_norm = temporary_dataframe_energy.iloc[-1]
-        temporary_dataframe_energy.drop([len(energies)], inplace=True)
-        self.normalized_battery = temporary_dataframe_energy.values
-        self.max_battery_norm = max_battery_norm.iloc[0]
-
-        self.average_coverage_energy = energy_model.coverage_energy(1250) # In J 
+        energies.to_csv(f"{data_path}/energies.csv")
+        
+        self.move_energy = energies.values.astype(np.float32)
+        self.average_coverage_energy = energy_model.coverage_energy(altitude) # In J 
         self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
-        self.normalized_coverage_energy = self.average_coverage_energy / max_battery  # Normalize coverage energy
-        logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
 
-        deallocate_memory(temporary_dataframe_energy)
-        deallocate_memory(max_battery)
-        deallocate_memory(max_battery_norm)
+        logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
 
         area_ids = list(user_points.keys()) 
         centroids_x = [centroids[i][0] for i in range(len(centroids))]
@@ -274,39 +262,38 @@ class MVMTSPConfig(ABC):
         self.average_energy = float(np.average(energies))
 
         # Calculate Average Ascend and Descend 
-        ascend = [] 
-        descend = [] 
-
+        ascend_energy = defaultdict(list)
+        descend_energy = defaultdict(list)
         for depot in depots: 
             for i in self.V['Area_id']: 
-                if i in depots: continue 
-                ascend.append(energy_model.ascend_energy(
+                
+                ascend_energy[(int(depot))].append(np.float32((energy_model.ascend_energy(
                     current_node=depot, 
                     next_node=i,
                     altitude=altitude,
                     distance_matrix=distance_matrix
-                ))
+                )) / 3600))
 
-                descend.append(energy_model.descend_energy(
+                descend_energy[(int(depot))].append(np.float32((energy_model.descend_energy(
                     current_node=i, 
                     next_node=depot, 
                     altitude=altitude, 
                     distance_matrix=distance_matrix
-                ))
-
-        self.ascend_avg_energy = float(np.average(ascend)) / 3600 # From J to Wh
-        self.descend_avg_energy = float(np.average(descend)) / 3600 # From J to Wh
+                )) / 3600))
+        
+        self.ascend_energy = pd.DataFrame.from_dict(ascend_energy).T
+        self.descend_energy = pd.DataFrame.from_dict(descend_energy).T
 
         # Here distance must be in meters
         travel_times = (distance_matrix * 1e3) / v_hor / 60.0  # Convert to minutes
         travel_times = pd.DataFrame(travel_times, columns=[f'tt_{i}' for i in range(1, len(travel_times)+1)])
         self.travel_cost = travel_times.values
-
+        travel_times.to_csv(f'{data_path}/times.csv')
         assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
 
-        distances = normalize_data(distances)
-        energies = normalize_data(energies)
-        travel_times = normalize_data(travel_times)
+        distances = normalize_data(distances,name='distance_km')
+        energies = normalize_data(energies, name='energies_Wh')
+        travel_times = normalize_data(travel_times, name='times_min')
 
         self.distance_columns = distances.columns.tolist()
         self.energy_columns = energies.columns.tolist()
@@ -373,14 +360,12 @@ class MVMTSPConfig(ABC):
 
         # TODO: Calculate Maximum nodes based on Hover.
         max_nodes = 0 
-        # if self.scenario == "coverage": 
-        #     adjusted_energy = self.average_energy + self.average_coverage_energy 
-        #     max_nodes = int(self.max_battery / adjusted_energy)
-        # elif self.scenario == "energy": 
-        #     max_nodes = int(self.max_battery / self.average_energy)
         
+        # Reserve 10–15% for emergency return
+        reserve = self.max_battery * 0.15
         adjusted_energy = self.average_energy + self.average_coverage_energy 
-        max_nodes = int(self.max_battery / adjusted_energy) - 1
+        
+        max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 1
 
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
         charge_points = int(np.floor(self.v/max_nodes))
@@ -429,12 +414,12 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod
-    def cluster_prioritization(self, clusters:pd.core.groupby.generic.DataFrameGroupBy, cue_groups:Mapping[int,Any])->pd.DataFrame:
+    def cluster_prioritization(self, clusters:pd.core.groupby.generic.DataFrameGroupBy, cue_groups:Mapping[int,Any], distance_matrix)->pd.DataFrame:
         topsis = TOPSISPriority()
         cluster_criteria = {} 
          
         for cluster_id, cluster_df in clusters:
-            cluster_criteria[cluster_id] = topsis.gather_criteria(cluster_df, cue_groups=cue_groups, distance_metric=self.distance_metric)
+            cluster_criteria[cluster_id] = topsis.gather_criteria(cluster_df, cue_groups=cue_groups, distance_matrix=distance_matrix)
 
         priority = topsis.run_model(cluster_criteria, [])
         logger.debug("Cluster Prioritization (TOPSIS) Complete...")

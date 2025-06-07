@@ -1,5 +1,4 @@
 import numpy as np 
-from dummy_app.tools.logger import logger
 
 
 class DroneEnergyModel: 
@@ -24,12 +23,12 @@ class DroneEnergyModel:
         return energy 
 
 
-    def recover_energy(self, energy):
+    def recover_energy(self):
         # Recharge at a fixed charging power (e.g., 200 W)
         P_charge = 250  # Watts
         energy_recovered = P_charge * self.dt  # in Joules
 
-        return min(energy + energy_recovered, self.max_battery)
+        return  energy_recovered
 
 
     def ascend_energy(self, current_node, next_node, altitude, distance_matrix):

@@ -84,10 +84,12 @@ class Cluster:
                     for i in range(len(best_path)-1)
                 )) + num_travels 
 
+            # 10 is added to each stop to denote the coverage time spend on each area.  
+
         if total_time == 0: 
             logger.error(f"Total time is 0 for cluster {self.id}")
             raise ValueError(f"Total time is 0 for cluster {self.id}")
-        
+
         self.timeframe = list(range(0, total_time + 1))
 
 
@@ -105,7 +107,7 @@ class Cluster:
                 distance=self.cost['distance'],
                 energy=self.cost['energy'], 
                 time=self.cost['travel_time'],
-                wait_energy=builder.normalized_coverage_energy
+                wait_energy=builder.average_coverage_energy
             )
             logger.info(f"Objective function set for energy scenario in cluster {self.id}")
         elif scenario == 'coverage':
@@ -128,6 +130,8 @@ class Cluster:
         # else: 
         #     pass 
         builder.set_constraints_for_multi_agent(self)
+
+        # import pdb;pdb.set_trace()
         builder.solve_problem(self) 
         return builder.create_solution(self)
 
@@ -187,7 +191,7 @@ class Cluster:
         if scenario == 'energy': 
             self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
         elif scenario == 'coverage':
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
         
         self.x = pl.LpVariable.dicts("x", ((i,j,v) for i in V for j in V for v in self.employed_agents), cat='Binary')
         self.t = pl.LpVariable.dicts("t", ((i, j, v, ts) for i in V for j in V for v in self.employed_agents for ts in self.timeframe), cat='Binary')
@@ -210,21 +214,25 @@ class Cluster:
 
         self.visit_miss = pl.LpVariable.dicts("visit_miss", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
 
+        self.T_MAX = pl.LpVariable(name='T_MAX', lowBound=0, cat='Continuous')
+
 
     def set_objective(self, distance, energy, time, wait_energy): 
         V_nodes = list(self.nodes_dict.keys())
-        penalty = 1000
-        alpha = 0.3
+        penalty = 100
+        alpha = 50
+        import pdb;pdb.set_trace()
         self.problem.setObjective(
             pl.lpSum(
-                # penalty * self.y[j,v] + 
+                alpha * self.y[j,v] + 
                 # alpha * self.y[j,v] * self.R_points[j] +
                 penalty * self.visit_miss[j, v] 
                 for j in V_nodes
                 for v in self.employed_agents
-            ) + pl.lpSum(
-                    self.t[i,j,v,t] * energy[self.nodes_dict[i]][self.nodes_dict[j]-1]/self.tr_times[(i,j)] +
-                    self.t[i,j,v,t] * distance[self.nodes_dict[i]][self.nodes_dict[j]-1]/self.tr_times[(i,j)]
+            ) + 
+            pl.lpSum(
+                    self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] +
+                    self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]]
                     for i in V_nodes
                     for j in V_nodes if i != j
                     for t in self.timeframe
@@ -240,12 +248,17 @@ class Cluster:
 
     def set_coverage_objective(self)->None:
         V_nodes = list(self.nodes_dict.keys()) 
+        ALPHA = 1.0 
+        BETA = 0.001 
+
         self.problem.setObjective(
-           pl.lpSum(self.R[i] * self.visit[i, v]
-                   for i in V_nodes
-                   for v in self.employed_agents
-                   for t in self.timeframe)
+            ALPHA * self.T_MAX - BETA * pl.lpSum(self.R[i] * self.visit[i,v] for i in V_nodes for v in self.employed_agents)
         )
+        # self.problem.setObjective(
+        #    pl.lpSum(self.R[i] * self.visit[i, v]
+        #            for i in V_nodes
+        #            for v in self.employed_agents)
+        #     )
 
 
     def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural', metric="euclidean"):

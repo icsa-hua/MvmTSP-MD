@@ -17,19 +17,10 @@ class TOPSISPriority:
         self.weights = None 
 
 
-    def calculate_cluster_connectivity(self, cluster:pd.DataFrame, distance_metric:str)->Dict[str,float]: 
+    def calculate_cluster_connectivity(self, cluster:pd.DataFrame, distance_matrix)->Dict[str,float]: 
 
-        coords = cluster[['X_coords','Y_coords']].values 
-        num_nodes = coords.shape[0]
-        dist_matrix = None
-        
-        if distance_metric == 'geodesic':
-            tuple_coords = tuple(map(tuple, coords))  # Convert to tuple of tuples for geodesic
-            dist_matrix = squareform(pdist(tuple_coords, lambda u, v: geodesic(u, v).km))
-        
-        elif distance_metric == 'euclidean':
-            dist_matrix = squareform(pdist(coords,metric='euclidean'))
-
+        num_nodes = cluster.shape[0]
+        dist_matrix = distance_matrix
         # Average Distance between nodes 
         avg_distance = np.sum(dist_matrix) / (num_nodes * (num_nodes-1)) / 1000 
 
@@ -60,7 +51,7 @@ class TOPSISPriority:
         }
     
     
-    def gather_criteria(self, cluster:pd.DataFrame, cue_groups:Dict[int,List[object]], distance_metric:str) -> Dict[str,float]: 
+    def gather_criteria(self, cluster:pd.DataFrame, cue_groups:Dict[int,List[object]], distance_matrix:str) -> Dict[str,float]: 
 
         # find the users inside the areas of the cluster. 
         # the areas outside the cluster are not considered. 
@@ -69,7 +60,7 @@ class TOPSISPriority:
             if area_id in cue_groups.keys(): 
                num_customers += len(cue_groups[area_id])
 
-        conn_metrics = self.calculate_cluster_connectivity(cluster, distance_metric)
+        conn_metrics = self.calculate_cluster_connectivity(cluster, distance_matrix=distance_matrix)
         return {
             'Customers': num_customers,
             **conn_metrics
