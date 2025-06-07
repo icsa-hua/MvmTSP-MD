@@ -26,7 +26,7 @@ def frame_generator():
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 TRIALS = 300 
-MAX_BATTERY = 2000 #Wh 
+MAX_BATTERY = 1500 #Wh 
 NUMBER_OF_AGENTS = 4 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
 NUMBER_OF_AREAS = 50 # NOTE: used for Voronoi map generation.
@@ -47,7 +47,7 @@ progress = tqdm(total=TRIALS, desc="Progress")
 parser = argparse.ArgumentParser()
 parser.add_argument("--gen_areas", action="store_true", help="Generate new Voronoi map and save it to assets.")
 parser.add_argument("--show_map", action="store_true", help="Show the generated Voronoi map.")
-parser.add_argument("--scenario", type=str, default="energy", help="Scenario to run.")
+parser.add_argument("--scenario", type=str, default="cooperative", help="Scenario to run.")
 parser.add_argument("--enable_ga", type=str, default='yes', help="Initialize solver with Genetic Algorithm")
 
 args = parser.parse_args()
@@ -87,7 +87,7 @@ Const 25 --> Target Edge count (the number of arcs enabled by x)
 """                                                              
 
 
-if SCENARIO == "energy": 
+if SCENARIO == "cooperative": 
     constraints = [
         # 'const_0', 
         'const_1', 
@@ -99,17 +99,17 @@ if SCENARIO == "energy":
         'const_7', 
         'const_8', 
         # 'const_9', 
-        'const_10', 
-        'const_11', 
+        # 'const_10', 
+        # 'const_11', 
         'const_12', 
         'const_13', 
         'const_14', 
         'const_15', 
         'const_16', 
         'const_17', 
-        'const_18', 
-        'const_19', 
-        'const_20', 
+        # 'const_18', 
+        # 'const_19', 
+        # 'const_20', 
         'const_21', 
         'const_22', 
         'const_23', 
@@ -122,21 +122,21 @@ if SCENARIO == "energy":
 else: 
     constraints = [
         # 'const_0',
-        # 'const_1', 
-        # 'const_2', 
-        # 'const_3', 
-        # 'const_4', 
+        'const_1', 
+        'const_2', 
+        'const_3', 
+        'const_4', 
         'const_5', 
         # 'const_6', 
         'const_8', 
         # 'const_9', 
         # 'const_10', 
         # 'const_11', 
-        # 'const_12', 
-        # 'const_13', 
+        # 'const_12',  
+        # 'const_13',
         # 'const_14', 
-        # 'const_15', 
-        # 'const_16', 
+        'const_15', 
+        'const_16', 
         'const_17', 
         # 'const_18', 
         # 'const_19', 
@@ -144,10 +144,10 @@ else:
         'const_22', 
         'const_23', 
         # 'const_24',
-        # 'const_26',
-        # 'const_27',
-        # 'const_28',
-        # "const_29"
+        'const_26',
+        'const_27',
+        # "const_28",
+        # 'const_29',
     ]  
 
 config = {

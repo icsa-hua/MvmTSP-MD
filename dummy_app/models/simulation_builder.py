@@ -201,15 +201,14 @@ class Builder(MVMTSPConfig):
 
             current_node = reverse_dict[cluster.depot_id]
             iteration = 0 
-
             triplet = (cluster.depot_id,cluster.depot_id,step)
+
+
             while iteration < max_iterations: 
                 found_next = False
 
                 for timestep in cluster.timeframe: 
                     if timestep < step: continue 
-
-                    
                     for next_node in cluster.nodes_dict.keys(): 
                         if next_node == current_node: continue 
                         if cluster.x[current_node, next_node, agent_id].varValue != 1: continue 
@@ -235,21 +234,24 @@ class Builder(MVMTSPConfig):
                                 cluster.nodes_dict[next_node],
                                 timestep,
                             )
-                            if triplet in edges:
-                                logger.debug(f"Edge {triplet[0], triplet[1]} already seen for agent {agent_name}")
-                                continue
+                     
 
                             # Optional: append once with duration, or multiple times
                             for d in range(duration):
                                 actual_time += 1
                                 paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
-                            wait_step = timestep + duration + self.coverage_time
-                            if wait_step in cluster.timeframe and cluster.wait[agent_id, wait_step].varValue == 1:
-                                for ii in range(1,self.coverage_time+1,1):
-                                    actual_time += 1
-                                    wait_triplet = (cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], actual_time )
-                                    paths[agent_name].append(wait_triplet)
+
+                            wait_step = timestep + duration
+
+                            if all(cluster.wait[agent_id,t].varValue == 1 
+                                   for t in range(wait_step, wait_step + self.coverage_time)
+                                   if t in cluster.timeframe): 
+                               
+                                for d in range(self.coverage_time): 
+                                    actual_time += 1 
+                                    next_node_idx = cluster.nodes_dict[next_node]
+                                    paths[agent_name].append((next_node_idx, next_node_idx, actual_time))
 
                             edges.add(triplet)
                             current_node = reverse_dict[triplet[1]]
@@ -264,13 +266,16 @@ class Builder(MVMTSPConfig):
                     logger.warning(f"❌ No valid move found for agent {agent_name} at iteration {iteration}. Ending early.")
                     break
                 
-                if paths[agent_name] and paths[agent_name][-1][1] == cluster.depot_id:
+                if current_node == cluster.depot_id and step > 0:
                     break
 
                 iteration += 1
-            # Force return to depot if path doesn't end there
-            # if not paths[agent_name] or paths[agent_name][-1][1] != cluster.depot_id:
-            #     paths[agent_name].append((cluster.depot_id, cluster.depot_id, step+1))
+                 
+            if paths[agent_name][-1][1] != cluster.depot_id:
+                print(paths[agent_name]) 
+                raise Exception(f"❌ Agent {agent_name} did not return to depot")
+            
+        
         print(paths) 
         logger.debug(f"✅ Solutions created for {len(cluster.employed_agents)} agents")
         unique_nodes_among_paths = set()
@@ -281,6 +286,7 @@ class Builder(MVMTSPConfig):
                     unique_nodes_among_paths.add(duble[0]) 
                 if duble[1] not in unique_nodes_among_paths:  
                     unique_nodes_among_paths.add(duble[1])
+
         logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(cluster.nodes_dict.values())}")
         memory_usage = self.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
@@ -569,7 +575,7 @@ class Builder(MVMTSPConfig):
         all_paths = {} 
         key_points = {} 
         for agent_id, path in paths.items(): 
-            visit_nodes = [] 
+            visit_nodes = set() 
             seen_edges = set()
             # Reject agents that haven't been used at this point. 
             if len(path) == 0: 
@@ -577,9 +583,16 @@ class Builder(MVMTSPConfig):
                 continue 
 
             if path[-1][1] != cluster.depot_id: 
-                logger.debug(f"Agent {agent_id} did not finish at depot [{path[0][-1] }|{nodes_dict[depot_ind]}]")
+                raise ValueError(f"{agent_id} does not return to depot")
             
-            visit_nodes.append(cluster.depot_id)
+            visit_nodes.add(cluster.depot_id)
+
+
+            # 2.  include the very last arrival node
+            for step in path:
+                for node in (step[0], step[1]):
+                    if node not in (cluster.depot_id,) + tuple(cluster.bridge_nodes):
+                        visit_nodes.add(node)
 
             for i in range(len(path)-1):
                 
@@ -615,7 +628,7 @@ class Builder(MVMTSPConfig):
                     logger.debug(f"Agent {agent_id} visited node {target_node} at time {time_step} before visiting node {next_target_node} at time {next_time_step}") 
 
                 if source_node not in visit_nodes and source_node != nodes_dict[depot_ind]: 
-                    visit_nodes.append(source_node)
+                    visit_nodes.add(source_node)
 
                 if i != len(path)-2 and target_node == cluster.depot_id:
                     logger.debug(f"Agent {agent_id} visited node {target_node} at time {time_step} before visiting node {cluster.depot_id} at time {time_step+1}")
@@ -625,13 +638,14 @@ class Builder(MVMTSPConfig):
 
             edge_sequence = tuple((step[0], step[1]) for step in path)
             all_paths[agent_id] = edge_sequence
-
-            if len(visit_nodes) != len(nodes_dict)-1 : 
-                logger.debug(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
+            
+            if self.scenario == "coverage": 
+                if len(visit_nodes) != len(nodes_dict)-1 : 
+                    logger.debug(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
 
             logger.info(f"Agent {agent_id} | Visited_nodes == > {sorted(visit_nodes)} | Cluster_nodes == > {cluster.nodes_dict.values()} | Bridge Nodes == > {cluster.bridge_nodes}")
 
-
+             
         agent_ids = list(all_paths.keys()) 
         for i in range(len(agent_ids)): 
             for j in range(i + 1, len(agent_ids)):

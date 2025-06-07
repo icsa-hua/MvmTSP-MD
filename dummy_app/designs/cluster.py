@@ -93,7 +93,7 @@ class Cluster:
         self.timeframe = list(range(0, total_time + 1))
 
 
-    def problem_formulation(self, builder, scenario:str='energy'): 
+    def problem_formulation(self, builder, scenario:str='cooperative'): 
 
         V_nodes = list(self.nodes_dict.keys())
 
@@ -102,7 +102,7 @@ class Cluster:
         self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
 
         # Set the loss function 
-        if scenario == 'energy':
+        if scenario == 'cooperative':
             self.set_objective(
                 distance=self.cost['distance'],
                 energy=self.cost['energy'], 
@@ -185,14 +185,14 @@ class Cluster:
         return paths
     
 
-    def create_problem(self, scenario:str='energy')->None: 
+    def create_problem(self, scenario:str='cooperative')->None: 
         V = list(self.nodes_dict.keys())
         
-        if scenario == 'energy': 
+        if scenario == 'cooperative': 
             self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
         elif scenario == 'coverage':
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
-        
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
+    
         self.x = pl.LpVariable.dicts("x", ((i,j,v) for i in V for j in V for v in self.employed_agents), cat='Binary')
         self.t = pl.LpVariable.dicts("t", ((i, j, v, ts) for i in V for j in V for v in self.employed_agents for ts in self.timeframe), cat='Binary')
         
@@ -206,9 +206,7 @@ class Cluster:
         # self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=1, cat='Binary')
         self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents), lowBound=0, cat='Integer')
 
-        self.active_agents = pl.LpVariable.dicts("active_agents", (v for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
-
-        self.return_step = pl.LpVariable.dicts("return_step", (v for v in self.employed_agents), lowBound=0, upBound=self.timeframe[-1], cat='Integer')
+        self.y_depart = pl.LpVariable.dicts("y_depart", ((i,j,v,t) for i in V for j in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
 
         self.visit = pl.LpVariable.dicts("visit", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
 
@@ -216,12 +214,15 @@ class Cluster:
 
         self.T_MAX = pl.LpVariable(name='T_MAX', lowBound=0, cat='Continuous')
 
+        self.return_step = pl.LpVariable.dicts("return_step", (v for v in self.employed_agents), lowBound=0, upBound=self.timeframe[-1], cat='Integer')
+
+
 
     def set_objective(self, distance, energy, time, wait_energy): 
         V_nodes = list(self.nodes_dict.keys())
-        penalty = 100
-        alpha = 50
-        import pdb;pdb.set_trace()
+        penalty = 1
+        alpha = 0.5
+
         self.problem.setObjective(
             pl.lpSum(
                 alpha * self.y[j,v] + 
@@ -232,7 +233,8 @@ class Cluster:
             ) + 
             pl.lpSum(
                     self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] +
-                    self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]]
+                    self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] +
+                    self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]]
                     for i in V_nodes
                     for j in V_nodes if i != j
                     for t in self.timeframe
@@ -248,11 +250,12 @@ class Cluster:
 
     def set_coverage_objective(self)->None:
         V_nodes = list(self.nodes_dict.keys()) 
-        ALPHA = 1.0 
-        BETA = 0.001 
+        ALPHA = 0.1
+        BETA = 1
 
         self.problem.setObjective(
-            ALPHA * self.T_MAX - BETA * pl.lpSum(self.R[i] * self.visit[i,v] for i in V_nodes for v in self.employed_agents)
+            # ALPHA * self.T_MAX - 
+            BETA * pl.lpSum(self.R[i] * self.visit[i,v] for i in V_nodes for v in self.employed_agents)
         )
         # self.problem.setObjective(
         #    pl.lpSum(self.R[i] * self.visit[i, v]
@@ -277,6 +280,7 @@ class Cluster:
                 if metric == "geodesic":
                     horizontal_distance = geodesic(coords, user_coords).km
                 
+
                 elif metric == "euclidean":
                     horizontal_distance = np.linalg.norm(np.array(coords) - np.array(user_coords))
                     horizontal_distance = horizontal_distance / 1e3 # Convert to km
