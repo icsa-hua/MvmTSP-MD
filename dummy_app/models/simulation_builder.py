@@ -176,6 +176,8 @@ class Builder(MVMTSPConfig):
             logger.info("❌ Problem is not optimal, returning None...")
             sys.exit(1)
 
+
+        
         logger.debug(f"Cluster bridge nodes are {cluster.bridge_nodes}")
 
         employed_agents = ["Agent_" + str(i) for i in cluster.employed_agents]
@@ -190,10 +192,18 @@ class Builder(MVMTSPConfig):
                 if cluster.visit[i,v].varValue == 1:
                     visit_nodes[k].append(int(cluster.nodes_dict[i]))
 
-        for agent in list_of_agents.keys():
-            if len(visit_nodes[agent]) != len(cluster.nodes_dict.keys()):
-                logger.debug(f"❌ Based on Cluster.Visits Agent {agent} has not visited all nodes, returning None...")
+        for agent,v in list_of_agents.items():
+            legs =[(i,j,v,t) for (i,j,kk,t),var in cluster.t.items()
+                if kk == v and var.value() == 1]
+            x_legs =[(i,j,v) for (i,j,kk),var in cluster.x.items()
+                if kk == v and var.value() == 1]
+            
+            print(legs)
+            print(x_legs)
 
+            # if len(visit_nodes[agent]) != len(cluster.nodes_dict.keys()):
+            #     logger.debug(f"❌ Based on Cluster.Visits Agent {agent} has not visited all nodes, returning None...")
+        print("Cluster ", cluster.nodes_dict)
         for agent_name, agent_id in list_of_agents.items():
             edges = set()
             step = -1 
@@ -235,27 +245,27 @@ class Builder(MVMTSPConfig):
                                 timestep,
                             )
                      
+                            paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
                             # Optional: append once with duration, or multiple times
                             for d in range(duration):
                                 actual_time += 1
-                                paths[agent_name].append((triplet[0], triplet[1], actual_time))
+                                # paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
-
+                            if cluster.nodes_dict[next_node] == cluster.depot_id: 
+                                break 
                             wait_step = timestep + duration
+                            paths[agent_name].append((cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], actual_time))
 
-                            if all(cluster.wait[agent_id,t].varValue == 1 
-                                   for t in range(wait_step, wait_step + self.coverage_time)
-                                   if t in cluster.timeframe): 
-                               
+                            if cluster.wait[agent_id,wait_step].varValue == 1 :
                                 for d in range(self.coverage_time): 
                                     actual_time += 1 
                                     next_node_idx = cluster.nodes_dict[next_node]
-                                    paths[agent_name].append((next_node_idx, next_node_idx, actual_time))
+                            paths[agent_name].append((cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], actual_time))
 
                             edges.add(triplet)
                             current_node = reverse_dict[triplet[1]]
-                            step = timestep + duration +1
+                            step = timestep + duration 
                             found_next = True
                             break  # next timestep
 
