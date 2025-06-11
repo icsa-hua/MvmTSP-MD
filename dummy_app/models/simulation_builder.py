@@ -479,7 +479,7 @@ class Builder(MVMTSPConfig):
         except Exception as e:
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
-
+        print("Problem Solved")
         # Step 5 extract solution 
         # paths = cluster_object.get_solution()
         # Step 6: Add the recharge phase & synchronize agents 
@@ -759,7 +759,6 @@ class Builder(MVMTSPConfig):
             altitude = altitude,
             user_height = user_height,
             terrain_type = terrain_type,
-            metric=self.distance_metric
         )
 
 

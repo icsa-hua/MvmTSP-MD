@@ -84,6 +84,7 @@ class DroneEnergyModel:
         #Total descend time in seconds 
         dt_vertical = np.abs(altitude/self.vertical_velocity) 
         T = self.mass * self.g
+        
         # Vertical Energy in J
         E_u = 0.2 * T *(self.vertical_velocity)*dt_vertical 
         

@@ -10,6 +10,7 @@ from geopy.distance import geodesic
 from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.logger import logger
 from dummy_app.models.coverage import coverage_u2c
+from dummy_app.designs.constraint import all_constraints
 
 
 class Cluster: 
@@ -63,6 +64,7 @@ class Cluster:
 
     def get_estimated_time_frame(self, builder:Any): 
         total_time = 0 
+
         if self.initial_population is None: 
             G = create_model_graph(
                 cost=self.cost['travel_time'], 
@@ -94,12 +96,18 @@ class Cluster:
 
 
     def problem_formulation(self, builder, scenario:str='cooperative'): 
+        
 
+        def get_depot_node(depot_id, nodes_dict):
+            reverse = {v: k for k, v in nodes_dict.items()}
+            return reverse[depot_id]
         V_nodes = list(self.nodes_dict.keys())
+
+        # Get duration of each trip (arc) 
+        self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
 
         # Set the decision variables 
         self.create_problem(scenario=scenario) 
-        self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
 
         # Set the loss function 
         if scenario == 'cooperative':
@@ -109,6 +117,7 @@ class Cluster:
                 time=self.cost['travel_time'],
                 wait_energy=builder.average_coverage_energy
             )
+            # self.problem += self.T_MAX
             logger.info(f"Objective function set for energy scenario in cluster {self.id}")
         elif scenario == 'coverage':
             self.set_coverage_objective()
@@ -129,10 +138,77 @@ class Cluster:
         
         # else: 
         #     pass 
-        builder.set_constraints_for_multi_agent(self)
+        # builder.set_constraints_for_multi_agent(self)
+        employed_agents = ["Agent_" + str(agent_id) for agent_id in self.employed_agents]
+        list_of_agents = {x:int(x.split('_')[-1]) for x in employed_agents}
+        header = list_of_agents[employed_agents[0]]
+        reverse_nodes = {v: k for k, v in self.nodes_dict.items()}
+        V_nodes = list(self.nodes_dict.keys())
 
+        all_constraints(self, builder, V_nodes, list_of_agents )
+        
         # import pdb;pdb.set_trace()
         builder.solve_problem(self) 
+        
+        if pl.LpStatus[self.problem.status] != 'Optimal': 
+            logger.info("❌ Problem is not optimal, returning None...")
+            import pdb;pdb.set_trace()
+
+        """Return a chronologically ordered path for every UAV."""
+        paths = {k: [] for k in self.employed_agents}
+
+        for k in self.employed_agents:
+            # gather every departure decision for this UAV
+            legs = [(t, i, j) for (i, j, kk, t), var in self.depart.items()
+                                if kk == k and var.value() == 1]
+            wait = [(t) for (kk,t), var in self.wait.items()
+                      if kk == k and var.value() == 1]
+            print(wait)
+            # sort by start time
+            legs.sort(key=lambda x: x[0])
+            depot = int(self.depot_id)
+            cur_time = 0
+            for t_depart, src, trg in legs:
+                
+        
+                # idle fill until next departure (should be only at depot)
+                while cur_time < t_depart:
+                    paths[k].append((self.depot_id, self.depot_id, cur_time))
+                    cur_time += 1
+
+                # busy minutes along arc src→trg
+                dur = self.tr_times[(src,trg)]
+                src = self.nodes_dict[src]
+                trg = self.nodes_dict[trg] 
+                for _ in range(dur):
+                    paths[k].append((src, trg, cur_time))
+                    cur_time += 1
+            
+                # WAIT minutes of hover at trg
+                for d in range(builder.coverage_time):
+                    # assert self.wait[k,cur_time] == 1 
+                    paths[k].append((trg, trg,  cur_time + d))
+                cur_time += 1
+            # after last leg, idle-fill to horizon (optional)
+            while cur_time <= self.timeframe[-1]:
+                paths[k].append(( self.depot_id, self.depot_id, cur_time))
+                cur_time += 1
+        depot_id = get_depot_node(self.depot_id, self.nodes_dict)
+
+        for k in self.employed_agents:
+            tmp = [self.depart[depot_id,j,k,self.timeframe[0]].varValue for j in V_nodes]
+            print("depot departures at t=0:",(tmp))
+            print(f"depot is {depot_id} with self.depot {self.depot_id}")
+
+        
+        print(paths)
+        builder.validate_paths(paths=paths, nodes_dict=self.nodes_dict, cluster=self)
+        pdb.set_trace()
+        return paths
+
+
+
+
         return builder.create_solution(self)
 
 
@@ -202,20 +278,16 @@ class Cluster:
 
         self.e = pl.LpVariable.dicts("e", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=self.max_battery, cat='Continuous')
         
-        # TODO: Try it like this but after checking the validity of an integer variable. 
-        # self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=1, cat='Binary')
         self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents), lowBound=0, cat='Integer')
 
-        self.y_depart = pl.LpVariable.dicts("y_depart", ((i,j,v,t) for i in V for j in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
-
+        self.depart = pl.LpVariable.dicts("depart", ((i,j,v,t) for i in V for j in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
+        self.atNode = pl.LpVariable.dicts('atNode', ((i,v,t) for i in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
         self.visit = pl.LpVariable.dicts("visit", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
-
         self.visit_miss = pl.LpVariable.dicts("visit_miss", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
-
+        self.arrive =  pl.LpVariable.dicts('arrive', ((i,v,t) for i in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
         self.T_MAX = pl.LpVariable(name='T_MAX', lowBound=0, cat='Continuous')
 
-        self.return_step = pl.LpVariable.dicts("return_step", (v for v in self.employed_agents), lowBound=0, upBound=self.timeframe[-1], cat='Integer')
-
+        
 
 
     def set_objective(self, distance, energy, time, wait_energy): 
@@ -224,26 +296,26 @@ class Cluster:
         alpha = 0.5
 
         self.problem.setObjective(
-            pl.lpSum(
-                alpha * self.y[j,v] + 
-                # alpha * self.y[j,v] * self.R_points[j] +
-                penalty * self.visit_miss[j, v] 
-                for j in V_nodes
-                for v in self.employed_agents
-            ) + 
+            # pl.lpSum(
+            #     alpha * self.y[j,v] + 
+            #     # alpha * self.y[j,v] * self.R_points[j] +
+            #     penalty * self.visit_miss[j, v] 
+            #     for j in V_nodes
+            #     for v in self.employed_agents
+            # ) + 
             pl.lpSum(
                     self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] +
                     self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] +
                     self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]]
                     for i in V_nodes
                     for j in V_nodes if i != j
-                    for t in self.timeframe
                     for v in self.employed_agents
-            ) + pl.lpSum(
-                    self.wait[v, t] * wait_energy
-                    for v in self.employed_agents
-                    for t in self.timeframe
-            )
+            ) 
+            # + pl.lpSum(
+            #         self.wait[v, t] * wait_energy
+            #         for v in self.employed_agents
+            #         for t in self.timeframe
+            # )
         )
         
 
@@ -264,7 +336,7 @@ class Cluster:
         #     )
 
 
-    def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural', metric="euclidean"):
+    def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural'):
         # for Area with id 
         average_R = defaultdict(float)
         average_sinr = defaultdict(float)
@@ -276,14 +348,10 @@ class Cluster:
             if area not in user_points: continue
             for user in user_points[area]:
                 user_coords = (user.x, user.y)
-                horizontal_distance = 0.0 
-                if metric == "geodesic":
-                    horizontal_distance = geodesic(coords, user_coords).km
-                
+                horizontal_distance = 0.0                 
 
-                elif metric == "euclidean":
-                    horizontal_distance = np.linalg.norm(np.array(coords) - np.array(user_coords))
-                    horizontal_distance = horizontal_distance / 1e3 # Convert to km
+                horizontal_distance = np.linalg.norm(np.array(coords) - np.array(user_coords))
+                horizontal_distance = horizontal_distance / 1e3 # Convert to km
 
                 height_difference = altitude - user_height
                 dist = np.sqrt(horizontal_distance**2 + height_difference**2)
