@@ -1,3 +1,4 @@
+import sys
 import math 
 import random
 import pandas as pd 
@@ -33,6 +34,7 @@ class Cluster:
         self.problem = pl.LpProblem()
         self.R = defaultdict(float) 
         self.sinr = defaultdict(float)
+        self.max_durations = defaultdict(int)
 
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -84,7 +86,7 @@ class Cluster:
                 total_time = math.ceil(sum(
                     builder.get_travel_time(i, i+1, best_path)
                     for i in range(len(best_path)-1)
-                )) + num_travels 
+                )) + num_travels * builder.coverage_time
 
             # 10 is added to each stop to denote the coverage time spend on each area.  
 
@@ -132,84 +134,13 @@ class Cluster:
         if not hasattr(builder, 'set_constraints_for_multi_agent'):
             logger.error("Builder does not have set_constraints_for_multi_agent method") 
             raise ValueError("Builder does not have set_constraints_for_multi_agent method")
-        
-        # if len(self.employed_agents) > 1: 
-        #     builder.set_constraints_for_multi_agent(self)
-        
-        # else: 
-        #     pass 
-        # builder.set_constraints_for_multi_agent(self)
-        employed_agents = ["Agent_" + str(agent_id) for agent_id in self.employed_agents]
-        list_of_agents = {x:int(x.split('_')[-1]) for x in employed_agents}
-        header = list_of_agents[employed_agents[0]]
-        reverse_nodes = {v: k for k, v in self.nodes_dict.items()}
-        V_nodes = list(self.nodes_dict.keys())
 
-        all_constraints(self, builder, V_nodes, list_of_agents )
-        
-        # import pdb;pdb.set_trace()
+        employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
+        list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
+        all_constraints(cluster=self,builder=builder, V_nodes=list(self.nodes_dict.keys()), list_of_agents=list_of_agents)
         builder.solve_problem(self) 
-        
-        if pl.LpStatus[self.problem.status] != 'Optimal': 
-            logger.info("❌ Problem is not optimal, returning None...")
-            import pdb;pdb.set_trace()
-
-        """Return a chronologically ordered path for every UAV."""
-        paths = {k: [] for k in self.employed_agents}
-
-        for k in self.employed_agents:
-            # gather every departure decision for this UAV
-            legs = [(t, i, j) for (i, j, kk, t), var in self.depart.items()
-                                if kk == k and var.value() == 1]
-            wait = [(t) for (kk,t), var in self.wait.items()
-                      if kk == k and var.value() == 1]
-            print(wait)
-            # sort by start time
-            legs.sort(key=lambda x: x[0])
-            depot = int(self.depot_id)
-            cur_time = 0
-            for t_depart, src, trg in legs:
-                
-        
-                # idle fill until next departure (should be only at depot)
-                while cur_time < t_depart:
-                    paths[k].append((self.depot_id, self.depot_id, cur_time))
-                    cur_time += 1
-
-                # busy minutes along arc src→trg
-                dur = self.tr_times[(src,trg)]
-                src = self.nodes_dict[src]
-                trg = self.nodes_dict[trg] 
-                for _ in range(dur):
-                    paths[k].append((src, trg, cur_time))
-                    cur_time += 1
-            
-                # WAIT minutes of hover at trg
-                for d in range(builder.coverage_time):
-                    # assert self.wait[k,cur_time] == 1 
-                    paths[k].append((trg, trg,  cur_time + d))
-                cur_time += 1
-            # after last leg, idle-fill to horizon (optional)
-            while cur_time <= self.timeframe[-1]:
-                paths[k].append(( self.depot_id, self.depot_id, cur_time))
-                cur_time += 1
-        depot_id = get_depot_node(self.depot_id, self.nodes_dict)
-
-        for k in self.employed_agents:
-            tmp = [self.depart[depot_id,j,k,self.timeframe[0]].varValue for j in V_nodes]
-            print("depot departures at t=0:",(tmp))
-            print(f"depot is {depot_id} with self.depot {self.depot_id}")
-
-        
-        print(paths)
-        builder.validate_paths(paths=paths, nodes_dict=self.nodes_dict, cluster=self)
-        pdb.set_trace()
-        return paths
-
-
-
-
-        return builder.create_solution(self)
+        return self.get_results(builder=builder)
+        # return builder.create_solution(self)
 
 
     def get_solution(self): # Test Trial #TODO: Implement this to extract the solution from the MILP problem. 
@@ -263,30 +194,41 @@ class Cluster:
 
     def create_problem(self, scenario:str='cooperative')->None: 
         V = list(self.nodes_dict.keys())
-        
+        NODES = V[:-1]
         if scenario == 'cooperative': 
             self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
         elif scenario == 'coverage':
             self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
     
         self.x = pl.LpVariable.dicts("x", ((i,j,v) for i in V for j in V for v in self.employed_agents), cat='Binary')
-        self.t = pl.LpVariable.dicts("t", ((i, j, v, ts) for i in V for j in V for v in self.employed_agents for ts in self.timeframe), cat='Binary')
         
-        self.p = pl.LpVariable.dicts("p", ((v,t) for v in self.employed_agents for t in self.timeframe), cat='Integer')
-        self.busy = pl.LpVariable.dicts("busy", ((v,t) for v in self.employed_agents for t in self.timeframe), cat='Binary')
-        self.wait = pl.LpVariable.dicts("wait", ((v,t) for v in self.employed_agents for t in self.timeframe), cat="Binary")
+        self.t = pl.LpVariable.dicts("t", ((i,v) for i in V  for v in self.employed_agents), lowBound=0, cat='Continuous')
+        
+        # Node visitation per agent
+        self.visit = pl.LpVariable.dicts("v",((j,v) for j in NODES for v in self.employed_agents),lowBound=0, upBound=1, cat='Binary')
+
+        # toor ordering and loop avoidance 
+        self.p = pl.LpVariable.dicts("p", ((j,v) for j in V for v in self.employed_agents),lowBound=0, upBound=len(V)-1, cat='Integer')
+       
+        # total number of nodes visited per agent
+        self.u = pl.LpVariable.dicts("u", (v for v in self.employed_agents),lowBound=0, cat='Integer')
+       
+        # Return step 
+        self.return_step = pl.LpVariable.dicts("return", ((k) for k in self.employed_agents), lowBound=self.timeframe[0], cat='Continuous')
+        
+        # self.wait = pl.LpVariable.dicts("wait", ((v,t) for v in self.employed_agents for t in self.timeframe), cat="Binary")
 
         self.e = pl.LpVariable.dicts("e", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=self.max_battery, cat='Continuous')
         
-        self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents), lowBound=0, cat='Integer')
+        # self.y = pl.LpVariable.dicts("y", ((i,v) for i in V for v in self.employed_agents), lowBound=0, cat='Integer')
 
-        self.depart = pl.LpVariable.dicts("depart", ((i,j,v,t) for i in V for j in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
-        self.atNode = pl.LpVariable.dicts('atNode', ((i,v,t) for i in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
-        self.visit = pl.LpVariable.dicts("visit", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
-        self.visit_miss = pl.LpVariable.dicts("visit_miss", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
-        self.arrive =  pl.LpVariable.dicts('arrive', ((i,v,t) for i in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
-        self.T_MAX = pl.LpVariable(name='T_MAX', lowBound=0, cat='Continuous')
-
+        # self.depart = pl.LpVariable.dicts("depart", ((i,j,v,t) for i in V for j in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
+        # self.atNode = pl.LpVariable.dicts('atNode', ((i,v,t) for i in V for v in self.employed_agents for t in self.timeframe), lowBound=0, upBound=1, cat='Binary')
+        # self.visit = pl.LpVariable.dicts("visit", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
+        # self.visit_miss = pl.LpVariable.dicts("visit_miss", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=1, cat='Binary')
+        # self.T_MAX = pl.LpVariable(name='T_MAX', lowBound=0, cat='Continuous')
+        # self.arrival_time = pl.LpVariable.dicts("arrival_time", ((i,v) for i in V for v in self.employed_agents), lowBound=0, upBound=len(self.timeframe), cat='Integer')
+        
         
 
 
@@ -304,9 +246,9 @@ class Cluster:
             #     for v in self.employed_agents
             # ) + 
             pl.lpSum(
-                    self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] +
-                    self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] +
-                    self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]]
+                    self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] * 0.5 +
+                    self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] * 0.4 +
+                    self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]] * 0.1
                     for i in V_nodes
                     for j in V_nodes if i != j
                     for v in self.employed_agents
@@ -374,13 +316,103 @@ class Cluster:
         self.R = average_R
         self.sinr = average_sinr
 
+   
+    def get_results(self,builder:Any): 
+       
+        logger.debug(f"Cluster Time Frame is {self.timeframe}") 
+        if pl.LpStatus[self.problem.status] != 'Optimal': 
+            logger.info("❌ Problem is not optimal, returning None...")
+            sys.exit(1)
+        # Assuming 'model' is your solved PuLP problem and depot_ind is your depot's index
+        V_nodes = list(self.nodes_dict.keys())
+        reverse_dict = {v:k for k, v in self.nodes_dict.items()}
+        depot_ind = reverse_dict[self.depot_id]
+        NODES = V_nodes[:-1]
+        agents = self.employed_agents
+        D = self.tr_times
+        TF = self.timeframe
 
+        # First, find the starting point for each agent
+        solution_path = defaultdict()
+        paths = defaultdict()
 
+        for k in agents:
+            solution_path[k] = []
+            paths[k] = [] 
+            step = 0
+            for j in NODES:
+                if self.x[depot_ind, j, k].varValue == 1:
+                    # Found the first step of the tour
+                    start_node = j
+                    path = [depot_ind, start_node]
+                    paths[k].append((depot_ind, start_node,))
+                    arrival_info = [
+                        f"Agent {k} departs Depot {depot_ind} at t=0",
+                        f"Agent {k} arrives at Node {start_node} at t={self.t[start_node, k].varValue:.2f}"
+                    ]
+                    # Now follow the path until we return to the depot
+                    current_node = start_node
+                    while current_node != depot_ind:
+                        found_next = False
+                        for next_node in V_nodes: # V_nodes includes the depot
+                            if self.x[current_node, next_node, k].varValue==1:
+                                path.append(next_node)
+                                if next_node != depot_ind:
+                                    arrival_info.append(
+                                        f"Agent {k} arrives at Node {next_node} at t={self.t[next_node, k].varValue:.2f}"
+                                    )
+                                    
+                                    paths[k].append((current_node, next_node, int(self.t[next_node, k].varValue))) 
+                                else:
+                                    # Use the return_step variable for final arrival
+                                    arrival_info.append(
+                                        f"Agent {k} arrives back at Depot {next_node} at t={self.return_step[k].varValue:.2f}"
+                                    )
+                                    paths[k].append((current_node, next_node, int(self.return_step[k].varValue))) 
 
+                                current_node = next_node
+                                found_next = True
+                                break
+                        if not found_next:
+                            break # Should not happen in a valid tour
 
+                    solution_path[k] = (path, arrival_info)
 
-
-
-
-
+        # Now print the clean, ordered results
+        for k, (path, arrival_info) in solution_path.items():
+            logger.info(f"v--- Agent {k} Final Tour ---v")
+            logger.info(f"Path: {' -> '.join(map(str, path))}")
+            logger.info("Schedule:")
+            for step in arrival_info:
+                logger.info(f"  {step}")
         
+        unique_nodes_among_paths = set()
+        
+        for path in paths: 
+            for duble in paths[path]:
+                if duble[0] not in unique_nodes_among_paths: 
+                    unique_nodes_among_paths.add(duble[0]) 
+                if duble[1] not in unique_nodes_among_paths:  
+                    unique_nodes_among_paths.add(duble[1])
+
+        logger.debug(f"✅ Solutions created for {len(self.employed_agents)} agents")
+        logger.info("✅ Optimal Solution Found!!!!!")
+        memory_usage = builder.metrics.get_memory_usage()
+        logger.info(f"Memory usage: {memory_usage:.2f} MB")
+        builder.num_constraints += len(self.problem.constraints)
+        builder.variables_count += len(self.problem.variables())
+        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.nodes_dict.values())}")
+        
+        builder.validate_paths(paths=paths, nodes_dict=self.nodes_dict, cluster=self)
+        logger.debug("✅ Solutions validated successfully...")
+
+        return paths
+
+
+
+
+
+
+
+
+                
