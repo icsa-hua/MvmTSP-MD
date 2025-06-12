@@ -45,6 +45,7 @@ class MVMTSPConfig(ABC):
         self.scenario:str = ""
         self.ascend_energy = pd.DataFrame
         self.descend_energy= pd.DataFrame
+        self.coverage_time = 0 
       
 
     @abstractmethod
@@ -198,7 +199,8 @@ class MVMTSPConfig(ABC):
             v_ver:float, 
             v_hor:float, 
             max_battery:float, 
-            altitude:int
+            altitude:int, 
+            coverage_time:int
     )->pd.DataFrame:
         def normalize_data(df:pd.DataFrame, name:str='')->pd.DataFrame:
             scalers_path = f"{os.getcwd()}/assets/scalers"
@@ -239,9 +241,9 @@ class MVMTSPConfig(ABC):
         # NOTE: To convert it to Wh 
         energies = energies / 3600.0
         energies.to_csv(f"{data_path}/energies.csv")
-        
+        self.coverage_time = coverage_time 
         self.move_energy = energies.values.astype(np.float32)
-        self.average_coverage_energy = energy_model.coverage_energy(altitude) # In J 
+        self.average_coverage_energy = energy_model.coverage_energy(altitude, self.coverage_time) # In J 
         self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
 
         logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")

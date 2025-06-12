@@ -70,11 +70,12 @@ class DroneEnergyModel:
         return E_hov
         
 
-    def coverage_energy(self, altitude): 
+    def coverage_energy(self, altitude, time_steps_mins): 
         P_BS = 200 # In W is the power to operate the drone as a low level base station
+        time_steps_in_seconds = time_steps_mins * 60
         motor_speed_multiplier = 10.5 
         P_total = self.min_hover + (motor_speed_multiplier*altitude/100) + P_BS # In W
-        E_cov = P_total * self.dt 
+        E_cov = P_total * time_steps_in_seconds
         
         return E_cov
         
@@ -84,6 +85,7 @@ class DroneEnergyModel:
         #Total descend time in seconds 
         dt_vertical = np.abs(altitude/self.vertical_velocity) 
         T = self.mass * self.g
+
         # Vertical Energy in J
         E_u = 0.2 * T *(self.vertical_velocity)*dt_vertical 
         

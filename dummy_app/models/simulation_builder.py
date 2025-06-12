@@ -37,7 +37,6 @@ class Builder(MVMTSPConfig):
         self.variables_count = 0
         self.Time = 0 
         self.problem_results = defaultdict()
-        self.coverage_time = 10 
 
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
@@ -186,11 +185,28 @@ class Builder(MVMTSPConfig):
         paths = {agent: [] for agent in employed_agents}
         max_iterations = len(cluster.nodes_dict.keys())*len(cluster.timeframe) + 1 + self.recharge_time_window
 
-        visit_nodes = defaultdict(list)
-        for i in cluster.nodes_dict.keys(): 
-            for k,v in list_of_agents.items(): 
-                if cluster.visit[i,v].varValue == 1:
-                    visit_nodes[k].append(int(cluster.nodes_dict[i]))
+        # visit_nodes = defaultdict(list)
+        # for i in cluster.nodes_dict.keys(): 
+        #     for k,v in list_of_agents.items(): 
+        #         if cluster.visit[i,v].varValue == 1:
+        #             visit_nodes[k].append(int(cluster.nodes_dict[i]))
+
+        for k in list_of_agents.values():
+            legs = [(i,j, var.value()) for (i,j),var in cluster.t.items()
+                    if j == k ]
+            print(legs)
+            legs = [(i,j,v) for (i,j,v),var in cluster.x.items()
+                    if v == k and (var.value() ==1) ]
+            print("DEDE")
+            print(legs)
+            print("FEOIFE")
+            legs = [(v, var.value()) for (v),var in cluster.return_step.items()
+                    if v == k ]
+            print(legs)
+
+        # for agent in list_of_agents.keys():
+        #     if len(visit_nodes[agent]) != len(cluster.nodes_dict.keys()):
+        #         logger.debug(f"❌ Based on Cluster.Visits Agent {agent} has not visited all nodes, returning None...")
 
         for agent,v in list_of_agents.items():
             legs =[(i,j,v,t) for (i,j,kk,t),var in cluster.t.items()
@@ -218,11 +234,11 @@ class Builder(MVMTSPConfig):
                 found_next = False
 
                 for timestep in cluster.timeframe: 
-                    if timestep < step: continue 
+                    if timestep <= step: continue 
                     for next_node in cluster.nodes_dict.keys(): 
                         if next_node == current_node: continue 
                         if cluster.x[current_node, next_node, agent_id].varValue != 1: continue 
-                        
+                        if cluster.t[current_node, next_node, agent_id, timestep].varValue != 1: continue
                         duration = cluster.tr_times[(current_node, next_node)]
                         # duble = (cluster.nodes_dict[current_node],cluster.nodes_dict[next_node])
                         # paths[agent_name].append(duble)
@@ -233,25 +249,36 @@ class Builder(MVMTSPConfig):
                         # current_node = reverse_dict[duble[1]]
                         # found_next = True
 
-                        if all(
-                            cluster.t[current_node, next_node, agent_id, t].varValue == 1
-                            for t in range(timestep, timestep + duration)
-                            if t in cluster.timeframe
-                        ):
+                        # if all(
+                        #     cluster.t[current_node, next_node, agent_id, t].varValue == 1
+                        #     for t in range(timestep, timestep + duration)
+                        #     if t in cluster.timeframe
+                        # ):
                             # This is a legitimate travel
-                            triplet = (
-                                cluster.nodes_dict[current_node],
-                                cluster.nodes_dict[next_node],
-                                timestep,
-                            )
+                        triplet = (
+                            cluster.nodes_dict[current_node],
+                            cluster.nodes_dict[next_node],
+                            timestep,
+                        )
                      
                             paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
                             # Optional: append once with duration, or multiple times
-                            for d in range(duration):
-                                actual_time += 1
-                                # paths[agent_name].append((triplet[0], triplet[1], actual_time))
+                        for d in range(duration):
+                            actual_time += 1
+                            # paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
+
+                        wait_step = timestep + duration
+
+                            # if all(cluster.wait[agent_id,t].varValue == 1 
+                            #        for t in range(wait_step, wait_step + self.coverage_time)
+                            #        if t in cluster.timeframe): 
+                               
+                            #     for d in range(self.coverage_time): 
+                            #         actual_time += 1 
+                            #         next_node_idx = cluster.nodes_dict[next_node]
+                            #         paths[agent_name].append((next_node_idx, next_node_idx, actual_time))
                             if cluster.nodes_dict[next_node] == cluster.depot_id: 
                                 break 
                             wait_step = timestep + duration
@@ -263,11 +290,11 @@ class Builder(MVMTSPConfig):
                                     next_node_idx = cluster.nodes_dict[next_node]
                             paths[agent_name].append((cluster.nodes_dict[next_node], cluster.nodes_dict[next_node], actual_time))
 
-                            edges.add(triplet)
-                            current_node = reverse_dict[triplet[1]]
-                            step = timestep + duration 
-                            found_next = True
-                            break  # next timestep
+                        edges.add(triplet)
+                        current_node = reverse_dict[triplet[1]]
+                        step = timestep + duration 
+                        found_next = True
+                        break  # next timestep
 
                     if found_next:
                         break
@@ -489,7 +516,7 @@ class Builder(MVMTSPConfig):
         except Exception as e:
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
-
+        print("Problem Solved")
         # Step 5 extract solution 
         # paths = cluster_object.get_solution()
         # Step 6: Add the recharge phase & synchronize agents 
@@ -584,6 +611,7 @@ class Builder(MVMTSPConfig):
         depot_ind = reverse[cluster.depot_id]
         all_paths = {} 
         key_points = {} 
+        pdb.set_trace()
         for agent_id, path in paths.items(): 
             visit_nodes = set() 
             seen_edges = set()
@@ -769,7 +797,6 @@ class Builder(MVMTSPConfig):
             altitude = altitude,
             user_height = user_height,
             terrain_type = terrain_type,
-            metric=self.distance_metric
         )
 
 

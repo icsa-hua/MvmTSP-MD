@@ -40,10 +40,10 @@ def coverage_u2c(agent_to_user_dist, agent_altitude, user_altitude, agent_pos, t
 
 
 
-def pathloss_generation(nlos:int=1, nNlos:int=20, fc:float=2e9, c:float=(3e8/1e3), agent_height:int=1250, user_altitude:float=1.5, agent_user_dist:float=0.0, terrain_type='rural', agent_pos:tuple= ()): 
+def pathloss_generation(nlos:int=1, nNlos:int=20, fc:float=2.4e9, c:float=(3e8/1e3), agent_height:int=1250, user_altitude:float=1.5, agent_user_dist:float=0.0, terrain_type='rural', agent_pos:tuple= ()): 
 
     """
-    Computes the path loss (in dB) for different communication types: U2U, U2I, U2C.
+    Computes the path loss (in dB) for different communication types: U2C.
     Assumes distance and heights in km.
      
     Friis free space path loss model extended to include nlos and nNlos constants for additional path loss 

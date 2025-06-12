@@ -38,6 +38,7 @@ LONGITUDE_ATHENS = 23.7162
 LOW_BOUND = 1500 #Considered in meters 
 HIGH_BOUND = 1500 #Considered in meters
 ALTITUDE = 1250 # Optimal Coverage Altitude 
+MAX_COVERAGE_TIME = 5
 logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {TRIALS}\n Number of Agents -> {NUMBER_OF_AGENTS}\n Max Battery -> {MAX_BATTERY} Wh\n Number of Areas -> {NUMBER_OF_AREAS}\n Vertical Velocity -> {VERTICAL_VELOCITY} m/s\n Horizontal Velocity -> {HORIZONTAL_VELOCITY} m/s")
 
 # Progress bar 
@@ -92,31 +93,32 @@ if SCENARIO == "cooperative":
         # 'const_0', 
         'const_1', 
         # 'const_2', 
-        'const_3', 
+        # 'const_3', 
         'const_4', 
         'const_5', 
         # 'const_6', 
-        # 'const_7', 
+        # # 'const_7', 
         'const_8', 
         # 'const_9', 
         # 'const_10', 
         # 'const_11', 
-        'const_12', 
-        'const_13', 
-        # 'const_14', 
-        # 'const_15', 
-        # 'const_16', 
+        # 'const_12', 
+        # 'const_13', 
+        # # 'const_14', 
+        # # 'const_15', 
+        # # 'const_16', 
         # 'const_17', 
         # 'const_18', 
         'const_19', 
         # 'const_20', 
-        # 'const_21', 
+        # # 'const_21', 
         # 'const_22', 
         'const_23', 
-        # 'const_24',
+        # # 'const_24',
         # 'const_25',
         # 'const_26',
         # 'const_27',
+        # 'const_27'
         # 'const_28'    
     ] 
 
@@ -124,9 +126,9 @@ else:
     constraints = [
         # 'const_0',
         'const_1', 
-        'const_2', 
-        'const_3', 
-        'const_4', 
+        # 'const_2', 
+        # 'const_3', 
+        # 'const_4', 
         'const_5', 
         # 'const_6', 
         'const_8', 
@@ -142,10 +144,10 @@ else:
         # 'const_18', 
         # 'const_19', 
         # 'const_20', 
-        'const_22', 
-        'const_23', 
+        # 'const_22', 
+        # 'const_23', 
         # 'const_24',
-        'const_26',
+        # 'const_26',
         'const_27',
         # "const_28",
         # 'const_29',
@@ -292,7 +294,8 @@ else: # Default Choice to Generate all points on the map and on the users.
         v_hor=HORIZONTAL_VELOCITY, 
         v_ver=VERTICAL_VELOCITY,
         max_battery=MAX_BATTERY, 
-        altitude=ALTITUDE
+        altitude=ALTITUDE, 
+        coverage_time=MAX_COVERAGE_TIME
     )
     logger.debug(f"✅ Preprocessed Data Completed successfully")  
     
