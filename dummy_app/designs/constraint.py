@@ -901,15 +901,13 @@ def constraint_30(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
 
 def all_constraints(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict):
     depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
-    reversed_original = {v:k for k,v in cluster.original_nodes_dict.items()}
-    NODES = V_nodes[:depot_ind] + V_nodes[depot_ind+1:]
+    NODES = cluster.NODES
     agents = cluster.employed_agents
     model = cluster.problem 
     D = cluster.tr_times
     TF = cluster.timeframe
     MANDATORY_WAIT_TIME = builder.coverage_time
     wait_energy_consumption = builder.average_coverage_energy
-    
     for j in NODES:
         model += pl.lpSum(cluster.visit[j,k] for k in agents) == 1
 
@@ -932,14 +930,13 @@ def all_constraints(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict)
         model += pl.lpSum(cluster.visit[j,k] for j in NODES) >= 1
         model += cluster.u[k] == pl.lpSum(cluster.visit[j,k] for j in NODES)
     
- 
     # Path continuity flow 
     for i in NODES: 
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
     # At any given time agent k can only be on 1 travel . No overlap 
-     
+      
     # MTZ 
     n = len(NODES)
     for k in agents:
@@ -959,29 +956,34 @@ def all_constraints(cluster:Any, builder:Any, V_nodes:list, list_of_agents:dict)
     #             arrival_t = cluster.t.get((i,k), 0)
     #             model += cluster.t[j,k] >= arrival_t + D[(i,j)] - M *(1 - cluster.x[i,j,k])
 
-    
     # for k in agents: 
     #     for i in NODES: 
     #         model += cluster.return_step[k] >= (cluster.t[i,k]) + D[(i,depot_ind)] - M * (1-cluster.x[i,depot_ind,k])
- 
+    original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
+    dept = cluster.original_nodes_dict[original_depot_ind]
+
     for k in agents:
         for j in NODES:
-            import pdb;pdb.set_trace()
+            target = cluster.original_nodes_dict[j]
             # Arrival at first node >= (Time at Depot + Wait at Depot) + Travel Time
             # Assuming no wait time at the depot itself before starting the tour.
-            model += cluster.t[j, k] >= (0 + D[(depot_ind, j)]) - M * (1 - cluster.x[depot_ind, j, k])
+            model += cluster.t[j, k] >= (0 + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
 
     for k in agents:
         for i in NODES:
             for j in NODES:
                 if i == j: continue
+                source = cluster.original_nodes_dict[i]
+                trgt = cluster.original_nodes_dict[j]
                 # Arrival at j >= (Arrival at i + Wait at i) + Travel Time from i to j
-                model += cluster.t[j, k] >= (cluster.t[i, k] + MANDATORY_WAIT_TIME) + D[(i, j)] - M * (1 - cluster.x[i, j, k])
+                model += cluster.t[j, k] >= (cluster.t[i, k] + MANDATORY_WAIT_TIME) + D[(source, trgt)] - M * (1 - cluster.x[i, j, k])
 
     for k in agents:
         for i in NODES:
+            source = cluster.original_nodes_dict[i]
+
             # Return to depot >= (Arrival at last node i + Wait at i) + Travel Time to depot
-            model += cluster.return_step[k] >= (cluster.t[i, k] + MANDATORY_WAIT_TIME) + D[(i, depot_ind)] - M * (1 - cluster.x[i, depot_ind, k])
+            model += cluster.return_step[k] >= (cluster.t[i, k] + MANDATORY_WAIT_TIME) + D[(source, dept)] - M * (1 - cluster.x[i, depot_ind, k])
 
 
     M_energy = builder.max_battery

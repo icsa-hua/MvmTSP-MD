@@ -37,7 +37,8 @@ class Cluster:
         self.sinr = defaultdict(float)
         self.max_durations = defaultdict(int)
         self.original_nodes_dict = self.nodes_dict 
-
+        self.V_nodes = list() 
+        self.NODES = list() 
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
 
@@ -116,7 +117,7 @@ class Cluster:
 
         # Get duration of each trip (arc) 
         # self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
-        self.tr_times = {(i,j):self.get_travel_times(i, j, self.nodes_dict, builder) for i in V_nodes for j in V_nodes}
+        self.tr_times = {(self.nodes_dict[i],self.nodes_dict[j]):self.get_travel_times(i, j, self.nodes_dict, builder) for i in V_nodes for j in V_nodes}
 
         # Set the decision variables 
         self.create_problem(scenario=scenario) 
@@ -147,7 +148,7 @@ class Cluster:
 
         employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
-        all_constraints(cluster=self,builder=builder, V_nodes=list(self.nodes_dict.keys()), list_of_agents=list_of_agents)
+        all_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
     
         # builder.set_constraints_for_multi_agent(self)
         builder.solve_problem(self) 
@@ -206,16 +207,11 @@ class Cluster:
     
 
     def create_problem(self, scenario:str='cooperative')->None: 
-        reverse_nodes = {v:k for k, v in self.nodes_dict.items()}
-        self.original_nodes_dict = deepcopy(self.nodes_dict)
-        remove_original_nodes = set(self.virtual_nodes.values()) 
-        for node in remove_original_nodes: 
-            self.nodes_dict.pop(reverse_nodes[node]) 
-        self.nodes_dict = {i:v for i,(k,v) in enumerate(self.nodes_dict.items())} 
-        V = list(self.nodes_dict.keys())
         
-        depot_id = reverse_nodes[self.depot_id]
-        NODES = V[:depot_id] + V[depot_id+1:]
+        self.set_up_virtual_nodes_properties()
+
+        V = self.V_nodes
+        NODES = self.NODES
 
         if scenario == 'cooperative': 
             self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
@@ -264,7 +260,7 @@ class Cluster:
                     for i in V_nodes
                     for j in V_nodes if i != j
                     for v in self.employed_agents
-            ) 
+            )   
             # + pl.lpSum(
             #         self.wait[v, t] * wait_energy
             #         for v in self.employed_agents
@@ -288,6 +284,25 @@ class Cluster:
         #            for i in V_nodes
         #            for v in self.employed_agents)
         #     )
+
+    def set_up_virtual_nodes_properties(self): 
+
+        reverse_nodes = {v:k for k, v in self.nodes_dict.items()}
+        self.original_nodes_dict = deepcopy(self.nodes_dict)
+        remove_original_nodes = set(self.virtual_nodes.values()) 
+
+        for node in remove_original_nodes: 
+            self.nodes_dict.pop(reverse_nodes[node])
+
+        self.nodes_dict = {i:v for i,(k,v) in enumerate(self.nodes_dict.items())} 
+        
+        self.V_nodes = list(self.nodes_dict.keys())
+        reverse_nodes = {v:k for k, v in self.nodes_dict.items()}
+
+        depot_id = reverse_nodes[self.depot_id]
+        self.NODES = self.V_nodes[:depot_id] + self.V_nodes[depot_id+1:]
+
+
         
 
     def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural'):
@@ -336,14 +351,15 @@ class Cluster:
             logger.info("❌ Problem is not optimal, returning None...")
             sys.exit(1)
         # Assuming 'model' is your solved PuLP problem and depot_ind is your depot's index
-        V_nodes = list(self.nodes_dict.keys())
+        
+        V_nodes = self.V_nodes
+        NODES = self.NODES
+        agents = self.employed_agents
+
+
         reverse_dict = {v:k for k, v in self.nodes_dict.items()}
         depot_ind = reverse_dict[self.depot_id]
-        NODES = V_nodes[:-1]
-        agents = self.employed_agents
-        D = self.tr_times
-        TF = self.timeframe
-
+        
         # First, find the starting point for each agent
         solution_path = defaultdict()
         paths = defaultdict()
