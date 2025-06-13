@@ -365,7 +365,7 @@ class MVMTSPConfig(ABC):
         max_nodes = 0 
         
         # Reserve 10–15% for emergency return
-        reserve = self.max_battery * 0.45
+        reserve = self.max_battery * 0.15
         adjusted_energy = self.average_energy + self.average_coverage_energy 
         
         max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 1
