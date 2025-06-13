@@ -8,12 +8,12 @@ import networkx as nx
 import logging 
 from collections import defaultdict
 import matplotlib.pyplot as plt 
-
-
+from copy import deepcopy
 from typing import Any, List, Dict, Union, Tuple
 from dummy_app.models.central_hubs import CentralHub
 from dummy_app.tools.graphs import is_eulerian_digraph
 from dummy_app.models.energy_model import DroneEnergyModel
+
 
 def deallocate_memory(variable:Any)->None:
     del variable 
@@ -35,6 +35,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     except KeyError as ke: 
         raise ValueError(f"KeyError: {ke}")
 
+
     cost_d = dict(zip(area_ids, dists))
     cost_e = dict(zip(area_ids, ees))
     cost_t = dict(zip(area_ids, travel_times))
@@ -45,7 +46,6 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     
     cost_bundle = {'distance':cost_d, 'energy':cost_e,'travel_time':cost_t}
 
-    nodes_for_graph = nodes_dict.copy() 
     graph = create_model_graph(
         cost=cost_bundle, 
         nodes=nodes_dict,
@@ -59,7 +59,6 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     except:
         raise ValueError("Graph is not eulerian")
 
-
     hub = CentralHub()
     bridge_nodes = hub.get_bridge_nodes(
         graph=graph, 
@@ -68,19 +67,44 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
         nodes_dict=nodes_dict,
         n_agents=len(employed_agents)
     )
-
-    if not bridge_nodes: 
-        raise ValueError("No bridge nodes were found")
-
+    
     bridge_nodes = [nodes_dict[bridge_nodes[i]] for i in range(len(bridge_nodes))]
     R_points = [] 
+    bridge_nodes_idx = []
     for i in nodes_dict: 
         if nodes_dict[i] in bridge_nodes: 
             allowed_visits = hub.number_allowed_visits[i]
+            bridge_nodes_idx.append(1)
         else: 
             allowed_visits = 1 
         R_points.append(allowed_visits)
-    
+
+    reverse_nodes = {v: k for k, v in nodes_dict.items()} 
+    virtual_nodes = defaultdict(int)
+  
+    if not all(rp==1 for rp in R_points) or len(bridge_nodes) > 1:
+        # Create virtual nodes inside the current dictionary 
+        for node in bridge_nodes: 
+            number_of_virtual_nodes = R_points[reverse_nodes[node]] 
+            constant_length = len(cost_bundle['distance'][node])
+            
+            for kk in range(number_of_virtual_nodes):
+                virtual_nodes[kk + (constant_length)] = node 
+
+        count = len(nodes_dict)
+        cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes)
+                
+        for i in virtual_nodes:
+            nodes_dict[count] = i      
+            count += 1    
+
+    # remove_original_nodes = set(virtual_nodes.values()) 
+    # for node in remove_original_nodes: 
+    #     nodes_dict.pop(reverse_nodes[node]) 
+        # cost_bundle['distance'].pop(node)
+        # cost_bundle['energy'].pop(node)
+        # cost_bundle['travel_time'].pop(node)
+
     assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
     "Mismatch between distance, energy, travel_time and R_points dictionary length"
     
@@ -95,7 +119,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
             # print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
             initial_population[agent] = (solution_path, solution_cost) 
 
-    return cost_bundle, R_points, bridge_nodes, nodes_dict, initial_population
+    return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
 
 
 def jupyter_logger(level=logging.INFO)->logging.StreamHandler: 
@@ -111,7 +135,7 @@ def jupyter_logger(level=logging.INFO)->logging.StreamHandler:
     return jupyter_handler
 
 
-def create_model_graph(cost:Dict[str,Dict[int,np.ndarray]], nodes:Dict[int,int], weights): 
+def create_model_graph(cost:Any, nodes:Dict[int,int], weights): 
     graph = nx.DiGraph()
     for source_node in nodes.values(): 
         for target_node in nodes.values(): 
@@ -119,7 +143,7 @@ def create_model_graph(cost:Dict[str,Dict[int,np.ndarray]], nodes:Dict[int,int],
             composite_cost = 0.0 
             # Calculate the composite cost for the edge
             for cost_type in cost.keys(): 
-               composite_cost += weights[cost_type] * cost[cost_type][source_node][target_node-1] 
+                    composite_cost += weights[cost_type] * cost[cost_type][source_node][target_node] 
 
             graph.add_edge(source_node, target_node, cost=composite_cost)
 
@@ -128,9 +152,9 @@ def create_model_graph(cost:Dict[str,Dict[int,np.ndarray]], nodes:Dict[int,int],
         
 def get_weights(): 
     return {
-        'distance': 0.4,
-        'energy': 0.4,
-        'travel_time': 0.2
+        'distance': 0.3,
+        'energy': 0.6,
+        'travel_time': 0.1
     }
 
 
@@ -227,6 +251,7 @@ def denormalize_cost(scalers:defaultdict, cost:dict):
 
     return cost             
 
+
 def load_generated_data(): 
     cost = defaultdict()
     data_path = f"{os.getcwd()}/assets/data"
@@ -237,7 +262,6 @@ def load_generated_data():
         cost[name] = df.values.astype(np.float32)
     
     return cost
-
 
 
 def calculate_recharge_steps(max_battery:float, energy_spent:float):  
@@ -266,3 +290,60 @@ def draw_circular_graph(G:nx.DiGraph):
         plt.scatter([],[],label=labels[i],color=colors_top_10[i])
     plt.legend(loc='center')
     plt.show()
+
+
+def add_virtual_nodes(cost_bundle: dict, clones: dict) -> dict:
+    """
+    Return a *new* cost_bundle in which every metric has been expanded so that:
+      • each original row is k elements longer (one entry per clone);
+      • k new rows (one per clone) have been added;
+      • distance(u, clone_j) == distance(u, prototype_of_j).
+    All arrays remain independent (no accidental views).
+    """
+    k                = len(clones)                       # how many clones
+    clone_ids        = list(clones.keys())
+    prototypes       = list(clones.values())
+    prototype_lookup = {c: p for c, p in clones.items()}
+
+    # --- discover basic sizes and dtypes once ------------------------------
+    any_metric    = next(iter(cost_bundle))
+    any_row       = next(iter(cost_bundle[any_metric].values()))
+    n_old, dtype  = len(any_row), any_row.dtype
+    n_new         = n_old + k
+
+    out = deepcopy(cost_bundle)          # keep caller's object untouched
+
+    # -----------------------------------------------------------------------
+    # 1) EXTEND **EXISTING** ROWS
+    # -----------------------------------------------------------------------
+    for metric, rows in out.items():
+        for node, row in rows.items():
+            # collect, in order, the distance from this node to each prototype
+            addon = np.fromiter((row[prototype_lookup[c]] for c in clone_ids),
+                                dtype=dtype, count=k)
+            rows[node] = np.concatenate([row, addon])
+    # -----------------------------------------------------------------------
+    # 2) BUILD ROWS FOR THE CLONES THEMSELVES
+    # -----------------------------------------------------------------------
+    for metric, rows in out.items():
+        for j, clone_id in enumerate(clone_ids):
+            p         = prototype_lookup[clone_id]
+            base_row  = rows[p][:n_old]            # original part (length n_old)
+            zeros_blk = np.zeros(k, dtype=dtype) # clone-vs-clone block
+            zeros_blk = zeros_blk + 0.001   #epsilon factor. 
+            new_row = np.concatenate([base_row, zeros_blk])
+
+            new_row[clone_id] = 0 
+
+
+            rows[clone_id] = new_row
+
+    # -----------------------------------------------------------------------
+    # 3) MAKE SURE **EVERY** ROW IS EXACTLY n_new LONG
+    #    (defensive – catches bugs early)
+    # -----------------------------------------------------------------------
+    for metric, rows in out.items():
+        for node, row in rows.items():
+            assert len(row) == n_new, f"{metric}:{node} is wrong length"
+
+    return out

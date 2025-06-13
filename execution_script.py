@@ -298,7 +298,7 @@ else: # Default Choice to Generate all points on the map and on the users.
         coverage_time=MAX_COVERAGE_TIME
     )
     logger.debug(f"✅ Preprocessed Data Completed successfully")  
-    
+
     vor_map = map_generator.vor_map
     deallocate_memory(map_generator)
     deallocate_memory(regions)

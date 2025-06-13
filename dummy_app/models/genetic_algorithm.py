@@ -155,7 +155,7 @@ class GASolution:
 
             try: 
                 node_from = self.nodes[individual[i]]
-                node_to = self.nodes[individual[i+1]] -1
+                node_to = self.nodes[individual[i+1]] 
                 total_distance += cost['distance'][node_from][node_to]
                 total_energy += cost['energy'][node_from][node_to]
                 travel_time += cost['travel_time'][node_from][node_to]

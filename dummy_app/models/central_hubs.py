@@ -1,7 +1,7 @@
 import networkx as nx
 import numpy as np 
 import pandas as pd 
-from typing import Dict, List
+from typing import Dict, List, Any
 from sklearn.preprocessing import MinMaxScaler
 
 class CentralHub: 
@@ -74,8 +74,7 @@ class CentralHub:
 
             
 
-    def get_bridge_nodes(self, graph:nx.DiGraph, cluster_nodes:List[int], cost_dist:Dict[int,np.ndarray], nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
-
+    def get_bridge_nodes(self, graph:nx.DiGraph, cluster_nodes:List[int], cost_dist:Any, nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
         depot_id = nodes_dict[len(nodes_dict)-1]
         self.calculate_betweeness(graph, cluster_nodes, nodes_dict,cost_dist,depot_id=depot_id)
         self.get_node_with_min_total_distance(cluster_nodes, cost_dist, nodes_dict,depot_id=depot_id)

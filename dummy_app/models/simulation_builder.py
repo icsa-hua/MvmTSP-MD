@@ -158,8 +158,8 @@ class Builder(MVMTSPConfig):
         return data 
 
 
-    def preprocess_generated_data(self, distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude):
-        data = super().preprocess_generated_data(distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude)
+    def preprocess_generated_data(self, distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude, coverage_time):
+        data = super().preprocess_generated_data(distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude, coverage_time)
         self.depots_for_agents = self.assign_agents_to_areas(len(self.agents), self.depots)
         logger.debug("✅ Preprocessing of generated data completed successfully...")
         return data 
@@ -249,27 +249,27 @@ class Builder(MVMTSPConfig):
                         # current_node = reverse_dict[duble[1]]
                         # found_next = True
 
-                        # if all(
-                        #     cluster.t[current_node, next_node, agent_id, t].varValue == 1
-                        #     for t in range(timestep, timestep + duration)
-                        #     if t in cluster.timeframe
-                        # ):
+                        if all(
+                            cluster.t[current_node, next_node, agent_id, t].varValue == 1
+                            for t in range(timestep, timestep + duration)
+                            if t in cluster.timeframe
+                        ):
                             # This is a legitimate travel
-                        triplet = (
-                            cluster.nodes_dict[current_node],
-                            cluster.nodes_dict[next_node],
-                            timestep,
-                        )
+                            triplet = (
+                                cluster.nodes_dict[current_node],
+                                cluster.nodes_dict[next_node],
+                                timestep,
+                            )
                      
                             paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
-                            # Optional: append once with duration, or multiple times
-                        for d in range(duration):
-                            actual_time += 1
-                            # paths[agent_name].append((triplet[0], triplet[1], actual_time))
+                                # Optional: append once with duration, or multiple times
+                            for d in range(duration):
+                                actual_time += 1
+                                # paths[agent_name].append((triplet[0], triplet[1], actual_time))
 
 
-                        wait_step = timestep + duration
+                            wait_step = timestep + duration
 
                             # if all(cluster.wait[agent_id,t].varValue == 1 
                             #        for t in range(wait_step, wait_step + self.coverage_time)
@@ -693,7 +693,7 @@ class Builder(MVMTSPConfig):
         
     def get_travel_time(self, i, j, nodes_dict): 
         return math.ceil(self.travel_cost[nodes_dict[i]-1, nodes_dict[j]-1])
-    
+             
 
     def post_process_interpolation(self, agents_paths_clusters): 
 

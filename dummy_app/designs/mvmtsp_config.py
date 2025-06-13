@@ -17,7 +17,7 @@ import resource
 import random 
 import networkx as nx
 from pathlib import Path
-from sklearn.preprocessing import MinMaxScaler 
+from sklearn.preprocessing import MinMaxScaler, StandardScaler 
 from collections import defaultdict
 import pdb
 from k_means_constrained import KMeansConstrained
@@ -303,6 +303,7 @@ class MVMTSPConfig(ABC):
 
         self.depots = depots 
         # combine al normalized data
+
         data = pd.concat([distances, energies, travel_times, nodes], axis=1, join='inner')
         return data 
 
@@ -364,7 +365,7 @@ class MVMTSPConfig(ABC):
         max_nodes = 0 
         
         # Reserve 10–15% for emergency return
-        reserve = self.max_battery * 0.15
+        reserve = self.max_battery * 0.45
         adjusted_energy = self.average_energy + self.average_coverage_energy 
         
         max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 1
