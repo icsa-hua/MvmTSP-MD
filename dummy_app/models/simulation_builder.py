@@ -23,16 +23,18 @@ from geopy.distance import geodesic
 
 class Builder(MVMTSPConfig):
 
-    def __init__(self, config:Dict[str,Any], trials:int, scenario:str='energy'): 
-        super().__init__()
+    def __init__(self, config:Dict[str,Any], trials:int): 
         
-        self.enable_ga:bool = config['genetic_algorithm']
-        self.constraints:List[str] = config['constraints']
-        self.V:pd.DataFrame = pd.DataFrame() 
-        self.v:int = 0 
+        super().__init__(
+            env_type=config["env_type"], 
+            max_battery=config["max_battery"],
+            max_coverage_time=config["max_coverage_time"],
+            enable_ga=config["enable_ga"],
+            scenario=config["scenario"]
+        )
+        
         self.metrics = Metrics(verbose=True) 
         self.recharge_time_window:int = 5 #descrete time steps
-        self.scenario:str = scenario 
         self.num_constraints = 0 
         self.variables_count = 0
         self.Time = 0 
@@ -43,7 +45,7 @@ class Builder(MVMTSPConfig):
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
     
 
-    def assign_agents_to_areas(self, plethos:int=0, depots:List[int]=[])->Dict[int,int]:
+    def assign_agents_to_areas(self, plethos, depots:Any)->Dict[int,int]:
         return super().assign_agents_to_areas(plethos, depots)
     
 
@@ -158,9 +160,19 @@ class Builder(MVMTSPConfig):
         return data 
 
 
-    def preprocess_generated_data(self, distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude, coverage_time):
-        data = super().preprocess_generated_data(distance_matrix, centroids, user_points, depots, num_of_agents, v_ver, v_hor, max_battery, altitude, coverage_time)
-        self.depots_for_agents = self.assign_agents_to_areas(len(self.agents), self.depots)
+    def preprocess_generated_data(self, distance_matrix:np.ndarray, centroids:list, depots:np.ndarray, num_of_agents:int,  v_ver:float,  v_hor:float,  altitude:int,  coverage_time:int,  user_points=defaultdict()):
+        data = super().preprocess_generated_data(
+            distance_matrix=distance_matrix,
+            centroids=centroids, 
+            user_points=user_points,
+            depots=depots, 
+            num_of_agents=num_of_agents,
+            v_ver=v_ver, 
+            v_hor=v_hor, 
+            altitude=altitude,
+            coverage_time=coverage_time
+        )
+        self.depots_for_agents = self.assign_agents_to_areas(plethos=len(self.agents), depots=self.depots)
         logger.debug("✅ Preprocessing of generated data completed successfully...")
         return data 
 

@@ -1,17 +1,12 @@
 import numpy as np 
 import pandas as pd 
-import pdb
+import matplotlib.pyplot as plt
+
 from typing import Union, Any, Tuple, Dict
 from pathlib import Path
-import matplotlib.pyplot as plt
 from scipy.spatial import Voronoi, voronoi_plot_2d 
 from shapely.geometry import Point
-
-from geopy.distance import distance
-from geopy import Point as GeoPoint
-
 from pyproj import Transformer
-
 from dummy_app.designs.voronoi_map import Map
 from dummy_app.tools.logger import logger 
 
@@ -190,6 +185,3 @@ class GroundUserGroup:
         if self.scatter: 
             self.scatter.set_offsets(self.get_coords())
             
-
-    # def run(self, duration:int=3600)->None: 
-    #     self.env.run(until=duration)

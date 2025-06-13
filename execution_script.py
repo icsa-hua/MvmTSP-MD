@@ -7,7 +7,6 @@ from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.models.energy_model import DroneEnergyModel
 from dummy_app.models.coverage import * 
 from dummy_app.tools.common import deallocate_memory
-from geopy.distance import geodesic
 
 from tqdm import tqdm 
 import os 
@@ -27,7 +26,7 @@ PROJECT_DIR = os.getcwd()
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 TRIALS = 300 
 MAX_BATTERY = 1500 #Wh 
-NUMBER_OF_AGENTS = 4 # MIN 2. 
+NUMBER_OF_AGENTS = 6 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
 NUMBER_OF_AREAS = 50 # NOTE: used for Voronoi map generation.
 NUMBER_OF_USERS = 7
@@ -50,12 +49,21 @@ parser.add_argument("--gen_areas", action="store_true", help="Generate new Voron
 parser.add_argument("--show_map", action="store_true", help="Show the generated Voronoi map.")
 parser.add_argument("--scenario", type=str, default="cooperative", help="Scenario to run.")
 parser.add_argument("--enable_ga", type=str, default='yes', help="Initialize solver with Genetic Algorithm")
-
+parser.add_argument("--num_agents", type=int, default=NUMBER_OF_AGENTS, help="Number of agents to simulate.")
+parser.add_argument("--num_users", type=int, default=NUMBER_OF_USERS, help="Number of users to simulate.")
+parser.add_argument("--max_battery", type=int, default=MAX_BATTERY, help="Maximum battery capacity.")
+parser.add_argument("--max_coverage_time", type=int, default=MAX_COVERAGE_TIME, help="Maximum coverage time.")
+parser.add_argument("--num_areas", type=int, default=NUMBER_OF_AREAS, help="Number of areas to simulate.")
+parser.add_argument("--env", type=str, default="urban", help="Environment to simulate.")
 args = parser.parse_args()
 
-SCENARIO = args.scenario # NOTE: Scenario to run
-
 logger.debug(f"Arguments: Generate -> {args.gen_areas}, Show Map -> {args.show_map}")
+
+NUMBER_OF_AGENTS = args.num_agents
+NUMBER_OF_USERS = args.num_users
+MAX_BATTERY = args.max_battery
+MAX_COVERAGE_TIME = args.max_coverage_time
+NUMBER_OF_AREAS = args.num_areas
 
 # Declare which constraints to use 
 """
@@ -88,79 +96,25 @@ Const 25 --> Target Edge count (the number of arcs enabled by x)
 """                                                              
 
 
-if SCENARIO == "cooperative": 
-    constraints = [
-        # 'const_0', 
-        'const_1', 
-        # 'const_2', 
-        # 'const_3', 
-        'const_4', 
-        'const_5', 
-        # 'const_6', 
-        # # 'const_7', 
-        'const_8', 
-        # 'const_9', 
-        # 'const_10', 
-        # 'const_11', 
-        # 'const_12', 
-        # 'const_13', 
-        # # 'const_14', 
-        # # 'const_15', 
-        # # 'const_16', 
-        # 'const_17', 
-        # 'const_18', 
-        'const_19', 
-        # 'const_20', 
-        # # 'const_21', 
-        # 'const_22', 
-        'const_23', 
-        # # 'const_24',
-        # 'const_25',
-        # 'const_26',
-        # 'const_27',
-        # 'const_27'
-        # 'const_28'    
-    ] 
-
-else: 
-    constraints = [
-        # 'const_0',
-        'const_1', 
-        # 'const_2', 
-        # 'const_3', 
-        # 'const_4', 
-        'const_5', 
-        # 'const_6', 
-        'const_8', 
-        # 'const_9', 
-        # 'const_10', 
-        # 'const_11', 
-        # 'const_12',  
-        # 'const_13',
-        # 'const_14', 
-        'const_15', 
-        'const_16', 
-        'const_17', 
-        # 'const_18', 
-        # 'const_19', 
-        # 'const_20', 
-        # 'const_22', 
-        # 'const_23', 
-        # 'const_24',
-        # 'const_26',
-        'const_27',
-        # "const_28",
-        # 'const_29',
-    ]  
-
+# NOTE: Create different pipelines based on scenario choice.  
+   
+# Config should pass all the information necessary inside the builder. 
+# -scenario, 
+# -environment type 
+# -max_battery 
+# -max_coverage_time
 config = {
     "genetic_algorithm": True if args.enable_ga=='yes' else False, 
-    "constraints":constraints,
+    "env_type": args.env, 
+    "max_battery":args.max_battery, 
+    "max_coverage_time":args.max_coverage_time,
+    "scenario":args.scenario, 
+    "enable_ga":args.enable_ga,
 }
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 
-problem = Builder(config, TRIALS, scenario=SCENARIO)
-logger.info(f"Constraints Utilized --> {constraints}")
+problem = Builder(config, TRIALS)
+
 # Create Simulation environment to simulate mobility for users and agents
 mobility_sim = EnvSim(trials=TRIALS) 
 
@@ -228,7 +182,6 @@ if not args.gen_areas:
 
         # Save as MP4 (requires ffmpeg)
         ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
-        logger.info(f"The constraint use for this problem: {constraints}")
 
     except KeyboardInterrupt as kb:
         plt.close(mobility_sim.fig)
@@ -288,14 +241,13 @@ else: # Default Choice to Generate all points on the map and on the users.
     data = problem.preprocess_generated_data(
         distance_matrix=distance_matrix, 
         centroids=centroids,
-        depots=depots,
-        user_points=user_points,
+        depots=depots if not isinstance(depots,list) else np.ndarray(depots),
         num_of_agents=NUMBER_OF_AGENTS,
         v_hor=HORIZONTAL_VELOCITY, 
         v_ver=VERTICAL_VELOCITY,
-        max_battery=MAX_BATTERY, 
         altitude=ALTITUDE, 
-        coverage_time=MAX_COVERAGE_TIME
+        coverage_time=MAX_COVERAGE_TIME,
+        user_points=user_points,
     )
     logger.debug(f"✅ Preprocessed Data Completed successfully")  
 
@@ -324,7 +276,6 @@ else: # Default Choice to Generate all points on the map and on the users.
 
         # Save as MP4 (requires ffmpeg)
         ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
-        logger.info(f"The constraint use for this problem: {constraints}")
 
     except KeyboardInterrupt as kb:
         plt.close(mobility_sim.fig)

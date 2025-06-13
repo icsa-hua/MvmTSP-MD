@@ -11,7 +11,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import distance_matrix 
 from collections import defaultdict
 from scipy.spatial.distance import pdist, squareform 
-from geopy.distance import distance
 from geopy import Point 
 from pyproj import Transformer 
 
@@ -105,6 +104,9 @@ class MapGenerator(Map):
         
     
     def create_environment(self, show_map:bool=False, show_3d_map:bool=False): 
+        regions, centroids, all_user_points = [],[],[]
+        depots, user_points = [], defaultdict(list) 
+        distance_matrix_wgs84 = np.ndarray((0,0))
         try: 
             # Generate points in both utm
             points_utm = self.generate_points()
@@ -323,27 +325,13 @@ class MapGenerator(Map):
         return regions 
 
 
-    def set_boundaries(self, points_utm, buffer_m:int=200): 
+    def set_boundaries(self, points_utm): 
         self.MAX_X = points_utm['X_coords'].max() 
         self.MAX_Y = points_utm['Y_coords'].max() 
         self.MIN_Y = points_utm['Y_coords'].min()
         self.MIN_X = points_utm['X_coords'].min()
-        return
-        lat_min = self.points['Y_coords'].min()
-        lat_max = self.points['Y_coords'].max()
-        lon_min = self.points['X_coords'].min()
-        lon_max = self.points['X_coords'].max()
-       
-        # Create bounding points
-        south = distance(meters=buffer_m).destination(Point(lat_min, (lon_min + lon_max) / 2), bearing=180)
-        north = distance(meters=buffer_m).destination(Point(lat_max, (lon_min + lon_max) / 2), bearing=0)
-        west  = distance(meters=buffer_m).destination(Point((lat_min + lat_max) / 2, lon_min), bearing=270)
-        east  = distance(meters=buffer_m).destination(Point((lat_min + lat_max) / 2, lon_max), bearing=90)
+        
 
-        self.MAX_X = east.longitude
-        self.MAX_Y = north.latitude
-        self.MIN_X = west.longitude
-        self.MIN_Y = south.latitude
-       
+
        
 

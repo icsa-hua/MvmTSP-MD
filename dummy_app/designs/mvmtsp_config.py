@@ -27,7 +27,7 @@ from k_means_constrained import KMeansConstrained
 class MVMTSPConfig(ABC): 
 
     @abstractmethod
-    def __init__(self)->None: 
+    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:"str" )->None: 
 
         self.problem = pl.LpProblem() 
         self.V:pd.DataFrame = pd.DataFrame()
@@ -39,17 +39,19 @@ class MVMTSPConfig(ABC):
         self.move_energy:np.ndarray = np.ndarray((0,0))
         self.average_energy:float = 0.0
         self.depots:Optional[np.ndarray] = None
-        self.distance_metric:str = "euclidean"
         self.average_coverage_energy:float=0.0
-        self.user_points:Dict[int,Tuple[float,float]] = {}  # User points for regionalization
-        self.scenario:str = ""
+        self.user_points = defaultdict(list)  # User points for regionalization
+        self.scenario:str = scenario
         self.ascend_energy = pd.DataFrame
         self.descend_energy= pd.DataFrame
-        self.coverage_time = 0 
+        self.max_battery:int = max_battery
+        self.coverage_time = max_coverage_time
+        self.enable_ga = enable_ga
+        
       
 
     @abstractmethod
-    def assign_agents_to_areas(self, plethos:int=0, depots:List[int]=[])->Dict[int,int]:
+    def assign_agents_to_areas(self, plethos:int, depots:Any)->Dict[int,int]:
         """ 
             Assign agents randomly and equally to depot areas.
 
@@ -130,7 +132,6 @@ class MVMTSPConfig(ABC):
         distances = pd.read_csv(ensure_str_path(distances_path))
         energies = pd.read_csv(ensure_str_path(energies_path))
         nodes = pd.read_csv(ensure_str_path(nodes_path))
-        customers = pd.read_csv(ensure_str_path(customers_path))
 
         # Assign Nodes and Agents 
         self.V = nodes 
@@ -143,7 +144,7 @@ class MVMTSPConfig(ABC):
         
         self.average_coverage_energy = energy_model.coverage_energy(1250) # In J 
         self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
-        self.normalized_coverage_energy = self.average_coverage_energy / max_battery  # Normalize coverage energy
+
         logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
 
 
@@ -183,7 +184,6 @@ class MVMTSPConfig(ABC):
             self.depots = self.V['Area_id'].iloc[np.array([7, 8])].values
         else: 
             raise ValueError("Not enough nodes to select default depots at positions 7 and 8.")
-        self.distance_metric = "euclidean"
         # combine al normalized data
         data = pd.concat([distances, energies, travel_times, nodes], axis=1, join='inner')
         return data 
@@ -192,15 +192,14 @@ class MVMTSPConfig(ABC):
     def preprocess_generated_data(
             self, 
             distance_matrix:np.ndarray, 
-            centroids:list, 
-            user_points:dict, 
+            centroids:list,   
             depots:np.ndarray, 
             num_of_agents:int, 
             v_ver:float, 
             v_hor:float, 
-            max_battery:float, 
             altitude:int, 
-            coverage_time:int
+            coverage_time:int,
+            user_points=defaultdict(), 
     )->pd.DataFrame:
         def normalize_data(df:pd.DataFrame, name:str='')->pd.DataFrame:
             scalers_path = f"{os.getcwd()}/assets/scalers"
@@ -218,7 +217,6 @@ class MVMTSPConfig(ABC):
         if not os.path.exists(data_path):
             os.mkdir(data_path)
 
-        self.max_battery = max_battery
 
         distances = pd.DataFrame(distance_matrix, columns=[f'dist_{i}' for i in range(1, len(distance_matrix)+1)])
         distances.to_csv(f"{data_path}/distances.csv")
@@ -226,7 +224,7 @@ class MVMTSPConfig(ABC):
         energy_model = DroneEnergyModel(
             v_hor=v_hor, 
             v_ver=v_ver,
-            max_battery=max_battery)
+            max_battery=self.max_battery)
         
         energy_matrix = np.ndarray(distance_matrix.shape)
         
@@ -314,6 +312,7 @@ class MVMTSPConfig(ABC):
         # self.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.05']))
         pass
 
+
     @abstractmethod 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]: 
         
@@ -334,7 +333,6 @@ class MVMTSPConfig(ABC):
 
         logger.debug(f"Best Paths: {best_paths} with depot {depot}")
         return best_paths, hof
-
 
 
     @abstractmethod
