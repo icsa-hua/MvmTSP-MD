@@ -1,7 +1,13 @@
+import os 
+import uuid 
 import numpy as np 
-from scipy.stats import gamma, expon, lognorm, weibull_min 
-from dummy_app.tools.logger import logger 
+import pandas as pd 
 import matplotlib.pyplot as plt
+from scipy.stats import norm 
+from scipy.integrate import quad
+from scipy.stats import gamma, expon, lognorm, weibull_min 
+
+from dummy_app.tools.logger import logger 
 
 
 '''
@@ -159,3 +165,60 @@ def plot_pathloss_vs_distance(pathloss_func, terrain_types, comm_type='U2C', h_u
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
+
+def coverage_probability(cluster, num_users, savefile_name, directory, snr, lambda_var:float=1, seed:int=42):
+
+    def rayleigh_pdf_ppp(x): 
+        return 2 * lambda_var * np.pi * x * np.exp(-lambda_var * np.pi * x ** 2) 
+
+    theta_snr_db = np.linspace(-1,30,20) 
+
+    cov_probability = np.zeros((len(snr), len(theta_snr_db)))
+
+    for i, snr_db in enumerate(snr): 
+        for j, threshold in enumerate(theta_snr_db): 
+            prob = 1 - norm.cdf(threshold, loc=snr_db, scale=10) 
+            fun = lambda r: prob * rayleigh_pdf_ppp(r) 
+            cov_probability[i, j],_ = quad(fun, 0, np.inf)
+
+    coverage_PR = np.mean(cov_probability, axis=0)
+    outage = np.subtract(1, coverage_PR)
+
+    results = {
+        'cluster_id':cluster.id, 
+        'theta_snr_db': theta_snr_db,
+        'coverage_PR': coverage_PR,
+        'outage_PR': outage,
+        'num_areas': len(snr),
+        'num_users_per_area': num_users
+    }
+
+    df = pd.DataFrame([results])
+    filename = os.path.join(directory, savefile_name)
+    if not os.path.exists(filename): 
+        df.to_csv(filename, index=False)
+
+    else: 
+        df.to_csv(filename, mode='a', index=False, header=False)
+
+    # Plotting
+    mymap = np.random.rand(7, 3)
+    select = np.random.randint(0, 7)
+
+    image_dir = os.path.join(directory, 'coverage_images') 
+    if not os.path.exists(image_dir):
+        os.makedirs(image_dir)
+
+    image_id = uuid.uuid4()
+    plt.figure(figsize=(8, 5))
+    plt.plot(theta_snr_db, coverage_PR, '-s', color=mymap[select])
+    plt.plot(theta_snr_db, outage, '-s', color='black')
+    plt.title('Coverage/Outage Probability')
+    plt.xlabel('SINR Threshold (dB)')
+    plt.ylabel('Coverage Probability')
+    plt.legend(['CovPR (H=1250, BW=100MHz)', 'OutPR (H=1250, BW=100MHz)'])
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'{image_dir}/cov_out_probability_{image_id}.png')
+    plt.close()

@@ -288,9 +288,9 @@ class MVMTSPConfig(ABC):
         travel_times.to_csv(f'{data_path}/times.csv')
         assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
 
-        distances = normalize_data(distances,name='distance_km')
-        energies = normalize_data(energies, name='energies_Wh')
-        travel_times = normalize_data(travel_times, name='times_min')
+        distances = normalize_data(distances,name='distance')
+        energies = normalize_data(energies, name='energy')
+        travel_times = normalize_data(travel_times, name='travel_time')
 
         self.distance_columns = distances.columns.tolist()
         self.energy_columns = energies.columns.tolist()

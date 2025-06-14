@@ -1,5 +1,7 @@
+import os
 import sys
 import math 
+import uuid
 import random
 import pandas as pd 
 import numpy as np 
@@ -12,7 +14,7 @@ from typing import Dict, Tuple, List, Any
 
 from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.logger import logger
-from dummy_app.models.coverage import coverage_u2c
+from dummy_app.models.coverage import coverage_u2c, coverage_probability
 from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
 
 
@@ -22,8 +24,6 @@ class Cluster:
         self.cluster = cluster 
         self.id = id
         self.employed_agents:List[int] = assignment 
-        if self.employed_agents is None: 
-            logger.error(f"No agents assigned to cluster {self.id}")
         self.max_battery = max_battery
         self.nodes_dict = {} 
         self.timeframe = [] 
@@ -40,6 +40,7 @@ class Cluster:
         self.original_nodes_dict = self.nodes_dict 
         self.V_nodes = list() 
         self.NODES = list() 
+        
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
 
@@ -126,20 +127,16 @@ class Cluster:
                 time=self.cost['travel_time'],
             )
 
-            logger.info(f"Objective function set for energy scenario in cluster {self.id}")
-
         elif objective_function == 'coverage':
-            self.set_coverage_objective()
-            logger.info(f"Objective function set for coverage scenario in cluster {self.id}")
+            self.set_coverage_objective(energy=self.cost['energy'])
+
+        elif objective_function == 'idleness': 
+            self.set_idleness_objective(energy=self.cost['energy'])     
 
         if not hasattr(builder, 'get_travel_time'):
             logger.error("Builder does not have get_travel_time method") 
             raise ValueError("Builder does not have get_travel_time method")    
         
-        if not hasattr(builder, 'set_constraints_for_multi_agent'):
-            logger.error("Builder does not have set_constraints_for_multi_agent method") 
-            raise ValueError("Builder does not have set_constraints_for_multi_agent method")
-
         employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
         
@@ -230,30 +227,24 @@ class Cluster:
 
         self.e = pl.LpVariable.dicts("e", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=self.max_battery, cat='Continuous')
 
+        if scenario == 'individual': 
+            self.precedes = pl.LpVariable.dicts("precedes", ((j, k1, k2) for j in V for k1 in self.employed_agents for k2 in self.employed_agents if k1 < k2), cat='Binary')
+
+
         if objective_functions == 'energy': 
             self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
             
         elif objective_functions == 'coverage':
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
-    
-        if scenario == 'individual': 
-            self.precedes = pl.LpVariable.dicts("precedes", ((j, k1, k2) for j in V for k1 in self.employed_agents for k2 in self.employed_agents if k1 < k2), cat='Binary')
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
 
-            
+        elif objective_functions == "idleness":
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
+         
 
     def set_energy_objective(self, distance, energy, time): 
         V_nodes = list(self.nodes_dict.keys())
-        penalty = 1
-        alpha = 0.5
         weights = get_weights() 
         self.problem.setObjective(
-            # pl.lpSum(
-            #     alpha * self.y[j,v] + 
-            #     # alpha * self.y[j,v] * self.R_points[j] +
-            #     penalty * self.visit_miss[j, v] 
-            #     for j in V_nodes
-            #     for v in self.employed_agents
-            # ) + 
                 pl.lpSum(
                         self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] * weights['energy'] +
                         self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] * weights['distance'] +
@@ -265,21 +256,34 @@ class Cluster:
             )
        
 
+    def set_idleness_objective(self,energy):
+        alpha = 0.6
+        beta = 0.4
 
-    def set_coverage_objective(self)->None:
+        spatial_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j for k in self.employed_agents)
 
-        ALPHA = 0.1
-        BETA = 1
+        timestep_cost = pl.lpSum(self.return_step[k] for k in self.employed_agents)
 
         self.problem.setObjective(
-            # ALPHA * self.T_MAX - 
-            BETA * pl.lpSum(self.R[i] * self.visit[i,v] for i in self.NODES for v in self.employed_agents)
+            alpha * spatial_cost + beta * timestep_cost
         )
-        # self.problem.setObjective(
-        #    pl.lpSum(self.R[i] * self.visit[i, v]
-        #            for i in V_nodes
-        #            for v in self.employed_agents)
-        #     )
+
+
+    def set_coverage_objective(self,energy)->None:
+
+        # Makespan 
+        makespan = pl.LpVariable("makespan", lowBound=0, cat='Continuous')
+
+        for k in self.employed_agents: 
+           self.problem += makespan >= self.return_step[k] 
+
+        alpha = 0.6 
+        beta = 0.4
+        spatial_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j for k in self.employed_agents)
+
+        self.problem.setObjective(
+            alpha * spatial_cost + beta * makespan
+        )
 
 
     def set_up_virtual_nodes_properties(self): 
@@ -300,18 +304,34 @@ class Cluster:
         self.NODES = self.V_nodes[:depot_id] + self.V_nodes[depot_id+1:]
 
 
-        
-
     def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural'):
-        # for Area with id 
+        
+        file_id = uuid.uuid4()
+        
+        coverage_probability_filename = f'cov_out_prob_{file_id}.csv'
+        coverage_directory = f'{os.getcwd()}/assets/results/coverage_prob'
+        
+        self.check_results_file(
+            name=coverage_probability_filename,
+            directory='coverage_prob',
+            type='csv',
+        )
+        
         average_R = defaultdict(float)
         average_sinr = defaultdict(float)
         R = defaultdict(list) 
         sinr = defaultdict(list) 
+        user_per_area = defaultdict(int) 
+        
         for i in self.nodes_dict.keys():
+            
             area = self.nodes_dict[i]
             coords = self.cluster.loc[self.cluster['Area_id'] == area, ['X_coords', 'Y_coords']].values
+            
             if area not in user_points: continue
+            
+            user_per_area[i] = 0 
+            
             for user in user_points[area]:
                 user_coords = (user.x, user.y)
                 horizontal_distance = 0.0                 
@@ -332,17 +352,23 @@ class Cluster:
                 
                 R[i].append(r_value)
                 sinr[i].append(sinr_value)
+                user_per_area[i] += 1
+
             # Convert to numpy arrays for easier calculations
             average_R[i] = float(np.mean(R[i])/1e6) # Convert to Mbps
             average_sinr[i] = float(np.mean(sinr[i]))
             logger.info(f"R: {average_R[i] } Mbps, SINR: {average_sinr[i]} dB for area {area}")
-
+        
+        savefilename = f'{coverage_directory}/{coverage_probability_filename}'
+        
+        coverage_probability(self, num_users=user_per_area, savefile_name=savefilename, directory=coverage_directory, snr = average_sinr)
+        
         self.R = average_R
         self.sinr = average_sinr
-
+        
    
     def get_results(self,builder:Any): 
-       
+        
         logger.debug(f"Cluster Time Frame is {self.timeframe}") 
         if pl.LpStatus[self.problem.status] != 'Optimal': 
             logger.info("❌ Problem is not optimal, returning None...")
@@ -353,68 +379,91 @@ class Cluster:
         NODES = self.NODES
         agents = self.employed_agents
 
-
         reverse_dict = {v:k for k, v in self.nodes_dict.items()}
         depot_ind = reverse_dict[self.depot_id]
         
         # First, find the starting point for each agent
         solution_path = defaultdict()
-        paths = defaultdict()
+        detailed_log = defaultdict()
+        dc = self.nodes_dict
 
         for k in agents:
             solution_path[k] = []
-            paths[k] = [] 
+            detailed_log[k] = [] 
             step = 0
+            start_node = -1 
             for j in NODES:
                 if self.x[depot_ind, j, k].varValue == 1:
                     # Found the first step of the tour
                     start_node = j
-                    path = [depot_ind, start_node]
-                    paths[k].append((depot_ind, start_node,))
-                    arrival_info = [
-                        f"Agent {k} departs Depot {depot_ind} at t=0",
-                        f"Agent {k} arrives at Node {start_node} at t={self.t[start_node, k].varValue:.2f}"
-                    ]
-                    # Now follow the path until we return to the depot
-                    current_node = start_node
-                    while current_node != depot_ind:
-                        found_next = False
-                        for next_node in V_nodes: # V_nodes includes the depot
-                            if self.x[current_node, next_node, k].varValue==1:
-                                path.append(next_node)
-                                if next_node != depot_ind:
-                                    arrival_info.append(
-                                        f"Agent {k} arrives at Node {next_node} at t={self.t[next_node, k].varValue:.2f}"
-                                    )
-                                    
-                                    paths[k].append((current_node, next_node, int(self.t[next_node, k].varValue))) 
-                                else:
-                                    # Use the return_step variable for final arrival
-                                    arrival_info.append(
-                                        f"Agent {k} arrives back at Depot {next_node} at t={self.return_step[k].varValue:.2f}"
-                                    )
-                                    paths[k].append((current_node, next_node, int(self.return_step[k].varValue))) 
+                    break 
 
-                                current_node = next_node
-                                found_next = True
-                                break
-                        if not found_next:
-                            break # Should not happen in a valid tour
+            if start_node != -1:
+                departure_from_depot = 0 
+                arrival__at_start_node = (self.t[start_node,k].varValue) 
+            
+                for t_step in range(round(departure_from_depot), round(self.t[start_node,k].varValue)):
+                    detailed_log[k].append((dc[depot_ind],dc[start_node],t_step))
 
-                    solution_path[k] = (path, arrival_info)
+                arrival_info = [
+                    f"Agent {k} departs Depot {depot_ind} at t=0",
+                    f"Agent {k} arrives at Node {start_node} at t={self.t[start_node, k].varValue:.2f}"
+                ]          
+                current_node = start_node 
+
+
+
+                while current_node != depot_ind:
+                        
+                    next_node_in_path = -1
+                    for next_node in V_nodes:
+                        if self.x[current_node, next_node, k].varValue > 0.5:
+                            next_node_in_path = next_node
+                            break
+
+                    # --- Generate events for the current_node ---
+                    arrival_at_current = self.t[current_node, k].varValue
+                    departure_from_current = arrival_at_current + builder.coverage_time
+                    # --- Generate events for the next_node_in_path ---
+
+                    # Generate "waiting" events at the current node
+                    for t_step in range(round(arrival_at_current), round(departure_from_current)):
+                        detailed_log[k].append((dc[current_node], dc[current_node], t_step))
+
+                    # --- Generate events for the travel: current_node -> next_node_in_path ---
+                    # Handle the final leg back to the depot
+                    if next_node_in_path == depot_ind:
+                        arrival_at_depot = self.return_step[k].varValue
+                        # Generate "moving" events
+                        for t_step in range(round(departure_from_current), round(arrival_at_depot)):
+                            detailed_log[k].append((dc[current_node], dc[depot_ind], t_step))
+                    # Handle a leg to another non-depot node
+                    else:
+                        arrival_at_next = self.t[next_node_in_path, k].varValue
+                        # Generate "moving" events
+                        for t_step in range(round(departure_from_current), round(arrival_at_next)):
+                            detailed_log[k].append((dc[current_node], dc[next_node_in_path], t_step))
+
+                    # Move to the next node for the next loop iteration
+                    current_node = next_node_in_path
+
 
         # Now print the clean, ordered results
-        for k, (path, arrival_info) in solution_path.items():
-            logger.info(f"v--- Agent {k} Final Tour ---v")
-            logger.info(f"Path: {' -> '.join(map(str, path))}")
-            logger.info("Schedule:")
-            for step in arrival_info:
-                logger.info(f"  {step}")
+        # --- Now you can print or use the detailed_log ---
+        for k, events in detailed_log.items():
+            print(f"\n--- Detailed Event Log for Agent {k} ---")
+            # Sort events by timestep just in case of rounding nuances
+            events.sort(key=lambda x: x[2]) 
+            for event in events:
+                if event[0] == event[1]:
+                    logger.debug(f"Time {event[2]:>3}: Agent {k} is WAITING at Node {event[0]}")
+                else:
+                    logger.debug(f"Time {event[2]:>3}: Agent {k} is MOVING from {event[0]} to {event[1]}")
         
         unique_nodes_among_paths = set()
         
-        for path in paths: 
-            for duble in paths[path]:
+        for path in detailed_log: 
+            for duble in detailed_log[path]:
                 if duble[0] not in unique_nodes_among_paths: 
                     unique_nodes_among_paths.add(duble[0]) 
                 if duble[1] not in unique_nodes_among_paths:  
@@ -428,10 +477,10 @@ class Cluster:
         builder.variables_count += len(self.problem.variables())
         logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.nodes_dict.values())}")
         
-        builder.validate_paths(paths=paths, nodes_dict=self.nodes_dict, cluster=self)
-        logger.debug("✅ Solutions validated successfully...")
+        builder.validate_paths(paths=detailed_log, nodes_dict=self.nodes_dict, cluster=self)
+        logger.info("✅ Solutions validated successfully...")
 
-        return paths
+        return detailed_log
 
 
     def get_travel_times(self,i,j, nodes, builder): 
@@ -447,7 +496,24 @@ class Cluster:
         return math.ceil(builder.travel_cost[source, target])
              
 
+    def check_results_file(self, name, directory, type): 
+        parent_dir = os.getcwd() 
+        assets_dir = os.path.join(parent_dir, 'assets') 
+        results_dir = os.path.join(assets_dir, 'results')
+        if not os.path.exists(results_dir): 
+            os.mkdir(results_dir)
 
+        dd = os.path.join(results_dir, directory) 
+        if not os.path.exists(dd):
+            os.mkdir(dd)
+        accepted_files = ['csv', 'txt', 'png', 'jpg']
+        
+        if type not in accepted_files: 
+            raise ValueError(f"Invalid file type. Accepted file types are: {', '.join(accepted_files)}")
+        
+        results_file = os.path.join(results_dir, name + f'.{type}')
+        if os.path.exists(results_file):
+            os.remove(results_file)
 
 
 

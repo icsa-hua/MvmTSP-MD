@@ -7,10 +7,12 @@ from dummy_app.designs.constraint import *
 from dummy_app.tools.logger import logger 
 from typing import Any, List, Dict, Union, Tuple, Mapping
 
+import os 
 import sys
 import math
 import pdb
 import time
+import uuid
 import pulp as pl 
 import numpy as np 
 import pandas as pd
@@ -18,7 +20,6 @@ import networkx as nx
 import timeout_decorator 
 from tqdm import tqdm 
 from collections import defaultdict
-from geopy.distance import geodesic
 
 
 class Builder(MVMTSPConfig):
@@ -530,17 +531,14 @@ class Builder(MVMTSPConfig):
         except Exception as e:
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
-        print("Problem Solved")
+
         # Step 5 extract solution 
         # paths = cluster_object.get_solution()
         # Step 6: Add the recharge phase & synchronize agents 
-        
-        cost = load_generated_data()
+     
         results = extract_per_agent_metrics(
             paths=paths, 
-            distance_costs=cost['distances'], 
-            energy_costs=cost['energies'],
-            time_costs=cost['times'],
+            costs=cluster_object.cost,
             coverage_energy=self.average_coverage_energy
         )
         totalDistance, totalEnergy, totalTime = calculate_totals_from_paths(
@@ -558,61 +556,15 @@ class Builder(MVMTSPConfig):
             "Average SINR" : cluster_object.sinr
         }
 
+        filename = self.create_filename(cluster_object.id) 
+        df = pd.DataFrame([self.problem_results[f'Cluster_{cluster_object.id}']])
+        df.to_csv(filename, mode='a', index=False, header=False) 
+
         paths = self.synchronize_agent_paths(paths, cluster_object)
         print("Amount of CONSTRAINTs: ", len(cluster_object.problem.constraints))
         pdb.set_trace()
         deallocate_memory(cluster_object)
         return paths 
-
-
-    def set_constraints_for_multi_agent(self, cluster:Any): 
-        available_constraints = {
-            "const_0":constraint_0, "const_1":constraint_1,
-            "const_2":constraint_2, "const_3":constraint_3,
-            "const_4":constraint_4, "const_5":constraint_5,
-            "const_6":constraint_6, "const_7":constraint_7,
-            "const_8":constraint_8, "const_9":constraint_9,
-            "const_10":constraint_10, "const_11":constraint_11,
-            "const_12":constraint_12, "const_13":constraint_13,
-            "const_14":constraint_14, "const_15":constraint_15,
-            "const_16":constraint_16, "const_17":constraint_17, 
-            "const_18":constraint_18, "const_19":constraint_19,
-            "const_20":constraint_20, "const_21":constraint_21,
-            "const_22":constraint_22, "const_23":constraint_23,
-            "const_24":constraint_24, "const_25":constraint_25,
-            "const_26":constraint_26, "const_27":constraint_27,
-            "const_28":constraint_28, "const_29":constraint_29,
-            "const_30":constraint_30}
-
-        
-        employed_agents = ["Agent_" + str(agent_id) for agent_id in cluster.employed_agents]
-        list_of_agents = {x:int(x.split('_')[-1]) for x in employed_agents}
-        header = list_of_agents[employed_agents[0]]
-        reverse_nodes = {v: k for k, v in cluster.nodes_dict.items()}
-        V_nodes = list(cluster.nodes_dict.keys())
-
-        if self.enable_ga: # NOTE: Finalized 
-              for a in cluster.employed_agents: 
-                  for i in range(len(cluster.initial_population[a][0])-1): 
-                      node = reverse_nodes[cluster.initial_population[a][0][i]]
-                      next_node = reverse_nodes[cluster.initial_population[a][0][i+1]] 
-                      cluster.x[node, next_node, header].setInitialValue(1) 
-        
-        logger.info(f"Running Through Constraints |")
-        
-        for const in available_constraints:
-            if const not in self.constraints: continue
-            try: 
-                available_constraints[const](
-                    cluster=cluster,
-                    builder=self,
-                    V_nodes=V_nodes,
-                    list_of_agents=list_of_agents,
-                )
-                logger.info(f"✅ Constraint {const} set successfully...")
-            except Exception as e:
-                logger.exception(f"❌ Error setting constraint {const} for cluster: {e}")
-                raise ValueError(f"Error setting constraint {const} for cluster")
 
 
     def get_depot_index(self, ordered_nodes, k): 
@@ -626,7 +578,7 @@ class Builder(MVMTSPConfig):
         depot_ind = reverse[cluster.depot_id]
         all_paths = {} 
         key_points = {} 
-        pdb.set_trace()
+        
         for agent_id, path in paths.items(): 
             visit_nodes = set() 
             seen_edges = set()
@@ -634,12 +586,11 @@ class Builder(MVMTSPConfig):
             if len(path) == 0: 
                 logger.debug(f"Agent {agent_id} has no path")
                 continue 
-
             if path[-1][1] != cluster.depot_id: 
                 raise ValueError(f"{agent_id} does not return to depot")
             
             visit_nodes.add(cluster.depot_id)
-
+               
 
             # 2.  include the very last arrival node
             for step in path:
@@ -814,4 +765,21 @@ class Builder(MVMTSPConfig):
             terrain_type = terrain_type,
         )
 
+
+    def create_filename(self, cluster_id:int): 
+        id = uuid.uuid4() 
+        filename = f'Cluster_{cluster_id}_numerical_results_{id}.csv'
+        directory = 'cluster_performance'
+        parent_dir = f'{os.getcwd()}/assets/results'
+        if not os.path.exists(os.path.join(parent_dir, directory)):
+            os.mkdir(os.path.join(parent_dir, directory))
+
+        filename = os.path.join(parent_dir, directory, filename) 
+
+        if not os.path.exists(filename):
+            with open(filename, 'w') as f:
+                f.write('') 
+
+        return filename
+            
 

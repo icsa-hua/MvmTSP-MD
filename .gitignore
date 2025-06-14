@@ -1,5 +1,6 @@
 assets/logs/*
-assets/env_settings/* 
+assets/env_settings/*
+assets/results/* 
 assets/data/*
 MV_MTSP.egg-info 
 resources 

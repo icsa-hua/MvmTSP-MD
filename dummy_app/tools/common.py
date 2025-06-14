@@ -184,22 +184,32 @@ def calculate_totals_from_paths(
 
 def extract_per_agent_metrics(
     paths: Any,
-    distance_costs: np.ndarray,
-    energy_costs: np.ndarray,
-    time_costs: np.ndarray,
+    costs: dict,
     coverage_energy:float
+
 ) -> Dict[str,Dict[str, float]]:
     """
     Return individual distance, energy, and time for each agent's path.
     """
+
+    scalers = load_scalers()
+    for scaler in scalers: 
+        cost_name = scaler.split('_')[-1]
+        if cost_name == 'time': 
+            cost_name = 'travel_time'
+        cost = costs[cost_name]
+        import pdb; pdb.set_trace()
+
+        costs[cost_name] = scaler.inverse_transform(cost)
+
     results = defaultdict(dict)
-    
     for agent in paths:
         visited_nodes = []
         dist = 0.0 
         energy = 0.0 
         duration = 0.0 
         for i, j, _ in paths[agent]:
+
             if (i,j) in visited_nodes:
                 duration += 1
                 continue 
@@ -209,9 +219,9 @@ def extract_per_agent_metrics(
                 duration += 1
                 visited_nodes.append((i,j))
                 continue
-            dist += distance_costs[i, j]
-            energy += energy_costs[i, j] 
-            duration += time_costs[i, j]
+            dist += costs['distance'][i][j]
+            energy += costs['energy'][i][j] 
+            duration += costs['travel_time'][i][j]
             visited_nodes.append((i,j))
         results[agent] = {'distance': dist, 'energy': energy, 'time': duration}
 

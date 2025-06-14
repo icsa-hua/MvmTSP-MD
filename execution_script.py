@@ -8,6 +8,27 @@ from dummy_app.models.energy_model import DroneEnergyModel
 from dummy_app.models.coverage import * 
 from dummy_app.tools.common import deallocate_memory
 
+
+
+
+
+
+"""
+TODO: 
+1. Extract the duration included time paths for each agent. 
+2. Try mninimizing idleness for agents in the individual scenario 
+3. Improve visualization.   
+4. OUTAGE/COVERAGE PROBABILITY - done
+"""
+
+
+
+
+
+
+
+
+
 from tqdm import tqdm 
 import os 
 import argparse
@@ -41,7 +62,7 @@ MAX_COVERAGE_TIME = 5
 logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {TRIALS}\n Number of Agents -> {NUMBER_OF_AGENTS}\n Max Battery -> {MAX_BATTERY} Wh\n Number of Areas -> {NUMBER_OF_AREAS}\n Vertical Velocity -> {VERTICAL_VELOCITY} m/s\n Horizontal Velocity -> {HORIZONTAL_VELOCITY} m/s")
 
 scenario_choices = ['cooperative', 'individual']
-objective_choices = ['energy', 'coverage']
+objective_choices = ['energy', 'coverage', 'idleness']
 env_choices = ['urban', 'rural', 'forest', 'mountain']
 
 # Progress bar 
