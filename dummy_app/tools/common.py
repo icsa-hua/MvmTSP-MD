@@ -98,12 +98,6 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
             nodes_dict[count] = i      
             count += 1    
 
-    # remove_original_nodes = set(virtual_nodes.values()) 
-    # for node in remove_original_nodes: 
-    #     nodes_dict.pop(reverse_nodes[node]) 
-        # cost_bundle['distance'].pop(node)
-        # cost_bundle['energy'].pop(node)
-        # cost_bundle['travel_time'].pop(node)
 
     assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
     "Mismatch between distance, energy, travel_time and R_points dictionary length"
@@ -186,7 +180,6 @@ def calculate_totals_from_paths(
         total_time += results[agent]['time']
 
     return total_distance, total_energy, total_time
-
 
 
 def extract_per_agent_metrics(
@@ -300,48 +293,36 @@ def add_virtual_nodes(cost_bundle: dict, clones: dict) -> dict:
       • distance(u, clone_j) == distance(u, prototype_of_j).
     All arrays remain independent (no accidental views).
     """
-    k                = len(clones)                       # how many clones
-    clone_ids        = list(clones.keys())
-    prototypes       = list(clones.values())
+    k = len(clones)                       
+    clone_ids = list(clones.keys())
+    prototypes = list(clones.values())
     prototype_lookup = {c: p for c, p in clones.items()}
 
-    # --- discover basic sizes and dtypes once ------------------------------
-    any_metric    = next(iter(cost_bundle))
-    any_row       = next(iter(cost_bundle[any_metric].values()))
-    n_old, dtype  = len(any_row), any_row.dtype
-    n_new         = n_old + k
+    any_metric = next(iter(cost_bundle))
+    any_row = next(iter(cost_bundle[any_metric].values()))
+    n_old, dtype = len(any_row), any_row.dtype
+    n_new = n_old + k
 
-    out = deepcopy(cost_bundle)          # keep caller's object untouched
+    out = deepcopy(cost_bundle)          
 
-    # -----------------------------------------------------------------------
-    # 1) EXTEND **EXISTING** ROWS
-    # -----------------------------------------------------------------------
+
     for metric, rows in out.items():
         for node, row in rows.items():
             # collect, in order, the distance from this node to each prototype
             addon = np.fromiter((row[prototype_lookup[c]] for c in clone_ids),
                                 dtype=dtype, count=k)
             rows[node] = np.concatenate([row, addon])
-    # -----------------------------------------------------------------------
-    # 2) BUILD ROWS FOR THE CLONES THEMSELVES
-    # -----------------------------------------------------------------------
+
     for metric, rows in out.items():
         for j, clone_id in enumerate(clone_ids):
-            p         = prototype_lookup[clone_id]
+            p = prototype_lookup[clone_id]
             base_row  = rows[p][:n_old]            # original part (length n_old)
             zeros_blk = np.zeros(k, dtype=dtype) # clone-vs-clone block
-            zeros_blk = zeros_blk + 0.001   #epsilon factor. 
+            zeros_blk = zeros_blk + 1   #epsilon factor. 
             new_row = np.concatenate([base_row, zeros_blk])
-
             new_row[clone_id] = 0 
-
-
             rows[clone_id] = new_row
 
-    # -----------------------------------------------------------------------
-    # 3) MAKE SURE **EVERY** ROW IS EXACTLY n_new LONG
-    #    (defensive – catches bugs early)
-    # -----------------------------------------------------------------------
     for metric, rows in out.items():
         for node, row in rows.items():
             assert len(row) == n_new, f"{metric}:{node} is wrong length"

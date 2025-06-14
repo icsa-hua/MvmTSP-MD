@@ -4,15 +4,16 @@ import random
 import pandas as pd 
 import numpy as np 
 import pulp as pl 
-from copy import deepcopy
 import networkx as nx 
+
+from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Tuple, List, Any
-from geopy.distance import geodesic
-from dummy_app.tools.common import deallocate_memory, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+
+from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
 from dummy_app.tools.logger import logger
 from dummy_app.models.coverage import coverage_u2c
-from dummy_app.designs.constraint import all_constraints
+from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
 
 
 class Cluster: 
@@ -107,40 +108,33 @@ class Cluster:
         self.timeframe = list(range(0, total_time + 1))
 
 
-    def problem_formulation(self, builder, scenario:str='cooperative'): 
+    def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy'): 
         
-
-        def get_depot_node(depot_id, nodes_dict):
-            reverse = {v: k for k, v in nodes_dict.items()}
-            return reverse[depot_id]
         V_nodes = list(self.nodes_dict.keys())
 
         # Get duration of each trip (arc) 
-        # self.tr_times = {(i,j):builder.get_travel_time(i, j, self.nodes_dict) for i in V_nodes for j in V_nodes}
         self.tr_times = {(self.nodes_dict[i],self.nodes_dict[j]):self.get_travel_times(i, j, self.nodes_dict, builder) for i in V_nodes for j in V_nodes}
 
         # Set the decision variables 
-        self.create_problem(scenario=scenario) 
+        self.create_problem(scenario=scenario, objective_functions=objective_function) 
 
         # Set the loss function 
-        if scenario == 'cooperative':
-            self.set_objective(
+        if objective_function == 'energy':
+            self.set_energy_objective(
                 distance=self.cost['distance'],
                 energy=self.cost['energy'], 
                 time=self.cost['travel_time'],
-                wait_energy=builder.average_coverage_energy
             )
-            # self.problem += self.T_MAX
+
             logger.info(f"Objective function set for energy scenario in cluster {self.id}")
-        elif scenario == 'coverage':
+
+        elif objective_function == 'coverage':
             self.set_coverage_objective()
             logger.info(f"Objective function set for coverage scenario in cluster {self.id}")
-
 
         if not hasattr(builder, 'get_travel_time'):
             logger.error("Builder does not have get_travel_time method") 
             raise ValueError("Builder does not have get_travel_time method")    
-        
         
         if not hasattr(builder, 'set_constraints_for_multi_agent'):
             logger.error("Builder does not have set_constraints_for_multi_agent method") 
@@ -148,13 +142,16 @@ class Cluster:
 
         employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
-        all_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+        
+        if scenario == 'cooperative':
+            cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
     
-        # builder.set_constraints_for_multi_agent(self)
+        elif scenario == 'individual':
+            individual_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+
         builder.solve_problem(self) 
 
         return self.get_results(builder=builder)
-        # return builder.create_solution(self)
 
 
     def get_solution(self): # Test Trial #TODO: Implement this to extract the solution from the MILP problem. 
@@ -206,20 +203,15 @@ class Cluster:
         return paths
     
 
-    def create_problem(self, scenario:str='cooperative')->None: 
+    def create_problem(self, scenario:str='cooperative', objective_functions:str="energy")->None: 
         
         self.set_up_virtual_nodes_properties()
 
         V = self.V_nodes
         NODES = self.NODES
 
-        if scenario == 'cooperative': 
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
-        elif scenario == 'coverage':
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
-    
         self.x = pl.LpVariable.dicts("x", ((i,j,v) for i in V for j in V for v in self.employed_agents), cat='Binary')
-        
+    
         self.t = pl.LpVariable.dicts("t", ((i,v) for i in V  for v in self.employed_agents), lowBound=0, cat='Continuous')
         
         # Node visitation per agent
@@ -227,24 +219,33 @@ class Cluster:
 
         # toor ordering and loop avoidance 
         self.p = pl.LpVariable.dicts("p", ((j,v) for j in V for v in self.employed_agents),lowBound=0, upBound=len(V)-1, cat='Integer')
-       
+    
         # total number of nodes visited per agent
         self.u = pl.LpVariable.dicts("u", (v for v in self.employed_agents),lowBound=0, cat='Integer')
-       
+    
         # Return step 
         self.return_step = pl.LpVariable.dicts("return", ((k) for k in self.employed_agents), lowBound=self.timeframe[0], cat='Continuous')
         
         # self.wait = pl.LpVariable.dicts("wait", ((v,t) for v in self.employed_agents for t in self.timeframe), cat="Binary")
 
         self.e = pl.LpVariable.dicts("e", ((i,v) for i in V for v in self.employed_agents),lowBound=0, upBound=self.max_battery, cat='Continuous')
-        
-        
 
-    def set_objective(self, distance, energy, time, wait_energy): 
+        if objective_functions == 'energy': 
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
+            
+        elif objective_functions == 'coverage':
+            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMaximize)
+    
+        if scenario == 'individual': 
+            self.precedes = pl.LpVariable.dicts("precedes", ((j, k1, k2) for j in V for k1 in self.employed_agents for k2 in self.employed_agents if k1 < k2), cat='Binary')
+
+            
+
+    def set_energy_objective(self, distance, energy, time): 
         V_nodes = list(self.nodes_dict.keys())
         penalty = 1
         alpha = 0.5
-
+        weights = get_weights() 
         self.problem.setObjective(
             # pl.lpSum(
             #     alpha * self.y[j,v] + 
@@ -253,37 +254,33 @@ class Cluster:
             #     for j in V_nodes
             #     for v in self.employed_agents
             # ) + 
-            pl.lpSum(
-                    self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] * 0.5 +
-                    self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] * 0.4 +
-                    self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]] * 0.1
-                    for i in V_nodes
-                    for j in V_nodes if i != j
-                    for v in self.employed_agents
-            )   
-            # + pl.lpSum(
-            #         self.wait[v, t] * wait_energy
-            #         for v in self.employed_agents
-            #         for t in self.timeframe
-            # )
+                pl.lpSum(
+                        self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] * weights['energy'] +
+                        self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] * weights['distance'] +
+                        self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]] * weights['travel_time']
+                        for i in V_nodes
+                        for j in V_nodes if i != j
+                        for v in self.employed_agents
+                )   
             )
        
 
 
     def set_coverage_objective(self)->None:
-        V_nodes = list(self.nodes_dict.keys()) 
+
         ALPHA = 0.1
         BETA = 1
 
         self.problem.setObjective(
             # ALPHA * self.T_MAX - 
-            BETA * pl.lpSum(self.R[i] * self.visit[i,v] for i in V_nodes for v in self.employed_agents)
+            BETA * pl.lpSum(self.R[i] * self.visit[i,v] for i in self.NODES for v in self.employed_agents)
         )
         # self.problem.setObjective(
         #    pl.lpSum(self.R[i] * self.visit[i, v]
         #            for i in V_nodes
         #            for v in self.employed_agents)
         #     )
+
 
     def set_up_virtual_nodes_properties(self): 
 

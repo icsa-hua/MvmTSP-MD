@@ -2,13 +2,21 @@ import numpy as np
 import pandas as pd 
 import networkx as nx 
 from dummy_app.models.opa import opa_weights
-from typing import Dict, List
-from scipy.spatial.distance import pdist, squareform, euclidean 
-from sklearn.preprocessing import robust_scale, MinMaxScaler
-from geopy.distance import geodesic
+from typing import Dict, Any
+from sklearn.preprocessing import MinMaxScaler
+
 
 class TOPSISPriority:
 
+    """
+    Techique for Order Preference by Similarity to Ideal Solution (TOPSIS)
+    Custom implementation that uses the following criteria:
+    - Number of Customers
+    - Average distance
+    - Density
+    - Average shortest path length
+    - Average clustering coefficient
+    """    
 
     def __init__(self): 
         self.criteria = {} 
@@ -51,7 +59,7 @@ class TOPSISPriority:
         }
     
     
-    def gather_criteria(self, cluster:pd.DataFrame, cue_groups:Dict[int,List[object]], distance_matrix:str) -> Dict[str,float]: 
+    def gather_criteria(self, cluster:pd.DataFrame, cue_groups:Any,  distance_matrix:str) -> Dict[str,float]: 
 
         # find the users inside the areas of the cluster. 
         # the areas outside the cluster are not considered. 
@@ -69,19 +77,7 @@ class TOPSISPriority:
 
     def run_model(self, cluster_criteria:Dict[int,Dict], ranks:np.ndarray)-> pd.DataFrame: 
 
-
-        # NOTE: Index is the cluster ID         
         df = pd.DataFrame.from_dict(cluster_criteria, orient='index', columns=self.criteria_names)
-
-        # normalize criteria with vector normalization 
-        # norm_df = df / np.sqrt((df**2).sum())
-        # if norm_df["Customers"].sum() == 0:
-        #     norm_df["Customers"] = 0
-        # else:
-        #     norm_df["Customers"] = norm_df["Customers"] / norm_df["Customers"].sum()
-        
-        # NOTE: In this case it seems to be better to normalize using a MinMaxScaler 
-        # to preserve scale and direction of the values. 
 
         scaler = MinMaxScaler() 
         norm_df = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index) 

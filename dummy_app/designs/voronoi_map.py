@@ -11,7 +11,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import distance_matrix 
 from collections import defaultdict
 from scipy.spatial.distance import pdist, squareform 
-from geopy import Point 
 from pyproj import Transformer 
 
 from dummy_app.tools.logger import logger 

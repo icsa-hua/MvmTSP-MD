@@ -27,7 +27,7 @@ from k_means_constrained import KMeansConstrained
 class MVMTSPConfig(ABC): 
 
     @abstractmethod
-    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:"str" )->None: 
+    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str )->None: 
 
         self.problem = pl.LpProblem() 
         self.V:pd.DataFrame = pd.DataFrame()
@@ -47,6 +47,7 @@ class MVMTSPConfig(ABC):
         self.max_battery:int = max_battery
         self.coverage_time = max_coverage_time
         self.enable_ga = enable_ga
+        self.objective_function:str = objective_function
         
       
 
@@ -142,11 +143,10 @@ class MVMTSPConfig(ABC):
 
         energy_model = DroneEnergyModel()
         
-        self.average_coverage_energy = energy_model.coverage_energy(1250) # In J 
+        self.average_coverage_energy = energy_model.coverage_energy(altitude, self.coverage_time) # In J 
         self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
 
         logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
-
 
         # Prepare Matrices 
         dist_columns = [f'dist_{i}' for i in range(1, self.v + 1)]
@@ -171,17 +171,13 @@ class MVMTSPConfig(ABC):
         energies = normalize_data(energies)
         travel_times = normalize_data(travel_times)
 
-        # Setup visits allowed 
-        # self.allowed_visits = np.full(self.v, len(self.agents), dtype=int)
-
         # Final preperation 
         self.distance_columns = dist_columns 
         self.energy_columns = energy_columns
         self.travel_time_columns = tt_columns
         
-
         if self.v >= 10: 
-            self.depots = self.V['Area_id'].iloc[np.array([7, 8])].values
+            self.depots = np.array(self.V['Area_id'].iloc[np.array([7, 8])].values)
         else: 
             raise ValueError("Not enough nodes to select default depots at positions 7 and 8.")
         # combine al normalized data
@@ -201,6 +197,7 @@ class MVMTSPConfig(ABC):
             coverage_time:int,
             user_points=defaultdict(), 
     )->pd.DataFrame:
+        
         def normalize_data(df:pd.DataFrame, name:str='')->pd.DataFrame:
             scalers_path = f"{os.getcwd()}/assets/scalers"
             scaler_file_name = f"scaler_{name}.pkl"
@@ -363,7 +360,13 @@ class MVMTSPConfig(ABC):
         max_nodes = 0 
         
         # Reserve 10–15% for emergency return
-        reserve = self.max_battery * 0.15
+        if self.objective_function == 'energy': 
+            reserve = self.max_battery * 0.15
+        elif self.objective_function == 'coverage': 
+            reserve = self.max_battery * 0.35 
+        else: 
+            reserve = self.max_battery * 0.10
+
         adjusted_energy = self.average_energy + self.average_coverage_energy 
         
         max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 1
@@ -422,14 +425,14 @@ class MVMTSPConfig(ABC):
         for cluster_id, cluster_df in clusters:
             cluster_criteria[cluster_id] = topsis.gather_criteria(cluster_df, cue_groups=cue_groups, distance_matrix=distance_matrix)
 
-        priority = topsis.run_model(cluster_criteria, [])
+        priority = topsis.run_model(cluster_criteria, np.ndarray(0))
         logger.debug("Cluster Prioritization (TOPSIS) Complete...")
         
         return priority
     
 
     @abstractmethod
-    def clustering(self, cluster:pd.DataFrame, cluster_id:int, assignment:List[int], depot_id:int)->Dict: 
+    def clustering(self, cluster:pd.DataFrame, cluster_id:int, assignment:List[int], depot_id:int): 
         pass 
 
 

@@ -40,6 +40,10 @@ ALTITUDE = 1250 # Optimal Coverage Altitude
 MAX_COVERAGE_TIME = 5
 logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {TRIALS}\n Number of Agents -> {NUMBER_OF_AGENTS}\n Max Battery -> {MAX_BATTERY} Wh\n Number of Areas -> {NUMBER_OF_AREAS}\n Vertical Velocity -> {VERTICAL_VELOCITY} m/s\n Horizontal Velocity -> {HORIZONTAL_VELOCITY} m/s")
 
+scenario_choices = ['cooperative', 'individual']
+objective_choices = ['energy', 'coverage']
+env_choices = ['urban', 'rural', 'forest', 'mountain']
+
 # Progress bar 
 progress = tqdm(total=TRIALS, desc="Progress")
 
@@ -48,6 +52,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--gen_areas", action="store_true", help="Generate new Voronoi map and save it to assets.")
 parser.add_argument("--show_map", action="store_true", help="Show the generated Voronoi map.")
 parser.add_argument("--scenario", type=str, default="cooperative", help="Scenario to run.")
+parser.add_argument("--objective", type=str, default="energy", help="Objective to optimize.")
 parser.add_argument("--enable_ga", type=str, default='yes', help="Initialize solver with Genetic Algorithm")
 parser.add_argument("--num_agents", type=int, default=NUMBER_OF_AGENTS, help="Number of agents to simulate.")
 parser.add_argument("--num_users", type=int, default=NUMBER_OF_USERS, help="Number of users to simulate.")
@@ -64,6 +69,19 @@ NUMBER_OF_USERS = args.num_users
 MAX_BATTERY = args.max_battery
 MAX_COVERAGE_TIME = args.max_coverage_time
 NUMBER_OF_AREAS = args.num_areas
+
+if args.scenario not in scenario_choices: 
+    logger.error(f"Invalid scenario choice. Please choose from: {scenario_choices}")
+    exit(1)
+
+if args.objective not in objective_choices:
+    logger.error(f"Invalid objective choice. Please choose from: {objective_choices}")
+    exit(1)
+
+if args.env not in env_choices: 
+    logger.error(f"Invalid environment choice. Please choose from: {env_choices}")
+    exit(1)
+
 
 # Declare which constraints to use 
 """
@@ -110,6 +128,7 @@ config = {
     "max_coverage_time":args.max_coverage_time,
     "scenario":args.scenario, 
     "enable_ga":args.enable_ga,
+    "objective_function":args.objective
 }
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 

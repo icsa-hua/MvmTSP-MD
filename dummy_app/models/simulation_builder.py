@@ -30,7 +30,8 @@ class Builder(MVMTSPConfig):
             max_battery=config["max_battery"],
             max_coverage_time=config["max_coverage_time"],
             enable_ga=config["enable_ga"],
-            scenario=config["scenario"]
+            scenario=config["scenario"],
+            objective_function=config["objective_function"]
         )
         
         self.metrics = Metrics(verbose=True) 
@@ -187,8 +188,6 @@ class Builder(MVMTSPConfig):
             logger.info("❌ Problem is not optimal, returning None...")
             sys.exit(1)
 
-
-        
         logger.debug(f"Cluster bridge nodes are {cluster.bridge_nodes}")
 
         employed_agents = ["Agent_" + str(i) for i in cluster.employed_agents]
@@ -484,6 +483,9 @@ class Builder(MVMTSPConfig):
 
     def clustering(self, cluster, cluster_id, assignment, depot_id)->Dict:
 
+        SCENARIO = self.scenario 
+        OBJECTIVE = self.objective_function
+
         # Step 1: Create the cluster object to accomodate the problem.  
         cluster_object = Cluster(
             cluster=cluster, 
@@ -516,7 +518,7 @@ class Builder(MVMTSPConfig):
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
 
-        if self.scenario == 'coverage':
+        if OBJECTIVE == 'coverage':
             self.get_cluster_coverage(cluster_object)
 
         # deallocate_memory(context)
@@ -524,7 +526,7 @@ class Builder(MVMTSPConfig):
         # cluster_object.R_points = list(np.ones(len(cluster_object.nodes_dict)))
         # Step 4: Create and configure the optimization problem 
         try: 
-            paths = cluster_object.problem_formulation(builder=self, scenario=self.scenario) 
+            paths = cluster_object.problem_formulation(builder=self, scenario=SCENARIO, objective_function=OBJECTIVE ) 
         except Exception as e:
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
@@ -546,7 +548,8 @@ class Builder(MVMTSPConfig):
         )
 
         self.problem_results[f'Cluster_{cluster_object.id}'] = {
-            "scenario_name":self.scenario,
+            "scenario_name":SCENARIO,
+            "objective_function":OBJECTIVE,
             "agent_results":results, 
             "Total Distance": totalDistance, 
             "Total Energy":totalEnergy, 
@@ -689,7 +692,7 @@ class Builder(MVMTSPConfig):
             edge_sequence = tuple((step[0], step[1]) for step in path)
             all_paths[agent_id] = edge_sequence
             
-            if self.scenario == "coverage": 
+            if self.scenario == "individual": 
                 if len(visit_nodes) != len(nodes_dict)-1 : 
                     logger.debug(f"Agent {agent_id} visited only {len(visit_nodes)} nodes out of {len(nodes_dict)-1}")
 
