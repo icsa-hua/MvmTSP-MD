@@ -986,8 +986,8 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
             for j in NODES: 
                 if i == j : continue 
                 
-                source = cluster.nodes_dict[i]
-                target = cluster.nodes_dict[j]
+                source = cluster.original_nodes_dict[i]
+                target = cluster.original_nodes_dict[j]
                 if source in cluster.virtual_nodes: 
                     source = cluster.virtual_nodes[source] 
                 if target in cluster.virtual_nodes: 
@@ -1006,8 +1006,8 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
             for j in V_nodes:
                 if i == j: continue
                 
-                source = cluster.nodes_dict[i]
-                target = cluster.nodes_dict[j] - 1
+                source = cluster.original_nodes_dict[i]
+                target = cluster.original_nodes_dict[j] - 1
                 if source in cluster.virtual_nodes: 
                     source = cluster.virtual_nodes[source] 
                 if target in cluster.virtual_nodes: 
@@ -1240,7 +1240,6 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
 
     # Solver has to choose a precesed value for each node conflict, which in turn forces the arrival time variables to be spaced-out, thus 
     # preventing collisions.  
-    print("coverage constraitns")  
 
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
     dept = cluster.original_nodes_dict[original_depot_ind]
@@ -1279,8 +1278,8 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
             for j in NODES: 
                 if i == j : continue 
                 
-                source = cluster.nodes_dict[i]
-                target = cluster.nodes_dict[j]
+                source = cluster.original_nodes_dict[i]
+                target = cluster.original_nodes_dict[j]
                 if source in cluster.virtual_nodes: 
                     source = cluster.virtual_nodes[source] 
                 if target in cluster.virtual_nodes: 
@@ -1299,8 +1298,8 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
             for j in V_nodes:
                 if i == j: continue
                 
-                source = cluster.nodes_dict[i]
-                target = cluster.nodes_dict[j] - 1
+                source = cluster.original_nodes_dict[i]
+                target = cluster.original_nodes_dict[j] - 1
                 if source in cluster.virtual_nodes: 
                     source = cluster.virtual_nodes[source] 
                 if target in cluster.virtual_nodes: 

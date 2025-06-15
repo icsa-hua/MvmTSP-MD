@@ -333,7 +333,7 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod
-    def run_model(self, data:pd.DataFrame,  cue_groups:Dict[int,List[Any]])->Dict: 
+    def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Dict:
         pass 
 
 
@@ -343,7 +343,7 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod 
-    def regionalization(self, GDF:geopandas.GeoDataFrame)->pd.core.groupby.generic.DataFrameGroupBy:
+    def regionalization(self, GDF:geopandas.GeoDataFrame)->Any:
         """
         Cluster nodes (excluding depots) into constrained regions based on agent capacity.
 
@@ -418,7 +418,7 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod
-    def cluster_prioritization(self, clusters:pd.core.groupby.generic.DataFrameGroupBy, cue_groups:Mapping[int,Any], distance_matrix)->pd.DataFrame:
+    def cluster_prioritization(self, clusters:Any, cue_groups:Mapping[int,Any], distance_matrix)->pd.DataFrame:
         topsis = TOPSISPriority()
         cluster_criteria = {} 
          
@@ -432,7 +432,7 @@ class MVMTSPConfig(ABC):
     
 
     @abstractmethod
-    def clustering(self, cluster:pd.DataFrame, cluster_id:int, assignment:List[int], depot_id:int): 
+    def clustering(self, cluster:pd.DataFrame, cluster_id:int, assignment:List[int], depot_id:int)->Dict: 
         pass 
 
 

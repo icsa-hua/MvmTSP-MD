@@ -303,7 +303,7 @@ else: # Default Choice to Generate all points on the map and on the users.
             mobility_sim.fig,
             mobility_sim.simulations,
             frames=frame_generator(),
-            fargs=(problem, ground_users, map_generator.vor_map, distance_matrix, data, TRIALS),
+            fargs=(problem, ground_users, vor_map, distance_matrix, data, TRIALS),
             interval=100,
             blit=False, 
             cache_frame_data=False)

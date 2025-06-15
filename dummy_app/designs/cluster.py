@@ -89,19 +89,19 @@ class Cluster:
         else: 
             best_agent = min(self.initial_population.items(), key=lambda item: item[1][1])
             best_path = best_agent[1][0]
-            num_travels = len(best_path) - 1
+            if builder.scenario == 'cooperative': 
+                num_travels = int((len(best_path) - 1) /len(self.employed_agents))
+            elif builder.scenario == 'individual':
+                num_travels = len(best_path) - 1 
+
+            else: num_travels = len(best_path) 
+
             if hasattr(builder, 'get_travel_time'):
                 total_time = math.ceil(sum(
                     self.get_travel_times(i, i+1, best_path, builder)
                     for i in range(len(best_path)-1)
                     )) + num_travels * builder.coverage_time
-            #     total_time = math.ceil(sum(
-            #         builder.get_travel_time(i, i+1, best_path)
-            #         for i in range(len(best_path)-1)
-            #     )) + num_travels * builder.coverage_time
-
-            # 10 is added to each stop to denote the coverage time spend on each area.  
-
+ 
         if total_time == 0: 
             logger.error(f"Total time is 0 for cluster {self.id}")
             raise ValueError(f"Total time is 0 for cluster {self.id}")
@@ -111,10 +111,10 @@ class Cluster:
 
     def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy'): 
         
-        V_nodes = list(self.nodes_dict.keys())
+        V_nodes = list(self.original_nodes_dict.keys())
 
         # Get duration of each trip (arc) 
-        self.tr_times = {(self.nodes_dict[i],self.nodes_dict[j]):self.get_travel_times(i, j, self.nodes_dict, builder) for i in V_nodes for j in V_nodes}
+        self.tr_times = {(self.original_nodes_dict[i],self.original_nodes_dict[j]):self.get_travel_times(i, j, self.original_nodes_dict, builder) for i in V_nodes for j in V_nodes}
 
         # Set the decision variables 
         self.create_problem(scenario=scenario, objective_functions=objective_function) 
@@ -202,8 +202,6 @@ class Cluster:
 
     def create_problem(self, scenario:str='cooperative', objective_functions:str="energy")->None: 
         
-        self.set_up_virtual_nodes_properties()
-
         V = self.V_nodes
         NODES = self.NODES
 
@@ -232,13 +230,13 @@ class Cluster:
 
 
         if objective_functions == 'energy': 
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
+            self.problem = pl.LpProblem(name=f"MVMTSP_Cluster_{self.id}", sense=pl.LpMinimize)
             
         elif objective_functions == 'coverage':
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
+            self.problem = pl.LpProblem(name=f"MVMTSP_Cluster_{self.id}", sense=pl.LpMinimize)
 
         elif objective_functions == "idleness":
-            self.problem = pl.LpProblem(name="ContrainedMVMTSP", sense=pl.LpMinimize)
+            self.problem = pl.LpProblem(name=f"MVMTSP_Cluster_{self.id}", sense=pl.LpMinimize)
          
 
     def set_energy_objective(self, distance, energy, time): 
@@ -383,43 +381,62 @@ class Cluster:
         depot_ind = reverse_dict[self.depot_id]
         
         # First, find the starting point for each agent
-        solution_path = defaultdict()
-        detailed_log = defaultdict()
+        detailed_log = defaultdict(list)
         dc = self.nodes_dict
 
+
+ # --- START OF DEBUGGING ---
+        logger.debug(f"\n--- DEBUGGING CLUSTER {self.id} ---")
+        logger.debug(f"Assigned Depot ID: {self.depot_id}")
+        
+        # This is the most critical part
+        # Rebuild your node sets FROM SCRATCH for this run
+        all_node_ids_in_cluster = [node for node in self.original_nodes_dict] # Or however you get the IDs
+        
+        # Ensure depot is correctly identified and separated
+        V_nodes = list(self.nodes_dict.keys())
+        reverse_dict = {v: k for k, v in self.nodes_dict.items()}
+        depot_ind = reverse_dict[self.depot_id]
+        NODES = [n for n in V_nodes if n != depot_ind]
+
+        logger.debug(f"All Node IDs (original_nodes_dict): {all_node_ids_in_cluster}")
+        logger.debug(f"All Node Indices (V_nodes): {V_nodes}")
+        logger.debug(f"Depot Index for this run: {depot_ind}")
+        logger.debug(f"Visitable Node Indices (NODES): {NODES}")
+        logger.debug(f"Time frame for paths (cluster_object.timeframe): {self.timeframe}")
+        logger.debug("---------------------------------------\n")
+
         for k in agents:
-            solution_path[k] = []
-            detailed_log[k] = [] 
-            step = 0
             start_node = -1 
             for j in NODES:
-                if self.x[depot_ind, j, k].varValue == 1:
+                if self.x[depot_ind, j, k].varValue > 0.5:
                     # Found the first step of the tour
                     start_node = j
                     break 
 
             if start_node != -1:
-                departure_from_depot = 0 
-                arrival__at_start_node = (self.t[start_node,k].varValue) 
+                # Handle the first leg: Depot -> Start Node 
+                departure_from_depot = 0.0 
+                arrival_at_start_node = (self.t[start_node,k].varValue) 
             
-                for t_step in range(round(departure_from_depot), round(self.t[start_node,k].varValue)):
-                    detailed_log[k].append((dc[depot_ind],dc[start_node],t_step))
+                # Generate "moving" events for the first leg
+                for t_step in range(round(departure_from_depot), round(arrival_at_start_node)):
+                    detailed_log[k].append((dc[depot_ind], dc[start_node], t_step))
 
-                arrival_info = [
-                    f"Agent {k} departs Depot {depot_ind} at t=0",
-                    f"Agent {k} arrives at Node {start_node} at t={self.t[start_node, k].varValue:.2f}"
-                ]          
-                current_node = start_node 
-
-
-
+                # Continue with the rest of the path
+                current_node = start_node
                 while current_node != depot_ind:
-                        
+
+                    # Find the next node in the path
                     next_node_in_path = -1
                     for next_node in V_nodes:
-                        if self.x[current_node, next_node, k].varValue > 0.5:
+                        if self.x[current_node, next_node, k].varValue > 0.5 :
                             next_node_in_path = next_node
                             break
+
+                    if next_node_in_path == -1:
+                        logger.error(f"Warning: Path broken for agent {k} at node {current_node}.Could not find a path to node {next_node_in_path}.")
+                        break
 
                     # --- Generate events for the current_node ---
                     arrival_at_current = self.t[current_node, k].varValue
@@ -432,18 +449,31 @@ class Cluster:
 
                     # --- Generate events for the travel: current_node -> next_node_in_path ---
                     # Handle the final leg back to the depot
+                    start_t_move = round(departure_from_current)
                     if next_node_in_path == depot_ind:
-                        arrival_at_depot = self.return_step[k].varValue
-                        # Generate "moving" events
-                        for t_step in range(round(departure_from_current), round(arrival_at_depot)):
-                            detailed_log[k].append((dc[current_node], dc[depot_ind], t_step))
-                    # Handle a leg to another non-depot node
+                        arrival_at_next = self.return_step[k].varValue
+                        # print(f"Agent {k} is returning to depot")
+                        # # Generate "moving" events
+                        # for t_step in range(round(departure_from_current), round(arrival_at_depot)):
+                        #     detailed_log[k].append((dc[current_node], dc[depot_ind], t_step))
+                   
+                   # Handle a leg to another non-depot node
                     else:
                         arrival_at_next = self.t[next_node_in_path, k].varValue
                         # Generate "moving" events
-                        for t_step in range(round(departure_from_current), round(arrival_at_next)):
-                            detailed_log[k].append((dc[current_node], dc[next_node_in_path], t_step))
+                        # for t_step in range(round(departure_from_current), round(arrival_at_next)):
+                        #     detailed_log[k].append((dc[current_node], dc[next_node_in_path], t_step))
+                    
+                    end_t_move = round(arrival_at_next)
+                    # import pdb; pdb.set_trace
+                    # print(f"start_t_move: {start_t_move}, end_t_move: {end_t_move}, arrival_at_next: {arrival_at_next}, departure_from_current: {departure_from_current}")
+                    if start_t_move >= end_t_move and arrival_at_next >= departure_from_current: 
+                        end_t_move = start_t_move + 1 
 
+                    for t_step in range(start_t_move, end_t_move): 
+                        detailed_log[k].append((dc[current_node], dc[next_node_in_path], t_step))
+                   
+                   
                     # Move to the next node for the next loop iteration
                     current_node = next_node_in_path
 
@@ -451,7 +481,7 @@ class Cluster:
         # Now print the clean, ordered results
         # --- Now you can print or use the detailed_log ---
         for k, events in detailed_log.items():
-            print(f"\n--- Detailed Event Log for Agent {k} ---")
+            logger.debug(f"\n--- Detailed Event Log for Agent {k} ---")
             # Sort events by timestep just in case of rounding nuances
             events.sort(key=lambda x: x[2]) 
             for event in events:
@@ -470,6 +500,7 @@ class Cluster:
                     unique_nodes_among_paths.add(duble[1])
 
         logger.debug(f"✅ Solutions created for {len(self.employed_agents)} agents")
+        logger.info("--------------------------------------------------------------------------")
         logger.info("✅ Optimal Solution Found!!!!!")
         memory_usage = builder.metrics.get_memory_usage()
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
@@ -479,7 +510,7 @@ class Cluster:
         
         builder.validate_paths(paths=detailed_log, nodes_dict=self.nodes_dict, cluster=self)
         logger.info("✅ Solutions validated successfully...")
-
+        logger.info("--------------------------------------------------------------------------")
         return detailed_log
 
 

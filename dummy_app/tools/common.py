@@ -92,7 +92,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
                 virtual_nodes[kk + (constant_length)] = node 
 
         count = len(nodes_dict)
-        cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes)
+        cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes, add_epsilon=True)
                 
         for i in virtual_nodes:
             nodes_dict[count] = i      
@@ -185,22 +185,30 @@ def calculate_totals_from_paths(
 def extract_per_agent_metrics(
     paths: Any,
     costs: dict,
-    coverage_energy:float
+    coverage_energy:float, 
+    virtual_nodes:dict, 
+    area_ids:Any  
 
 ) -> Dict[str,Dict[str, float]]:
     """
     Return individual distance, energy, and time for each agent's path.
     """
+    
 
-    scalers = load_scalers()
-    for scaler in scalers: 
-        cost_name = scaler.split('_')[-1]
-        if cost_name == 'time': 
-            cost_name = 'travel_time'
-        cost = costs[cost_name]
-        import pdb; pdb.set_trace()
 
-        costs[cost_name] = scaler.inverse_transform(cost)
+    cost_bundle = {}
+    for cost_type in costs.keys():
+        new_type = ''
+        if cost_type.startswith('d'):
+            new_type = 'distance'
+        elif cost_type.startswith('e'):
+            new_type = 'energy'
+        elif cost_type.startswith('t'):
+            new_type = 'travel_time'
+        cost_bundle[new_type] = dict(zip(area_ids, costs[cost_type])) 
+            
+
+    cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes, add_epsilon=False)
 
     results = defaultdict(dict)
     for agent in paths:
@@ -213,16 +221,19 @@ def extract_per_agent_metrics(
             if (i,j) in visited_nodes:
                 duration += 1
                 continue 
+
             if i == j : 
                 energy  += coverage_energy 
                 dist += 0 
                 duration += 1
                 visited_nodes.append((i,j))
                 continue
-            dist += costs['distance'][i][j]
-            energy += costs['energy'][i][j] 
-            duration += costs['travel_time'][i][j]
+
+            dist += cost_bundle['distance'][i][j]
+            energy += cost_bundle['energy'][i][j] 
+            duration += cost_bundle['travel_time'][i][j]
             visited_nodes.append((i,j))
+
         results[agent] = {'distance': dist, 'energy': energy, 'time': duration}
 
     return results
@@ -273,7 +284,7 @@ def calculate_recharge_steps(max_battery:float, energy_spent:float):
     energy_model = DroneEnergyModel(max_battery=max_battery) 
     time_steps = 0 
     while energy_deficit < max_battery: 
-        recharge_energy = energy_model.recover_energy()
+        recharge_energy = energy_model.recover_energy()/3600
         energy_deficit +=  recharge_energy
         time_steps += energy_model.dt 
 
@@ -295,7 +306,7 @@ def draw_circular_graph(G:nx.DiGraph):
     plt.show()
 
 
-def add_virtual_nodes(cost_bundle: dict, clones: dict) -> dict:
+def add_virtual_nodes(cost_bundle: dict, clones: dict, add_epsilon:bool=True) -> dict:
     """
     Return a *new* cost_bundle in which every metric has been expanded so that:
       • each original row is k elements longer (one entry per clone);
@@ -328,7 +339,8 @@ def add_virtual_nodes(cost_bundle: dict, clones: dict) -> dict:
             p = prototype_lookup[clone_id]
             base_row  = rows[p][:n_old]            # original part (length n_old)
             zeros_blk = np.zeros(k, dtype=dtype) # clone-vs-clone block
-            zeros_blk = zeros_blk + 1   #epsilon factor. 
+            if add_epsilon: 
+                zeros_blk = zeros_blk + 1   #epsilon factor. 
             new_row = np.concatenate([base_row, zeros_blk])
             new_row[clone_id] = 0 
             rows[clone_id] = new_row

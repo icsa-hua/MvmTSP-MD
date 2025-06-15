@@ -6,20 +6,73 @@ from typing import Any
 
 class TSPAgent: 
 
-    def __init__(self, id, path):
-        self.path = path  # list of (x, y, t)
-        self.index = 0
-        self.x = path[0][0]
-        self.y = path[0][1]
-        self.agent_id = id 
+    def __init__(self, agent_id, path):
+        
+        self.agent_id = agent_id 
+        # Ensure each element in path is a tuple/list with at least 3 elements
+        self.plan = sorted(
+            [tuple(item) for item in path if hasattr(item, '__getitem__') and len(item) >= 3],
+            key=lambda x: x[2]
+        )  # list of (x, y, t)
+        self.index = 0 
+        self.x = self.plan[0][0] if self.plan is not None else 0 
+        self.y = self.plan[0][1] if self.plan is not None else 0
+        
+
+    def update_position(self, current_sim_time):
+        if not self.plan:
+            return
 
 
-    def update_position(self, timestep):
-        # print(f"Agent {self.agent_id} with path {self.path[self.index]} with index {self.index} at {timestep}")
-        while self.index < len(self.path) and self.path[self.index][2] <= timestep:
-            self.x, self.y, _ = self.path[self.index]
-            # print(f"Agent _ id {self.agent_id}({self.x},{ self.y})")
-            self.index += 1
+        start_event = None 
+        end_event = None 
+
+        for i in range(len(self.plan)-1): 
+            if self.plan[i][2] <= current_sim_time < self.plan[i+1][2]: 
+                start_event = self.plan[i] 
+                end_event = self.plan[i+1]
+                break 
+
+        
+        if start_event is None : 
+            final_node = self.plan[-1]
+            self.x, self.y = final_node[0], final_node[1] 
+            return
+       
+        if end_event is None:
+            self.x, self.y = self.plan[-1][0], self.plan[-1][1]
+            return
+
+        start_time = start_event[2] 
+        end_time = end_event[2] 
+
+        start_pos = (start_event[0], start_event[1])
+        end_pos = (end_event[0], end_event[1])
+
+        if start_event[0] == start_event[1] : 
+            self.x, self.y = start_pos 
+            return 
+        
+        travel_duration = end_time - start_time 
+        if travel_duration <= 0: 
+            self.x, self.y = end_pos 
+            return 
+        
+        fraction = (current_sim_time - start_time) / travel_duration 
+
+        self.x = start_pos[0] + fraction * (end_pos[0] - start_pos[0])
+        self.y = start_pos[1] + fraction * (end_pos[1] - start_pos[1])
+        
+
+
+
+
+
+
+
+
+
+
 
 
 class TSPAgents: 
@@ -49,7 +102,7 @@ class TSPAgents:
                 self.path_lines.append(line)
 
             n_agents = len(self.agents)
-            self.agent_colors = cm.get_cmap('tab10', n_agents)(range(n_agents))
+            self.agent_colors = cm.get_cmap('tab10', n_agents)(np.arange(n_agents))
             self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
             
             for i, agent in enumerate(self.agents):
@@ -74,18 +127,16 @@ class TSPAgents:
          
 
     def simulate(self):
-        while True:
-            timestep = self.mobility_env.timestep 
-            for i, agent in enumerate(self.agents):
-                agent.update_position(timestep)
 
-                path = agent.path  # Assume path is a list of (x, y) coordinates
-                if path:
-                    x_vals, y_vals, _ = zip(*path)
-                    self.path_lines[i].set_data(x_vals, y_vals)
+        # This process now just triggers updates. The agent itself knows what to do.
+        while self.mobility_env.env.now < self.mobility_env.session_duration[-1]:
+            current_time = self.mobility_env.env.now
+            for agent in self.agents:
+                agent.update_position(current_time)
             
+            # This part remains the same to update the plot
             self.update_plot()
             plt.draw()
-            if hasattr(self.mobility_env, "timestep"):
-                self.mobility_env.timestep += 1 
-            yield self.mobility_env.env.timeout(1)
+            
+            yield self.mobility_env.env.timeout(1) # Advance simulation by one step
+            

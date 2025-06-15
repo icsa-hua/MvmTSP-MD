@@ -85,16 +85,22 @@ class EnvSim:
         ):           
             self.optimization_guard_flag = True
             self.ready_event = self.env.event()
-            logger.info(f"Session duration reached: {self.session_duration} with simulator time {self.env.now}")
-            if self.ax.legend_:
-                self.ax.legend_.remove() # Remove old legend if needed
-            self.ax.legend()
-            if hasattr(self,"agent_group") and self.agent_group is not None: 
-                for line in self.agent_group.path_lines:
-                    line.remove()
-                # self.agent_group.path_lines.clear()
+            logger.info(f"Re-optimizing at simulator time {self.env.now}")
 
-            self.optimization_process(constructor, distance_matrix, data, cues.group )
+            # --- SOLUTION FOR PLOTTING ---
+            # 1. Clear the entire axes object. This removes all lines, scatters, legends, etc.
+            self.ax.cla()
+            
+            # 2. Re-initialize the plot's appearance
+            self.ax.set_title("Environment Plot")
+            self.ax.grid(True)
+            # You would also redraw your static map elements (voronoi cells, etc.) here
+            self.fig, self.ax = cues.plot_users(map)
+
+            
+            # 3. Now run the optimization, which will create a new TSPAgents object.
+            # This new object will draw fresh paths and a clean legend on the newly cleared axes.
+            self.optimization_process(constructor, distance_matrix, data, cues.group)
 
         self.env.step()
 
