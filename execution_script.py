@@ -8,33 +8,21 @@ from dummy_app.models.energy_model import DroneEnergyModel
 from dummy_app.models.coverage import * 
 from dummy_app.tools.common import deallocate_memory
 
+import os 
+import argparse
+import matplotlib.pyplot as plt
 
-
-
+from tqdm import tqdm 
+from matplotlib.animation import FuncAnimation
 
 
 """
 TODO: 
-1. Extract the duration included time paths for each agent. 
+1. Extract the duration included time paths for each agent. -- idle 
 2. Try mninimizing idleness for agents in the individual scenario 
 3. Improve visualization.   
 4. OUTAGE/COVERAGE PROBABILITY - done
 """
-
-
-
-
-
-
-
-
-
-from tqdm import tqdm 
-import os 
-import argparse
-import matplotlib.pyplot as plt
-# import matplotlib; matplotlib.use('Agg') s
-from matplotlib.animation import FuncAnimation
 
 def frame_generator():
     for i in range(TRIALS):
@@ -70,7 +58,6 @@ progress = tqdm(total=TRIALS, desc="Progress")
 
 # User arguments 
 parser = argparse.ArgumentParser()
-parser.add_argument("--gen_areas", action="store_true", help="Generate new Voronoi map and save it to assets.")
 parser.add_argument("--show_map", action="store_true", help="Show the generated Voronoi map.")
 parser.add_argument("--scenario", type=str, default="cooperative", help="Scenario to run.")
 parser.add_argument("--objective", type=str, default="energy", help="Objective to optimize.")
@@ -82,8 +69,6 @@ parser.add_argument("--max_coverage_time", type=int, default=MAX_COVERAGE_TIME, 
 parser.add_argument("--num_areas", type=int, default=NUMBER_OF_AREAS, help="Number of areas to simulate.")
 parser.add_argument("--env", type=str, default="urban", help="Environment to simulate.")
 args = parser.parse_args()
-
-logger.debug(f"Arguments: Generate -> {args.gen_areas}, Show Map -> {args.show_map}")
 
 NUMBER_OF_AGENTS = args.num_agents
 NUMBER_OF_USERS = args.num_users
@@ -158,172 +143,97 @@ problem = Builder(config, TRIALS)
 # Create Simulation environment to simulate mobility for users and agents
 mobility_sim = EnvSim(trials=TRIALS) 
 
-# This choice is only possible if there are files pre-crafted 
-if not args.gen_areas: 
-    dist_path = f"{PROJECT_ASSETS}/env_settings/distance_cost.csv"
-    energy_path = f"{PROJECT_ASSETS}/env_settings/energy_cost.csv"
-    areas_path = f"{PROJECT_ASSETS}/env_settings/areas.csv"
-    customers_path = f"{PROJECT_ASSETS}/env_settings/customers.csv"
-    gues_path = f"{PROJECT_ASSETS}/env_settings/ground_users.csv"
+#
 
-    map = Map(data_path=areas_path, incremental=False)
-    map.voronoi_tessellation()
-    logger.debug(f"✅Voronoi Map Initialized")
+# Generate Map Generator Object 
+map_generator = MapGenerator(
+    ax = mobility_sim.ax,
+    num_areas = NUMBER_OF_AREAS,
+    users_per_area = NUMBER_OF_USERS, 
+    lon=LONGITUDE_ATHENS, 
+    lat=LATITUDE_ATHENS,
+    seed=42, 
+)
+logger.debug(f"✅ Map Generator Initialized")
 
-    ground_users = GroundUserGroup(
-        mobility_env=mobility_sim, 
-        map_obj=map, 
-        alpha=0.85, 
-        mean_velocity=2.0, 
-        sigma=0.5
-    )
-    logger.debug(f"✅Ground Users Group Initialized: {ground_users.__dict__}")
+regions, centroids, user_points, depots, distance_matrix, all_users = map_generator.create_environment(show_map=False, show_3d_map=False)
 
-    ground_users.load_users_from_csv(
-        data_path=gues_path,
-        customers_path=customers_path
-    )
-    logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")
+# Generate the GroundUserGroup which handles the ground users collectively
+ground_users = GroundUserGroup(
+    mobility_env=mobility_sim, 
+    map_obj=map_generator, 
+    alpha=0.85, 
+    mean_velocity=2.0, 
+    sigma=0.5
+)
+logger.debug(f"✅ Ground Users Group Initialized")
 
-    data = problem.preprocess(
-        distances_path=dist_path, 
-        energies_path=energy_path, 
-        nodes_path=areas_path, 
-        agents=NUMBER_OF_AGENTS, 
-        customers_path=customers_path,
-        ground_users=ground_users.group,
-        max_battery=MAX_BATTERY
-    )
+# Extract the Ground Users as separate entities with individual velocity and angle
+ground_users.get_generated_users(user_points=user_points)
+logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")    
 
-    logger.debug(f"✅Preprocessed Data: {data}")
+if map_generator.vor_map is None:
+    raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
 
-    if map.vor_map is None:
-        raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
+all_user_points = [point for points in user_points.values() for point in points]
 
-    mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map.vor_map)
-    
-    vor_map = map.vor_map 
-    del map
-    try: 
-        ani = FuncAnimation(
-            mobility_sim.fig,
-            mobility_sim.simulations,
-            frames=frame_generator(),
-            fargs=(problem, ground_users, vor_map, data, TRIALS),
-            interval=100,
-            blit=False, 
-            cache_frame_data=False)
-        
-        plt.show(block=False)
-
-        # while True:
-        #     plt.pause(0.001)  # keeps the plot interactive
-        #     time.sleep(0.001)
-
-        # Save as MP4 (requires ffmpeg)
-        ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
-
-    except KeyboardInterrupt as kb:
-        plt.close(mobility_sim.fig)
-        logger.exception(f"KeyboardInterrupt: {kb}")
-        exit(1)
-
-    except Exception as e:
-        plt.close(mobility_sim.fig)
-        logger.exception(f"Exception: {e}")
-        exit(1)
-
-else: # Default Choice to Generate all points on the map and on the users. 
-
-    # Generate Map Generator Object 
-    map_generator = MapGenerator(
-        ax = mobility_sim.ax,
-        num_areas = NUMBER_OF_AREAS,
-        users_per_area = NUMBER_OF_USERS, 
-        lon=LONGITUDE_ATHENS, 
-        lat=LATITUDE_ATHENS,
-        seed=42, 
-    )
-    logger.debug(f"✅ Map Generator Initialized")
-
-    regions, centroids, user_points, depots, distance_matrix, all_users = map_generator.create_environment(show_map=False, show_3d_map=False)
-
-    # Generate the GroundUserGroup which handles the ground users collectively
-    ground_users = GroundUserGroup(
-        mobility_env=mobility_sim, 
-        map_obj=map_generator, 
-        alpha=0.85, 
-        mean_velocity=2.0, 
-        sigma=0.5
-    )
-    logger.debug(f"✅ Ground Users Group Initialized")
-
-    # Extract the Ground Users as separate entities with individual velocity and angle
-    ground_users.get_generated_users(user_points=user_points)
-    logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")    
-
-    if map_generator.vor_map is None:
-        raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
-    
-    all_user_points = [point for points in user_points.values() for point in points]
-    
-    if args.show_map: 
-        mobility_sim.fig, mobility_sim.ax = ground_users.plot_generated_users(
-            map_generator,
-            regions=regions, 
-            centroids=centroids,
-            user_points=all_user_points
-        )
-    else:
-        mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
-    
-    # Preprocess the data based on the map, the energy/coverage model and the ground users. 
-    data = problem.preprocess_generated_data(
-        distance_matrix=distance_matrix, 
+if args.show_map: 
+    mobility_sim.fig, mobility_sim.ax = ground_users.plot_generated_users(
+        map_generator,
+        regions=regions, 
         centroids=centroids,
-        depots=depots if not isinstance(depots,list) else np.ndarray(depots),
-        num_of_agents=NUMBER_OF_AGENTS,
-        v_hor=HORIZONTAL_VELOCITY, 
-        v_ver=VERTICAL_VELOCITY,
-        altitude=ALTITUDE, 
-        coverage_time=MAX_COVERAGE_TIME,
-        user_points=user_points,
+        user_points=all_user_points
     )
-    logger.debug(f"✅ Preprocessed Data Completed successfully")  
+else:
+    mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
 
-    vor_map = map_generator.vor_map
-    deallocate_memory(map_generator)
-    deallocate_memory(regions)
-    deallocate_memory(centroids)
-    deallocate_memory(user_points)
+# Preprocess the data based on the map, the energy/coverage model and the ground users. 
+data = problem.preprocess_generated_data(
+    distance_matrix=distance_matrix, 
+    centroids=centroids,
+    depots=depots if not isinstance(depots,list) else np.ndarray(depots),
+    num_of_agents=NUMBER_OF_AGENTS,
+    v_hor=HORIZONTAL_VELOCITY, 
+    v_ver=VERTICAL_VELOCITY,
+    altitude=ALTITUDE, 
+    coverage_time=MAX_COVERAGE_TIME,
+    user_points=user_points,
+)
+logger.debug(f"✅ Preprocessed Data Completed successfully")  
 
-    try: 
-        # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
-        ani = FuncAnimation(
-            mobility_sim.fig,
-            mobility_sim.simulations,
-            frames=frame_generator(),
-            fargs=(problem, ground_users, vor_map, distance_matrix, data, TRIALS),
-            interval=100,
-            blit=False, 
-            cache_frame_data=False)
-        
-        plt.show(block=False)
+vor_map = map_generator.vor_map
+deallocate_memory(map_generator)
+deallocate_memory(regions)
+deallocate_memory(centroids)
+deallocate_memory(user_points)
 
-        # while True:
-        #     plt.pause(0.001)  # keeps the plot interactive
-        #     time.sleep(0.001)
+try: 
+    # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
+    ani = FuncAnimation(
+        mobility_sim.fig,
+        mobility_sim.simulations,
+        frames=frame_generator(),
+        fargs=(problem, ground_users, vor_map, distance_matrix, data, TRIALS),
+        interval=100,
+        blit=False, 
+        cache_frame_data=False)
+    
+    plt.show(block=False)
 
-        # Save as MP4 (requires ffmpeg)
-        ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
+    # while True:
+    #     plt.pause(0.001)  # keeps the plot interactive
+    #     time.sleep(0.001)
 
-    except KeyboardInterrupt as kb:
-        plt.close(mobility_sim.fig)
-        logger.exception(f"KeyboardInterrupt: {kb}")
-        exit(1)
+    # Save as MP4 (requires ffmpeg)
+    ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
 
-    except Exception as e:
-        plt.close(mobility_sim.fig)
-        logger.exception(f"Exception: {e}")
-        exit(1)
+except KeyboardInterrupt as kb:
+    plt.close(mobility_sim.fig)
+    logger.exception(f"KeyboardInterrupt: {kb}")
+    exit(1)
+
+except Exception as e:
+    plt.close(mobility_sim.fig)
+    logger.exception(f"Exception: {e}")
+    exit(1)
 

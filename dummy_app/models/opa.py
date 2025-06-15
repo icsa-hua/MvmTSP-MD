@@ -1,4 +1,5 @@
 import numpy as np
+
 from typing import List, Dict 
 
 def opa_weights(ranks:np.ndarray, criteria_names:List[str])->Dict[str,float]: 

@@ -1,11 +1,13 @@
-import numpy as np 
-import random
-import pandas as pd
-import networkx as nx 
 from dummy_app.tools.logger import logger
 from dummy_app.tools.common import create_model_graph, get_weights
+
+import numpy as np 
+import random
+import networkx as nx 
+
 from typing import Dict, List, Any, Tuple 
 from deap import base, creator, tools, algorithms
+
 
 class GASolution:
 

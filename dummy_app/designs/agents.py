@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+
 from typing import Any 
 
 
@@ -65,16 +66,6 @@ class TSPAgent:
         
 
 
-
-
-
-
-
-
-
-
-
-
 class TSPAgents: 
 
     def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False):
@@ -129,14 +120,14 @@ class TSPAgents:
     def simulate(self):
 
         # This process now just triggers updates. The agent itself knows what to do.
-        while self.mobility_env.env.now < self.mobility_env.session_duration[-1]:
+        while True:
             current_time = self.mobility_env.env.now
             for agent in self.agents:
                 agent.update_position(current_time)
             
             # This part remains the same to update the plot
             self.update_plot()
-            plt.draw()
+            # plt.draw()
             
             yield self.mobility_env.env.timeout(1) # Advance simulation by one step
             

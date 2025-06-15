@@ -1,3 +1,5 @@
+from dummy_app.tools.logger import logger 
+
 import os 
 import uuid 
 import numpy as np 
@@ -5,9 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import norm 
 from scipy.integrate import quad
-from scipy.stats import gamma, expon, lognorm, weibull_min 
-
-from dummy_app.tools.logger import logger 
+from scipy.stats import gamma, lognorm, weibull_min 
 
 
 '''

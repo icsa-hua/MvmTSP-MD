@@ -1,3 +1,6 @@
+from dummy_app.designs.voronoi_map import Map
+from dummy_app.tools.logger import logger 
+
 import numpy as np 
 import pandas as pd 
 import matplotlib.pyplot as plt
@@ -6,9 +9,7 @@ from typing import Union, Any, Tuple, Dict
 from pathlib import Path
 from scipy.spatial import Voronoi, voronoi_plot_2d 
 from shapely.geometry import Point
-from pyproj import Transformer
-from dummy_app.designs.voronoi_map import Map
-from dummy_app.tools.logger import logger 
+
 
 """ 
 This function generates uniform random values between MIN and MAX for each element 

@@ -155,11 +155,8 @@ def get_weights():
 def get_session_duration(paths): 
     agent_times = [] 
     for agent in paths.keys(): 
-        duration = len(paths[agent])
         last_time_step = paths[agent][-1][2]
-        if duration > last_time_step:
-            duration = last_time_step
-        agent_times.append(duration) 
+        agent_times.append(last_time_step) 
 
     session_duration = max(agent_times)
     return session_duration

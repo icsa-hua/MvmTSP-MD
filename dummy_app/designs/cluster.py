@@ -149,55 +149,6 @@ class Cluster:
         builder.solve_problem(self) 
 
         return self.get_results(builder=builder)
-
-
-    def get_solution(self): # Test Trial #TODO: Implement this to extract the solution from the MILP problem. 
-        reverse_dict = {v:k for k, v in self.nodes_dict.items()}
-        employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
-        list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
-        paths =  {agent:[] for agent in employed_agents}
-        for name, agent_id in list_of_agents.items():
-            node_values = [v for k, v in self.nodes_dict.items()]
-            node_values.remove(self.depot_id)
-            
-            step = self.timeframe[0] 
-            next_node = 0 
-            current_node = 0 
-
-            while step in self.timeframe: 
-                if step == self.timeframe[0]: 
-                    
-                    paths[name].extend([(self.depot_id,self.depot_id,step)])
-
-                    current_node = self.depot_id
-                    next_node = random.choice(node_values) 
-                    node_values.remove(next_node)
-                    step += 1 
-                    continue
-                elif step >= self.timeframe[-1]:
-                    paths[name].extend([(self.depot_id,self.depot_id,step)])
-                    break
-
-                duration = self.tr_times[(reverse_dict[current_node], reverse_dict[next_node])]
-                paths[name].extend([(current_node,next_node,t) for t in range(step, step + duration)])
-                step += duration 
-                current_node = next_node
-                if len(node_values) == 0:
-                    break
-                next_node = random.choice(node_values)
-                node_values.remove(next_node)
-
-            time_difference = step - self.timeframe[-1]
-            for t in range(0,time_difference):
-                paths[name].extend([(current_node, next_node, step + t + 1)]) 
-
-            if paths[name][-1][1] != self.depot_id:
-                duration = self.tr_times[(reverse_dict[next_node], reverse_dict[self.depot_id])]
-
-                paths[name].extend([(next_node,self.depot_id,step)])
-            logger.debug(f"Agent {agent_id} path: {paths[name]}")
-
-        return paths
     
 
     def create_problem(self, scenario:str='cooperative', objective_functions:str="energy")->None: 
@@ -414,6 +365,10 @@ class Cluster:
                     start_node = j
                     break 
 
+            real_start_node = dc[start_node]
+            if dc[start_node] in self.virtual_nodes: 
+                real_start_node = self.virtual_nodes[dc[start_node]] 
+
             if start_node != -1:
                 # Handle the first leg: Depot -> Start Node 
                 departure_from_depot = 0.0 
@@ -421,11 +376,16 @@ class Cluster:
             
                 # Generate "moving" events for the first leg
                 for t_step in range(round(departure_from_depot), round(arrival_at_start_node)):
-                    detailed_log[k].append((dc[depot_ind], dc[start_node], t_step))
+                    detailed_log[k].append((dc[depot_ind], real_start_node, t_step))
 
                 # Continue with the rest of the path
                 current_node = start_node
                 while current_node != depot_ind:
+
+                    
+                    real_current_node = dc[current_node]
+                    if dc[current_node] in self.virtual_nodes:
+                        real_current_node = self.virtual_nodes[dc[current_node]]
 
                     # Find the next node in the path
                     next_node_in_path = -1
@@ -438,6 +398,10 @@ class Cluster:
                         logger.error(f"Warning: Path broken for agent {k} at node {current_node}.Could not find a path to node {next_node_in_path}.")
                         break
 
+                    real_next_node_in_path = dc[next_node_in_path]
+                    if dc[next_node_in_path] in self.virtual_nodes:
+                        real_next_node_in_path = self.virtual_nodes[dc[next_node_in_path]]
+                    
                     # --- Generate events for the current_node ---
                     arrival_at_current = self.t[current_node, k].varValue
                     departure_from_current = arrival_at_current + builder.coverage_time
@@ -445,7 +409,7 @@ class Cluster:
 
                     # Generate "waiting" events at the current node
                     for t_step in range(round(arrival_at_current), round(departure_from_current)):
-                        detailed_log[k].append((dc[current_node], dc[current_node], t_step))
+                        detailed_log[k].append((real_current_node, real_current_node, t_step))
 
                     # --- Generate events for the travel: current_node -> next_node_in_path ---
                     # Handle the final leg back to the depot
@@ -465,14 +429,13 @@ class Cluster:
                         #     detailed_log[k].append((dc[current_node], dc[next_node_in_path], t_step))
                     
                     end_t_move = round(arrival_at_next)
-                    # import pdb; pdb.set_trace
+
                     # print(f"start_t_move: {start_t_move}, end_t_move: {end_t_move}, arrival_at_next: {arrival_at_next}, departure_from_current: {departure_from_current}")
                     if start_t_move >= end_t_move and arrival_at_next >= departure_from_current: 
                         end_t_move = start_t_move + 1 
 
                     for t_step in range(start_t_move, end_t_move): 
-                        detailed_log[k].append((dc[current_node], dc[next_node_in_path], t_step))
-                   
+                        detailed_log[k].append((real_current_node, real_next_node_in_path, t_step))
                    
                     # Move to the next node for the next loop iteration
                     current_node = next_node_in_path
@@ -506,7 +469,7 @@ class Cluster:
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
         builder.num_constraints += len(self.problem.constraints)
         builder.variables_count += len(self.problem.variables())
-        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.nodes_dict.values())}")
+        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.original_nodes_dict.values())}")
         
         builder.validate_paths(paths=detailed_log, nodes_dict=self.nodes_dict, cluster=self)
         logger.info("✅ Solutions validated successfully...")

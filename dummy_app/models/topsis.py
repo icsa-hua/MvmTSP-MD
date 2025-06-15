@@ -1,7 +1,9 @@
+from dummy_app.models.opa import opa_weights
+
 import numpy as np 
 import pandas as pd 
 import networkx as nx 
-from dummy_app.models.opa import opa_weights
+
 from typing import Dict, Any
 from sklearn.preprocessing import MinMaxScaler
 

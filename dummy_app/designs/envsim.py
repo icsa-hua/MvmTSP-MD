@@ -1,13 +1,16 @@
+from dummy_app.tools.logger import logger
+from dummy_app.tools.common import get_session_duration
+from dummy_app.designs.agents import TSPAgents
+
 import simpy
 import numpy as np
 import pandas as pd 
 import matplotlib.pyplot as plt
+
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from typing import Any, List, Dict, Optional
-from dummy_app.tools.logger import logger
-from dummy_app.tools.common import get_session_duration
-from dummy_app.designs.agents import TSPAgents
+
 
 
 class EnvSim:
@@ -47,9 +50,8 @@ class EnvSim:
         constructor.Time += self.session_duration 
         self.ready_event.succeed()
         self.optimization_guard_flag = False 
-        
+
         logger.debug(f"Session duration: {self.session_duration}")
-        import pdb;pdb.set_trace() 
         
 
     def user_movement_process(self, cues:Any, trials:int):

@@ -10,17 +10,17 @@ import joblib
 import geopandas 
 import pandas as pd 
 import numpy as np 
-from typing import Any, Union, List, Dict, Mapping, Tuple, Optional
 import pulp as pl 
 import timeout_decorator 
 import resource
 import random 
 import networkx as nx
+
 from pathlib import Path
-from sklearn.preprocessing import MinMaxScaler, StandardScaler 
+from sklearn.preprocessing import MinMaxScaler 
 from collections import defaultdict
-import pdb
 from k_means_constrained import KMeansConstrained
+from typing import Any, Union, List, Dict, Mapping, Tuple, Optional
 
 
 
@@ -49,7 +49,6 @@ class MVMTSPConfig(ABC):
         self.enable_ga = enable_ga
         self.objective_function:str = objective_function
         
-      
 
     @abstractmethod
     def assign_agents_to_areas(self, plethos:int, depots:Any)->Dict[int,int]:
@@ -100,91 +99,10 @@ class MVMTSPConfig(ABC):
 
     @abstractmethod
     def set_memory_limit(self, max_memory:int=1024)->None:
-
         resource.setrlimit(resource.RLIMIT_AS, (max_memory, max_memory))
 
-    
-    @abstractmethod 
-    def preprocess(
-        self,
-        distances_path:Union[str,Path],
-        energies_path:Union[str,Path], 
-        nodes_path:Union[Path, str], 
-        num_of_agents:int, 
-        v_ver:float, 
-        v_hor:float, 
-        customers_path:Union[Path,str], 
-        user_points:Any, 
-        max_battery:int, 
-        altitude:int
-    )->pd.DataFrame:
 
-        def normalize_data(df:pd.DataFrame)->pd.DataFrame:
-            
-            scaler = MinMaxScaler()
-            scaled_data = scaler.fit_transform(df.values)
-            
-            return pd.DataFrame(scaled_data, columns=df.columns, index=df.index)
-        
-        def ensure_str_path(path:Union[Path,str])->str:
-            return str(path) if isinstance(path, Path) else path
-        
-        # Load Data 
-        distances = pd.read_csv(ensure_str_path(distances_path))
-        energies = pd.read_csv(ensure_str_path(energies_path))
-        nodes = pd.read_csv(ensure_str_path(nodes_path))
-
-        # Assign Nodes and Agents 
-        self.V = nodes 
-        self.v = len(self.V)
-        
-        self.agents = list(range(1,num_of_agents+1))
-        self.max_battery = max_battery
-
-        energy_model = DroneEnergyModel()
-        
-        self.average_coverage_energy = energy_model.coverage_energy(altitude, self.coverage_time) # In J 
-        self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
-
-        logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
-
-        # Prepare Matrices 
-        dist_columns = [f'dist_{i}' for i in range(1, self.v + 1)]
-        energy_columns = [f'ee_{i}' for i in range(1, self.v + 1)]
-        tt_columns = [f'tt_{i}' for i in range(1, self.v + 1)] 
-
-        distances.columns = dist_columns 
-        energies.columns = energy_columns
-
-        self.average_energy = float(np.average(energies))
-        
-        # Velocity in m/s
-        velocity = 5.5555555555555 
-        travel_times = distances/velocity/60
-        travel_times.columns = tt_columns 
-        self.travel_cost = travel_times.values
-        # Assert matrix shapes 
-        assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
-
-        # Normalize matrices 
-        distances = normalize_data(distances)
-        energies = normalize_data(energies)
-        travel_times = normalize_data(travel_times)
-
-        # Final preperation 
-        self.distance_columns = dist_columns 
-        self.energy_columns = energy_columns
-        self.travel_time_columns = tt_columns
-        
-        if self.v >= 10: 
-            self.depots = np.array(self.V['Area_id'].iloc[np.array([7, 8])].values)
-        else: 
-            raise ValueError("Not enough nodes to select default depots at positions 7 and 8.")
-        # combine al normalized data
-        data = pd.concat([distances, energies, travel_times, nodes], axis=1, join='inner')
-        return data 
-
-
+    @abstractmethod
     def preprocess_generated_data(
             self, 
             distance_matrix:np.ndarray, 
@@ -334,11 +252,6 @@ class MVMTSPConfig(ABC):
 
     @abstractmethod
     def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Dict:
-        pass 
-
-
-    @abstractmethod
-    def create_solution(self, cluster:Any)->Dict[str,List[int]]: 
         pass 
 
 
