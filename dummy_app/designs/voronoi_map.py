@@ -90,7 +90,7 @@ class Map:
         
 class MapGenerator(Map): 
 
-    def __init__(self, ax, num_areas:int=30, users_per_area:int=5, lat:float=13.5, lon:float=33.3, seed:int=0): 
+    def __init__(self, num_areas:int=30, users_per_area:int=5, lat:float=13.5, lon:float=33.3, seed:int=0): 
         
         logger.debug("Map Generator initialized...")
         # Transform lon and lat into UTM for better point management. 
@@ -101,7 +101,6 @@ class MapGenerator(Map):
         self.seed = seed 
         self.vor_map = None
         self.users_per_area = users_per_area
-        self.ax = ax 
         
     
     def create_environment(self, show_map:bool=False, show_3d_map:bool=False): 
@@ -131,21 +130,6 @@ class MapGenerator(Map):
         
         except Exception as E: 
             logger.exception("Raised exception {E}.")
-
-        if show_map: 
-            self.plot_map(
-                ax = self.ax, 
-                regions=regions, 
-                centroids=centroids, 
-                user_points=all_user_points
-            )
-                          
-        if show_3d_map: 
-            self.plot_map_3D(
-                regions=regions, 
-                centroids=centroids, 
-                user_points=all_user_points
-            )
 
         return regions, centroids, user_points, depots, distance_matrix_wgs84, all_user_points
         
@@ -228,7 +212,7 @@ class MapGenerator(Map):
         return user_points
         
         
-    def plot_map(self, ax, regions, centroids, user_points): 
+    def plot_map(self, ax, regions, centroids): 
 
         if self.vor_map is None:
            raise ValueError("Voronoi map is not initialized. Call 'voronoi_tessellation()' first.")
@@ -242,56 +226,15 @@ class MapGenerator(Map):
         labels = [f"A{i}" for i,_ in enumerate(centroids) ]
         ax.scatter(*zip(*centroids), c='red', marker='x', label='Centroids')
         ax.scatter(*zip(*self.vor_map.points), c='blue', marker='o', label='Original Nodes')
-        ax.scatter(*zip(*user_points), c='green', s=10, label='Users')
+
         for i in range(len(centroids)): 
             ax.text(x[i],y[i], labels[i], c='black')
         ax.set_xlabel("Longitude")
         ax.set_ylabel("Latitude")
-        ax.set_title("Voronoi Diagram with Triangle-Based User Sampling")
+        # ax.set_title("Voronoi Diagram with Triangle-Based User Sampling")
         ax.legend()
-        plt.grid(True)
-        plt.show()
-
-
-    def plot_map_3D(self, regions, centroids, user_points):
-
-        # Assign synthetic altitudes to centroids (e.g., 100m ± 20m)
-        altitudes = np.random.uniform(80, 120, len(centroids))
-
-        # 3D Plotting
-        fig = plt.figure(figsize=(12, 10))
-        ax = fig.add_subplot(111, projection='3d')
-
-        # Plot Voronoi region edges in 3D at z=0
-        for poly in regions:
-            x, y = poly.exterior.xy
-            z = np.zeros_like(x)
-            ax.plot(x, y, z, color='gray', alpha=0.5)
-
-        # Plot centroids with altitude
-        for i, (lon, lat) in enumerate(centroids):
-            ax.scatter(lon, lat, altitudes[i], c='red', marker='x', s=50)
-            ax.text(lon, lat, altitudes[i] + 5, f'A{i}', color='black')
-
-        # Plot user points at ground level (z=0)
-        for (x, y) in user_points:
-            ax.scatter(x, y, 0, c='green', s=10)
-
-        # Plot drone paths between centroids
-        for i in range(len(centroids)):
-            for j in range(i+1, len(centroids)):
-                x_vals = [centroids[i][0], centroids[j][0]]
-                y_vals = [centroids[i][1], centroids[j][1]]
-                z_vals = [altitudes[i], altitudes[j]]
-                ax.plot(x_vals, y_vals, z_vals, 'blue', alpha=0.3)
-
-        # Axis labels
-        ax.set_xlabel('Longitude')
-        ax.set_ylabel('Latitude')
-        ax.set_zlabel('Altitude (m)')
-        ax.set_title('3D Voronoi Areas with Drone Paths and Users')
-        plt.tight_layout()
-        plt.show()
+        # plt.grid(True)
+        
 
 
     def get_central_depots(self, sites, number_of_areas=2): 

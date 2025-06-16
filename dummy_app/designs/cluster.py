@@ -469,7 +469,7 @@ class Cluster:
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
         builder.num_constraints += len(self.problem.constraints)
         builder.variables_count += len(self.problem.variables())
-        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.original_nodes_dict.values())}")
+        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.NODES)}")
         
         builder.validate_paths(paths=detailed_log, nodes_dict=self.nodes_dict, cluster=self)
         logger.info("✅ Solutions validated successfully...")

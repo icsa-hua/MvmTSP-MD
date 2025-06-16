@@ -7,7 +7,7 @@ from typing import Any
 
 class TSPAgent: 
 
-    def __init__(self, agent_id, path):
+    def __init__(self, agent_id, path, altitude):
         
         self.agent_id = agent_id 
         # Ensure each element in path is a tuple/list with at least 3 elements
@@ -18,12 +18,12 @@ class TSPAgent:
         self.index = 0 
         self.x = self.plan[0][0] if self.plan is not None else 0 
         self.y = self.plan[0][1] if self.plan is not None else 0
-        
+        self.z = altitude
+        self.history = [] 
 
     def update_position(self, current_sim_time):
         if not self.plan:
             return
-
 
         start_event = None 
         end_event = None 
@@ -34,7 +34,6 @@ class TSPAgent:
                 end_event = self.plan[i+1]
                 break 
 
-        
         if start_event is None : 
             final_node = self.plan[-1]
             self.x, self.y = final_node[0], final_node[1] 
@@ -68,7 +67,7 @@ class TSPAgent:
 
 class TSPAgents: 
 
-    def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False):
+    def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False, altitude:int=1250):
         
         if empty: 
             self.mobility_env = mobility_env
@@ -77,13 +76,15 @@ class TSPAgents:
             self.path_lines = [] 
             self.agent_colors = [] 
             self.scatter:Any = None 
+            self.altitude = altitude
+            
 
         else: 
             self.mobility_env = mobility_env
             self.ax = self.mobility_env.ax
             agent_paths = agent_paths or {}
-            
-            self.agents = [TSPAgent(id, path) for (id), path in agent_paths.items()]
+            self.altitude = altitude
+            self.agents = [TSPAgent(id, path, self.altitude) for (id), path in agent_paths.items()]
             
             self.path_lines = []  # To store line objects for each agent
 
@@ -92,13 +93,13 @@ class TSPAgents:
                 line, = self.ax.plot([], [], linestyle='--', linewidth=2.5 , zorder=5)
                 self.path_lines.append(line)
 
-            n_agents = len(self.agents)
-            self.agent_colors = cm.get_cmap('tab10', n_agents)(np.arange(n_agents))
-            self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
+            # n_agents = len(self.agents)
+            # self.agent_colors = cm.get_cmap('tab10', n_agents)(np.arange(n_agents))
+            # self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
             
-            for i, agent in enumerate(self.agents):
-                self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
-            self.ax.legend()
+            # for i, agent in enumerate(self.agents):
+            #     self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
+            # self.ax.legend()
 
             # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
             self.process = self.mobility_env.env.process(self.simulate())
@@ -107,14 +108,18 @@ class TSPAgents:
     def get_coords(self):
         x = [agent.x for agent in self.agents]
         y = [agent.y for agent in self.agents]
-        return np.column_stack((x,y))
+        z = [self.altitude] * len(x)
+
+        return np.column_stack((x,y,z))
 
 
     def update_plot(self):
-
+        coords = self.get_coords()
+        xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
         if self.scatter: 
-            self.scatter.set_offsets(self.get_coords())
+            self.scatter._offsets3d = (xs, ys, zs)
             self.scatter.set_color(self.agent_colors)
+         
          
 
     def simulate(self):

@@ -147,13 +147,13 @@ mobility_sim = EnvSim(trials=TRIALS)
 
 # Generate Map Generator Object 
 map_generator = MapGenerator(
-    ax = mobility_sim.ax,
     num_areas = NUMBER_OF_AREAS,
     users_per_area = NUMBER_OF_USERS, 
     lon=LONGITUDE_ATHENS, 
     lat=LATITUDE_ATHENS,
     seed=42, 
 )
+
 logger.debug(f"✅ Map Generator Initialized")
 
 regions, centroids, user_points, depots, distance_matrix, all_users = map_generator.create_environment(show_map=False, show_3d_map=False)
@@ -177,15 +177,17 @@ if map_generator.vor_map is None:
 
 all_user_points = [point for points in user_points.values() for point in points]
 
-if args.show_map: 
-    mobility_sim.fig, mobility_sim.ax = ground_users.plot_generated_users(
-        map_generator,
-        regions=regions, 
-        centroids=centroids,
-        user_points=all_user_points
-    )
-else:
-    mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
+# if args.show_map: 
+#     mobility_sim.fig, mobility_sim.ax = ground_users.plot_generated_users(
+#         map_generator,
+#         regions=regions, 
+#         centroids=centroids,
+#         user_points=all_user_points
+#     )
+# else:
+#     mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
+
+
 
 # Preprocess the data based on the map, the energy/coverage model and the ground users. 
 data = problem.preprocess_generated_data(
@@ -207,33 +209,52 @@ deallocate_memory(regions)
 deallocate_memory(centroids)
 deallocate_memory(user_points)
 
-try: 
-    # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
-    ani = FuncAnimation(
-        mobility_sim.fig,
-        mobility_sim.simulations,
-        frames=frame_generator(),
-        fargs=(problem, ground_users, vor_map, distance_matrix, data, TRIALS),
-        interval=100,
-        blit=False, 
-        cache_frame_data=False)
+mobility_sim.run_simulation(
+    trials=TRIALS, 
+    constructor=problem, 
+    cues=ground_users,
+    regions=regions,
+    centroids=centroids,
+)
+
+
+# try: 
+#     # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
+#     ani = FuncAnimation(
+#         mobility_sim.fig,
+#         mobility_sim.simulations,
+#         frames=frame_generator(),
+#         fargs=(problem,
+#                ground_users, 
+#                vor_map, 
+#                distance_matrix, 
+#                data, 
+#                regions,
+#                centroids,
+#                user_points,
+#                ALTITUDE,
+#                TRIALS),
+
+#         interval=100,
+#         blit=False, 
+#         cache_frame_data=False)
     
-    plt.show(block=False)
+#     plt.show()
+#     import time 
+#     while True:
+#         plt.pause(0.001)  # keeps the plot interactive
+#         time.sleep(0.001)
 
-    # while True:
-    #     plt.pause(0.001)  # keeps the plot interactive
-    #     time.sleep(0.001)
+#     # Save as MP4 (requires ffmpeg)
+#     ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
 
-    # Save as MP4 (requires ffmpeg)
-    ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
+# except KeyboardInterrupt as kb:
+#     plt.close(mobility_sim.fig)
+#     logger.exception(f"KeyboardInterrupt: {kb}")
+#     exit(1)
 
-except KeyboardInterrupt as kb:
-    plt.close(mobility_sim.fig)
-    logger.exception(f"KeyboardInterrupt: {kb}")
-    exit(1)
-
-except Exception as e:
-    plt.close(mobility_sim.fig)
-    logger.exception(f"Exception: {e}")
-    exit(1)
+# except Exception as e:
+#     plt.close(mobility_sim.fig)
+#     logger.exception(f"Exception: {e}")
+#     exit(1)
 

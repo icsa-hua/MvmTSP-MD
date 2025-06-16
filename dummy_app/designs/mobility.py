@@ -1,6 +1,7 @@
 from dummy_app.designs.voronoi_map import Map
 from dummy_app.tools.logger import logger 
 
+import uuid
 import numpy as np 
 import pandas as pd 
 import matplotlib.pyplot as plt
@@ -19,14 +20,15 @@ U = lambda MIN, MAX, SAMPLES: np.random.rand(*SAMPLES.shape) * (MAX-MIN) + MIN
 
 class GroundUser: 
 
-    def __init__(self, x, y, mean_velocity=1.0)->None:
+    def __init__(self, x, y, z=1.25, mean_velocity=1.0)->None:
         self.x:Union[int,float] = x 
         self.y:Union[int,float] = y 
+        self.z:Union[int,float] = z 
         self.velocity:float = mean_velocity 
         self.theta:float = 0.0 
         self.angle_mean:float = 0.0
         self.current_area:int = 0 
-    
+        self.user_id = uuid.uuid4()
 
     def move(self, map_obj:Map)->Point: 
 
@@ -44,8 +46,9 @@ class GroundUser:
             self.theta = -self.theta
             self.angle_mean = -self.angle_mean
 
+
         # Update region 
-        return Point(self.x, self.y) 
+        return Point(self.x, self.y, self.z) 
     
 
 class GroundUserGroup: 
@@ -68,8 +71,8 @@ class GroundUserGroup:
         self.alpha3 = np.sqrt(1.0 - self.alpha * self.alpha) * self.sigma
 
         self.group: Dict[int, list[GroundUser]] = {}
-        self.fig = self.mobility_env.fig 
-        self.ax = self.mobility_env.ax
+        # self.fig = self.mobility_env.fig 
+        # self.ax = self.mobility_env.ax
         self.scatter = None 
         self.process = self.mobility_env.env.process(self.simulate())
 
@@ -93,8 +96,6 @@ class GroundUserGroup:
                 self.group[idx].append(user) 
 
         
-
-
     def get_generated_users(self, user_points)->None:
         df = pd.DataFrame(user_points).T
 
@@ -113,49 +114,10 @@ class GroundUserGroup:
     def get_coords(self)->np.ndarray: 
         x = [user.x for area in self.group.values() for user in area]
         y = [user.y for area in self.group.values() for user in area]
-        return np.column_stack((x,y))
+        z = [user.z for area in self.group.values() for user in area]
+
+        return np.column_stack((x,y,z))
     
-
-    def plot_users(self, vor_map:Voronoi)->Tuple: 
-
-        voronoi_plot_2d(
-            vor_map, 
-            ax=self.ax, 
-            show_vertices=False, 
-            line_colors='black',
-            line_width=3, 
-            line_alpha=0.6
-        )
-        self.scatter = self.ax.scatter(
-            [],[],
-            c='red',
-            s=50,
-            label='Ground Users',
-            edgecolors='black'
-        )
-
-        self.scatter.set_offsets(self.get_coords())
-        return self.fig, self.ax
-
-    
-    def plot_generated_users(self, map_obj:Any, regions, centroids, user_points)->Tuple: 
-
-        if hasattr(map_obj, 'plot_map'):
-            map_obj.plot_map(ax=self.ax,regions=regions, centroids=centroids, user_points=user_points)
-
-            self.scatter = self.ax.scatter(
-                [],[],
-                c='red',
-                s=50,
-                label='Ground Users',
-                edgecolors='black'
-            )
-
-            self.scatter.set_offsets(self.get_coords())
-            return self.fig, self.ax
-
-        return None, None
-
 
     def simulate(self): 
 
@@ -177,12 +139,13 @@ class GroundUserGroup:
                                   self.alpha2 * user.angle_mean +
                                   self.alpha3 * np.random.normal(0.0))
 
-            self.update_plot() 
-            plt.draw()  
+            
             yield self.mobility_env.env.timeout(1)
 
 
     def update_plot(self)->None:
+        coords = self.get_coords()
+        xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
         if self.scatter: 
-            self.scatter.set_offsets(self.get_coords())
+            self.scatter._offsets3d = (xs, ys, zs)
             
