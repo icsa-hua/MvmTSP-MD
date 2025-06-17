@@ -157,8 +157,10 @@ class Builder(MVMTSPConfig):
 
     @timeout_decorator.timeout(3600)
     def solve_problem(self, cluster:Any):
-        cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
-    
+        if self.objective_function == "energy":
+            cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
+        elif self.objective_function == "coverage":
+            cluster.problem.solve(pl.GLPK_CMD(timeLimit=500, msg=False, options=['--mipgap', '0.0','--seed', '42']))
 
     def preprocess_generated_data(self, distance_matrix:np.ndarray, centroids:list, depots:np.ndarray, num_of_agents:int,  v_ver:float,  v_hor:float,  altitude:int,  coverage_time:int,  user_points=defaultdict()):
         data = super().preprocess_generated_data(

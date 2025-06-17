@@ -105,7 +105,7 @@ class Cluster:
         if total_time == 0: 
             logger.error(f"Total time is 0 for cluster {self.id}")
             raise ValueError(f"Total time is 0 for cluster {self.id}")
-
+        
         self.timeframe = list(range(0, total_time + 1))
 
 
@@ -119,20 +119,6 @@ class Cluster:
         # Set the decision variables 
         self.create_problem(scenario=scenario, objective_functions=objective_function) 
 
-        # Set the loss function 
-        if objective_function == 'energy':
-            self.set_energy_objective(
-                distance=self.cost['distance'],
-                energy=self.cost['energy'], 
-                time=self.cost['travel_time'],
-            )
-
-        elif objective_function == 'coverage':
-            self.set_coverage_objective(energy=self.cost['energy'])
-
-        elif objective_function == 'idleness': 
-            self.set_idleness_objective(energy=self.cost['energy'])     
-
         if not hasattr(builder, 'get_travel_time'):
             logger.error("Builder does not have get_travel_time method") 
             raise ValueError("Builder does not have get_travel_time method")    
@@ -141,12 +127,45 @@ class Cluster:
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
         
         if scenario == 'cooperative':
+            if builder.objective_function == "energy":
+                self.set_energy_objective(
+                    distance=self.cost['distance'],
+                    energy=self.cost['energy'], 
+                    time=self.cost['travel_time'],
+                )
+            elif builder.objective_function == "coverage":
+                self.set_idleness_objective(
+                    energy=self.cost['energy']
+                )
+            
             cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
-    
-        elif scenario == 'individual':
-            individual_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+            
+            builder.solve_problem(self) 
 
-        builder.solve_problem(self) 
+
+        elif scenario == 'individual':
+
+            self.set_energy_objective(
+                distance=self.cost['distance'],
+                energy=self.cost['energy'], 
+                time=self.cost['travel_time'],
+            )
+            individual_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+           
+            builder.solve_problem(self) 
+           
+            if builder.objective_function == "coverage": 
+                if self.problem.status == pl.LpStatusOptimal: 
+                    feasible_makespan = self.makespan.varValue 
+                    logger.info(f"Feasible makespan: {feasible_makespan}")
+
+                    self.problem += self.makespan <= feasible_makespan * 0.99 
+
+                    self.set_coverage_objective(energy=self.cost['energy'])
+                    logger.info("\n--- Re-solving with makespan objective and upper bound constraint... ---")
+
+                    builder.solve_problem(self)
+
 
         return self.get_results(builder=builder)
     
@@ -178,7 +197,7 @@ class Cluster:
 
         if scenario == 'individual': 
             self.precedes = pl.LpVariable.dicts("precedes", ((j, k1, k2) for j in V for k1 in self.employed_agents for k2 in self.employed_agents if k1 < k2), cat='Binary')
-
+            self.makespan = pl.LpVariable("makespan", lowBound=0, cat='Continuous')
 
         if objective_functions == 'energy': 
             self.problem = pl.LpProblem(name=f"MVMTSP_Cluster_{self.id}", sense=pl.LpMinimize)
@@ -206,32 +225,29 @@ class Cluster:
        
 
     def set_idleness_objective(self,energy):
-        alpha = 0.6
-        beta = 0.4
-
-        spatial_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j for k in self.employed_agents)
-
-        timestep_cost = pl.lpSum(self.return_step[k] for k in self.employed_agents)
-
-        self.problem.setObjective(
-            alpha * spatial_cost + beta * timestep_cost
-        )
-
-
-    def set_coverage_objective(self,energy)->None:
-
         # Makespan 
         makespan = pl.LpVariable("makespan", lowBound=0, cat='Continuous')
 
         for k in self.employed_agents: 
            self.problem += makespan >= self.return_step[k] 
 
+        alpha = 0.8
+        beta = 0.02
+        spatial_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j for k in self.employed_agents)
+        self.problem.setObjective(
+            alpha * spatial_cost + beta * makespan
+        )
+
+
+    def set_coverage_objective(self,energy)->None:
+
+        # Makespan
         alpha = 0.6 
         beta = 0.4
         spatial_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j for k in self.employed_agents)
 
         self.problem.setObjective(
-            alpha * spatial_cost + beta * makespan
+            alpha * spatial_cost + beta * self.makespan
         )
 
 

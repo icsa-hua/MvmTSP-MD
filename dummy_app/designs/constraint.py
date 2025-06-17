@@ -438,4 +438,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 
                 # Energy at i must be >= the energy needed for the next leg
                 model += cluster.e[i, k] >= total_energy_cost - M_energy * (1 - cluster.x[i, j, k])
-
+    
+    if builder.objective_function == "coverage":
+        for k in agents: 
+            model += cluster.makespan >= cluster.return_step[k] 
