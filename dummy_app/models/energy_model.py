@@ -25,7 +25,7 @@ class DroneEnergyModel:
 
     def recover_energy(self):
         # Recharge at a fixed charging power (e.g., 200 W)
-        P_charge = 250  # Watts
+        P_charge = 350  # Watts
         energy_recovered = P_charge * self.dt  # in Joules
 
         return  energy_recovered

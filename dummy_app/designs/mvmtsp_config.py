@@ -48,6 +48,7 @@ class MVMTSPConfig(ABC):
         self.coverage_time = max_coverage_time
         self.enable_ga = enable_ga
         self.objective_function:str = objective_function
+        self.env_type:str = env_type
         
 
     @abstractmethod
@@ -273,9 +274,9 @@ class MVMTSPConfig(ABC):
         max_nodes = 0 
         
         # Reserve 10–15% for emergency return
-        if self.objective_function == 'energy': 
+        if self.scenario == 'cooperative': 
             reserve = self.max_battery * 0.15
-        elif self.objective_function == 'coverage': 
+        elif self.scenario == 'individual': 
             reserve = self.max_battery * 0.35 
         else: 
             reserve = self.max_battery * 0.10

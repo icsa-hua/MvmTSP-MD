@@ -253,11 +253,10 @@ class Cluster:
         self.NODES = self.V_nodes[:depot_id] + self.V_nodes[depot_id+1:]
 
 
-    def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural'):
+    def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural', filename='outuput.csv'):
         
-        file_id = uuid.uuid4()
-        
-        coverage_probability_filename = f'cov_out_prob_{file_id}.csv'
+        coverage_probability_filename = filename
+        # coverage_probability_filename = f'cov_out_prob_{file_id}.csv'
         coverage_directory = f'{os.getcwd()}/assets/results/coverage_prob'
         
         self.check_results_file(
@@ -314,8 +313,22 @@ class Cluster:
         
         self.R = average_R
         self.sinr = average_sinr
-        
-   
+
+
+    def get_node_visits(self, builder:Any, node, dc):
+
+        if dc[node] not in builder.visits_per_nodes:
+            if dc[node] in self.virtual_nodes:    
+                builder.visits_per_nodes[self.virtual_nodes[dc[node]]] = 1
+            else:
+                builder.visits_per_nodes[dc[node]] = 1
+        else: 
+            if dc[node] in self.virtual_nodes: 
+                builder.visits_per_nodes[self.virtual_nodes[dc[node]]] += 1
+            else:
+                builder.visits_per_nodes[dc[node]] += 1
+
+             
     def get_results(self,builder:Any): 
         
         logger.debug(f"Cluster Time Frame is {self.timeframe}") 
@@ -336,7 +349,7 @@ class Cluster:
         dc = self.nodes_dict
 
 
- # --- START OF DEBUGGING ---
+        # --- START OF DEBUGGING ---
         logger.debug(f"\n--- DEBUGGING CLUSTER {self.id} ---")
         logger.debug(f"Assigned Depot ID: {self.depot_id}")
         
@@ -378,11 +391,12 @@ class Cluster:
                 for t_step in range(round(departure_from_depot), round(arrival_at_start_node)):
                     detailed_log[k].append((dc[depot_ind], real_start_node, t_step))
 
+                self.get_node_visits(builder, start_node, dc)
+
                 # Continue with the rest of the path
                 current_node = start_node
                 while current_node != depot_ind:
 
-                    
                     real_current_node = dc[current_node]
                     if dc[current_node] in self.virtual_nodes:
                         real_current_node = self.virtual_nodes[dc[current_node]]
@@ -437,6 +451,8 @@ class Cluster:
                     for t_step in range(start_t_move, end_t_move): 
                         detailed_log[k].append((real_current_node, real_next_node_in_path, t_step))
                    
+                    self.get_node_visits(builder, next_node_in_path, dc)
+
                     # Move to the next node for the next loop iteration
                     current_node = next_node_in_path
 
@@ -470,7 +486,7 @@ class Cluster:
         builder.num_constraints += len(self.problem.constraints)
         builder.variables_count += len(self.problem.variables())
         logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.NODES)}")
-        
+        builder.global_nodes_visited += len(unique_nodes_among_paths)
         builder.validate_paths(paths=detailed_log, nodes_dict=self.nodes_dict, cluster=self)
         logger.info("✅ Solutions validated successfully...")
         logger.info("--------------------------------------------------------------------------")
@@ -510,5 +526,5 @@ class Cluster:
             os.remove(results_file)
 
 
-
+ 
                 

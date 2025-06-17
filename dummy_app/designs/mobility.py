@@ -48,7 +48,9 @@ class GroundUser:
 
 
         # Update region 
-        return Point(self.x, self.y, self.z) 
+        return Point(self.x, self.y) 
+    
+        # return Point(self.x, self.y, self.z) 
     
 
 class GroundUserGroup: 
@@ -71,8 +73,8 @@ class GroundUserGroup:
         self.alpha3 = np.sqrt(1.0 - self.alpha * self.alpha) * self.sigma
 
         self.group: Dict[int, list[GroundUser]] = {}
-        # self.fig = self.mobility_env.fig 
-        # self.ax = self.mobility_env.ax
+        self.fig = self.mobility_env.fig 
+        self.ax = self.mobility_env.ax
         self.scatter = None 
         self.process = self.mobility_env.env.process(self.simulate())
 
@@ -114,15 +116,39 @@ class GroundUserGroup:
     def get_coords(self)->np.ndarray: 
         x = [user.x for area in self.group.values() for user in area]
         y = [user.y for area in self.group.values() for user in area]
-        z = [user.z for area in self.group.values() for user in area]
+        return np.column_stack((x,y))
+        # z = [user.z for area in self.group.values() for user in area]
 
-        return np.column_stack((x,y,z))
+        # return np.column_stack((x,y,z))
     
+    def plot_users(self, vor_map:Voronoi)->Tuple: 
+
+        voronoi_plot_2d(
+            vor_map, 
+            ax=self.ax, 
+            show_vertices=False, 
+            line_colors='black',
+            line_width=1.5, 
+            line_alpha=0.5
+        )
+
+        self.scatter = self.ax.scatter(
+            [],[],
+            c='green',
+            s=40,
+            label='Ground Users',
+            edgecolors='black',
+        )
+
+        self.scatter.set_offsets(self.get_coords())
+        return self.fig, self.ax
+
 
     def simulate(self): 
 
         regions = self.map_obj.clip_voronoi_to_box() 
         while True: 
+
             for area_users in self.group.values() : 
                 for user in area_users:
                     point = user.move(self.map_obj)
@@ -139,13 +165,16 @@ class GroundUserGroup:
                                   self.alpha2 * user.angle_mean +
                                   self.alpha3 * np.random.normal(0.0))
 
-            
+            self.update_plot() 
+            plt.draw()  
             yield self.mobility_env.env.timeout(1)
 
 
     def update_plot(self)->None:
-        coords = self.get_coords()
-        xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
         if self.scatter: 
-            self.scatter._offsets3d = (xs, ys, zs)
+            self.scatter.set_offsets(self.get_coords())
+        # coords = self.get_coords()
+        # xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
+        # if self.scatter: 
+        #     self.scatter._offsets3d = (xs, ys, zs)
             

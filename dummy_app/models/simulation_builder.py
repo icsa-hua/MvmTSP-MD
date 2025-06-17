@@ -42,7 +42,11 @@ class Builder(MVMTSPConfig):
         self.variables_count = 0
         self.Time = 0 
         self.problem_results = defaultdict()
-
+        self.global_nodes_visited:int = 0
+        self.visits_per_nodes:Dict[int,int] = {}
+        self.total_number_cluster: int = 0 
+        self.coverage_file_id = uuid.uuid4() 
+        self.coordinated_plan = defaultdict(dict)
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
@@ -181,7 +185,7 @@ class Builder(MVMTSPConfig):
         return super().createGeoDataset(data)
      
 
-    def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Dict:
+    def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Any:
         self.user_points = cue_groups
         logger.debug("Running combinatorial problem constructor...")
         with tqdm (total=8, desc="Preparing Problem with clustering") as pbar: 
@@ -250,9 +254,9 @@ class Builder(MVMTSPConfig):
 
         paths = {} 
         self.metrics.start_performance_timer() 
- 
+        self.total_number_cluster = len(clusters)
         # Phase 5: Problem Construction and Solution
-        with tqdm(total=len(clusters), desc="Solving problem...", unit="step") as pbar:
+        with tqdm(total=len(clusters), desc="Solving problem ", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
                 
                 paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
@@ -269,24 +273,16 @@ class Builder(MVMTSPConfig):
         logger.info("Total Number of Constraints : {}".format(self.num_constraints))
         logger.info("Total Number of Variables : {}".format(self.variables_count))
 
-        # Step 6: Flatten all the paths to form a single path for each agent
-        paths = self.flatten_paths_on_time(paths)  
-       
-        # Step 7: Transform positions to coordinates
-        agents_paths_clusters = defaultdict(dict)
+        # Step 6: Flatten all the paths to form a single path for each agent        
 
-        for agent in paths.keys(): 
-            agents_paths_clusters[agent] = {
-                'path': self.get_coordinates_for_path(paths[agent])
-            }
+        # Step 7: Transform positions to coordinates
+        for agent, plan in self.coordinated_plan.items():
+            self.coordinated_plan[agent] = self.get_coordinates_for_path(plan)
             
         # Step 8: Add interpolation steps for the paths (visualizatino) 
-        agents_paths_clusters = self.post_process_interpolation(agents_paths_clusters)
-        path_times = []
-        for agent in agents_paths_clusters.keys(): 
-            path_times.append(len(agents_paths_clusters[agent]))
-        
-        return agents_paths_clusters     
+        # self.coordinated_plan = self.post_process(self.coordinated_plan)
+
+        return self.coordinated_plan     
     
 
     def get_coordinates_for_path(self, path): 
@@ -295,9 +291,11 @@ class Builder(MVMTSPConfig):
             try:
                 current_node = self.V.index[self.V['Area_id'] == point[0]][0] 
                 next_node = self.V.index[self.V['Area_id'] == point[1]][0]
-                current_coords = (int(self.V['X_coords'].iloc[current_node]), int(self.V['Y_coords'].iloc[current_node]))
-                next_coords = (int(self.V['X_coords'].iloc[next_node]), int(self.V['Y_coords'].iloc[next_node]))
+                current_coords = (float(self.V['X_coords'].iloc[current_node]), float(self.V['Y_coords'].iloc[current_node]))
+                next_coords = (float(self.V['X_coords'].iloc[next_node]), float(self.V['Y_coords'].iloc[next_node]))
                 coordinates.append((current_coords, next_coords, point[2]))
+                # coordinates.append((point[0], point[1], point[2]))
+            
             except IndexError:
                 logger.error(f"❌ Node {point[0]} or {point[1]} not found in the dataframe.")
                 continue
@@ -351,44 +349,11 @@ class Builder(MVMTSPConfig):
         # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
 
-        # --- START OF DEBUGGING ---
-        logger.debug(f"\n--- DEBUGGING CLUSTER {cluster_id} ---")
-        logger.debug(f"Assigned Agents: {assignment}")
-        logger.debug(f"Assigned Depot ID: {depot_id}")
-        
-        # This is the most critical part
-        # Rebuild your node sets FROM SCRATCH for this run
-        all_node_ids_in_cluster = [node for node in cluster_object.original_nodes_dict] # Or however you get the IDs
-        
-        # Ensure depot is correctly identified and separated
-        V_nodes = list(cluster_object.nodes_dict.keys())
-        reverse_dict = {v: k for k, v in cluster_object.nodes_dict.items()}
-        depot_ind = reverse_dict[depot_id]
-        NODES = [n for n in V_nodes if n != depot_ind]
+        # Step 3.5 : Calculate the average throughput and SNR 
+        self.get_cluster_coverage(cluster_object)
 
-        logger.debug(f"All Node IDs (original_nodes_dict): {all_node_ids_in_cluster}")
-        logger.debug(f"All Node Indices (V_nodes): {V_nodes}")
-        logger.debug(f"Depot Index for this run: {depot_ind}")
-        logger.debug(f"Visitable Node Indices (NODES): {NODES}")
-        logger.debug(f"Time frame for paths (cluster_object.timeframe): {cluster_object.timeframe}")
-        logger.debug("---------------------------------------\n")
+        deallocate_memory(context)
 
-        # Cluster has 
-        # Original Mapping -> original_nodes_dict 
-        # New mapping (without the hub node/with the virtual nodes) -> nodes_dict 
-        # New Nodes list (including depot) -> V_nodes (from nodes_dict)
-        # Nodes list (without depot) -> NODES (from nodes_dict) 
-        # Depot index -> depot_ind (from nodes_dict)
-        # TR_TIMES based on 
-
-
-
-        if OBJECTIVE == 'coverage':
-            self.get_cluster_coverage(cluster_object)
-
-        # deallocate_memory(context)
-
-        # cluster_object.R_points = list(np.ones(len(cluster_object.nodes_dict)))
         # Step 4: Create and configure the optimization problem 
         try: 
             paths = cluster_object.problem_formulation(builder=self, scenario=SCENARIO, objective_function=OBJECTIVE ) 
@@ -396,9 +361,7 @@ class Builder(MVMTSPConfig):
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
-        # Step 5 extract solution 
-        # paths = cluster_object.get_solution()
-        # Step 6: Add the recharge phase & synchronize agents 
+        # Step 5: Calculate the results for the cluster 
         cost = load_generated_data()
         results = extract_per_agent_metrics(
             paths=paths, 
@@ -408,6 +371,7 @@ class Builder(MVMTSPConfig):
             area_ids=cluster_object.original_nodes_dict.values() 
         )
 
+        # Total results for all agents inside the cluster. 
         totalDistance, totalEnergy, totalTime = calculate_totals_from_paths(
             results=results
         )
@@ -429,8 +393,8 @@ class Builder(MVMTSPConfig):
         df.to_csv(filename, mode='a', index=False, header=False) 
 
         paths = self.synchronize_agent_paths(paths, cluster_object)
-        logger.info(f"Amount of constraints for cluster: {len(cluster_object.problem.constraints)}")
-        deallocate_memory(cluster_object)
+        self.flatten_paths_on_time(self.coordinated_plan, paths)  
+
         return paths 
 
 
@@ -517,40 +481,69 @@ class Builder(MVMTSPConfig):
         return math.ceil(self.travel_cost[nodes_dict[i]-1, nodes_dict[j]-1])
              
 
-    def post_process_interpolation(self, agents_paths_clusters): 
+    def post_process(self, coordinated_plan): 
 
+        def check_for_duplicates(path): 
+            # Build a new list instead of modifying the old one.
+            unique_plan = []
+            if path:
+                unique_plan.append(path[0])
+                for i in range(len(path) - 1):
+                    if path[i] != path[i+1]:
+                        unique_plan.append(path[i+1])
+                    
+            return unique_plan
+
+
+        if not coordinated_plan: return [] 
         interpolated_paths = {}
+        for agent, plan in coordinated_plan.items(): 
 
-        for key in agents_paths_clusters.keys():
-            path = agents_paths_clusters[key]['path']
-            processed_path = []
-            step = 0
+            if not plan:
+                logger.debug(f"Agent {agent} has no path in cluster {agent}")
+                continue
+            path = check_for_duplicates(plan)
             
-            while step < len(path):
-                i, j, t = path[step]
-                journey = (i, j)
+            detailed_log = [] 
 
-                # Count how many steps this journey spans
-                duration = 1
-                while (
-                    step + duration < len(path) and
-                    (path[step + duration][0], path[step + duration][1]) == journey
-                ):
-                    duration += 1
-                
-                # Get coordinates for interpolation
-                x1, y1 = i  # coords is a dict: node -> (x, y)
-                x2, y2 = j
-                
-                xs = np.linspace(x1, x2, duration + 1)[1:]  # exclude x1 (already included)
-                ys = np.linspace(y1, y2, duration + 1)[1:]
-                
-                for d in range(duration):
-                    processed_path.append((xs[d], ys[d], t + d))
+            for i in range(len(path)):
 
-                step += duration  # move to next journey
+                # Get the current event and its start time 
+                from_node_id, to_node_id, start_time = path[i] 
 
-            interpolated_paths[key] = processed_path
+                if i + 1 < len(path):
+                    end_time = path[i+1][2]
+                else:
+                    end_time = start_time + 1
+
+                duration = int(round(end_time - start_time))
+
+                # Get the 3D coordinates for the start and end nodes
+                start_pos = (from_node_id[0], from_node_id[1])
+                end_pos = (to_node_id[0], to_node_id[1]) 
+
+                # --- LOGIC SEPARATION ---
+    
+                # Case 1: The agent is WAITING at a node
+                if from_node_id == to_node_id:
+                    # For a waiting period, simply append the same position for the duration.
+                    # No interpolation is needed.
+                    for t in range(duration):
+                        current_time = int(round(start_time)) + t
+                        detailed_log.append((*start_pos, current_time))
+                # Case 2: The agent is MOVING between nodes
+                else:
+                    if duration == 0: # If duration is zero, just add the start point
+                        detailed_log.append((*start_pos, int(round(start_time))))
+                        continue
+
+                    x_coords = np.linspace(start_pos[0], end_pos[0], duration)
+                    y_coords = np.linspace(start_pos[1], end_pos[1], duration)
+                    for t in range(duration):
+                        current_time = int(round(start_time)) + t
+                        detailed_log.append((x_coords[t], y_coords[t], current_time))
+            interpolated_paths[agent] = detailed_log
+
         return interpolated_paths
     
 
@@ -558,70 +551,92 @@ class Builder(MVMTSPConfig):
        
         # Calculate recharge steps 
         problem_results = self.problem_results[f'Cluster_{cluster.id}']['agent_results']
-        tmp_times = defaultdict(float)
+        
+        recharge_times = defaultdict(float)
+
+        synced_paths = {} 
+        agent_end_times = {}
+
         for agent in paths: 
-            tmp_times[agent] = calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy'])
-            time_end = paths[agent][-1][-1]
-            for step in range(time_end, time_end + round(tmp_times[agent])):
-                if step == time_end + round(tmp_times[agent]) - 1:
-                    paths[agent].append((paths[agent][-1][0], paths[agent][-1][1], step))
-                    break
-                
-                if step % 10 == 0 and step != time_end :                    
-                    paths[agent].append((paths[agent][-1][0], paths[agent][-1][1], step))
-                
-       
-        tmp_time_frame = 1000000000
-        for agent, path in paths.items() : 
-            if path[-1][-1] < tmp_time_frame:
-                tmp_time_frame = path[-1][-1]
+            recharge_times[agent] = calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy'])
+            agent_end_times[agent] = paths[agent][-1][2] + recharge_times[agent] if paths[agent] else -1 
+            self.problem_results[f'Cluster_{cluster.id}']['agent_results'][agent]['recharge_steps'] = recharge_times[agent]
 
-        cluster.timeframe = list(range(0,tmp_time_frame))
-        
-        for agent, path in paths.items(): 
-            if path[-1][-1] < cluster.timeframe[-1]: 
-                time_diff = cluster.timeframe[-1] - path[-1][-1] +1
-                idle = [(int(cluster.depot_id),int(cluster.depot_id),path[-1][2]+step) for step in range(time_diff)] 
-                path.extend(idle)
+        max_mission_time = max(agent_end_times.values()) if agent_end_times else 0 
 
-        return paths 
-    
+        new_sync_time = max_mission_time 
 
-    def flatten_paths_on_time(self, paths): 
+        for agent_id, path in paths.items(): 
+            if not path:
+                synced_paths[agent_id] = [] 
+                continue 
 
-        order_of_clusters = list(paths.keys())
-        # employed_agents = ["Agent_" + str(agent_id) for agent_id in self.agents]
-        
-        single_agent_paths_for_clusters = {}
-        for agent in self.agents: 
-            flattened_path = []
-            for cluster_id in order_of_clusters:
-                if agent in list(paths[cluster_id].keys()): 
-                    
-                    if len(flattened_path)==0: 
-                        flattened_path.extend(paths[cluster_id][agent])
-
-                    else: 
-                        last_time = flattened_path[-1][2] 
-                        new_time_steps_for_path = [step[2]+last_time + 1 for step in paths[cluster_id][agent]]
-                        new_path = [(step[0], step[1], new_time_steps_for_path[i]) for i, step in enumerate(paths[cluster_id][agent])]
-                        flattened_path.extend(new_path)
+            new_path = list(path) 
+            last_step = new_path[-1] 
+            last_pos = (last_step[0], last_step[1])
+            if last_step[0] != cluster.depot_id: 
+                last_pos = (int(cluster.depot_id), last_step[1])
             
-            single_agent_paths_for_clusters[agent] = flattened_path
+            current_time = last_step[2] 
 
-        return single_agent_paths_for_clusters
+            for i in range(int(recharge_times[agent_id])):
+                current_time += 1
+                new_path.append((*last_pos, current_time))
+
+            idle_steps_needed = new_sync_time - current_time 
+            for i in range(int(idle_steps_needed)):
+                current_time += 1
+                new_path.append((*last_pos, current_time))
+
+            synced_paths[agent_id] = new_path
+
+        return synced_paths 
     
+
+    def flatten_paths_on_time(self, master_paths, new_paths): 
+
+        for agent_id, new_path in new_paths.items():
+            if not new_path: 
+                continue 
+
+            if agent_id not in master_paths or not master_paths[agent_id]: 
+                master_paths[agent_id] = new_path 
+
+            else: 
+                last_global_time = master_paths[agent_id][-1][-1] 
+
+                shifted_path = [] 
+                for step in new_path: 
+                    if len(step) ==3 :
+                        x, y, local_time = step 
+                    elif len(step) == 4: 
+                        x, y, z, local_time = step 
+                    else: 
+                        x, local_time = step
+                    
+                    new_global_time = local_time + last_global_time + 1 
+                    
+                    if len(step) == 3:
+                        shifted_path.append((x, y, new_global_time))
+                    elif len(step) == 4:
+                        shifted_path.append((x, y, z, new_global_time))
+
+                master_paths[agent_id].extend(shifted_path)
+
+        return master_paths
+                        
 
     def get_cluster_coverage(self, cluster:Any):
-                
+        filename = 'coverage_results_{}.csv'.format(self.coverage_file_id)
         altitude = 1250/1e3 
         user_height = 12.5/1e3 
-        terrain_type = 'urban'
+        terrain_type = self.env_type 
         cluster.get_average_coverage(
             user_points = self.user_points,
             altitude = altitude,
             user_height = user_height,
             terrain_type = terrain_type,
+            filename=filename
         )
 
 
@@ -642,4 +657,77 @@ class Builder(MVMTSPConfig):
 
         return filename
             
+
+    def gather_results(self): 
+
+        results = self.problem_results
+        depots_len = len(self.depots) if self.depots is not None else 0
+        self.global_nodes_visited = self.global_nodes_visited - (self.total_number_cluster - depots_len)
+        
+        average_visits_per_node = sum(self.visits_per_nodes.values()) / len(self.visits_per_nodes) if self.visits_per_nodes else 0
+        node_coverage_ration = self.global_nodes_visited / self.v 
+
+        total_energy_consumption = 0 
+        total_mission_time = 0 
+        total_distance = 0
+        idle_times = 0 
+        for cluster in results: 
+            
+            total_energy_consumption += results[cluster]['Total Energy'] 
+            total_mission_time += results[cluster]['Total Time']
+            total_distance += results[cluster]['Total Distance']
+
+            for agent, agent_results in results[cluster]['agent_results'].items():
+                idle_times += agent_results.get('recharge_steps', 0) 
+
+        mission_efficiency_per_energy = self.global_nodes_visited / total_energy_consumption if total_energy_consumption > 0 else 0
+        scaled_mission_efficiency = 1000 * mission_efficiency_per_energy # (nodes per kWh) 
+        mission_efficiency_per_time = self.global_nodes_visited / total_mission_time if total_mission_time > 0 else 0
+        scaled_mission_efficiency_time = 60 * mission_efficiency_per_time # (nodes per hour)
+        
+        idle_ration = idle_times / total_mission_time if total_mission_time > 0 else 0
+        
+        final_results = {
+            "Scenario": self.scenario, 
+            "Objective Function": self.objective_function,
+            "Total Number of Clusters": self.total_number_cluster,
+            "Total Nodes Visited": self.global_nodes_visited,
+            "Visits per Node": self.visits_per_nodes,
+            "Total Mission Time": total_mission_time,
+            "Total Energy Consumption": total_energy_consumption,
+            "Total Distance Covered": total_distance,
+            "Average Visits per Node": average_visits_per_node,
+            "Node Coverage Ratio": node_coverage_ration,
+            "Mission Efficiency per Energy": mission_efficiency_per_energy,
+            "Scaled Mission Efficiency per Energy (nodes per kWh)": scaled_mission_efficiency,
+            "Scaled Mission Efficiency per Time (nodes per hour)": scaled_mission_efficiency_time,
+            "Mission Efficiency per Time": mission_efficiency_per_time,
+            "Idle Ratio": idle_ration,
+            "Total Number of Constraints": self.num_constraints,
+            "Total Number of Variables": self.variables_count,
+            "Problem Results": results
+        }
+        
+        field_names = ['Total Number of Clusters', 'Total Nodes Visited', 'Visits per Node', 'Total Mission Time', 'Total Energy Consumption', 'Average Visits per Node', 'Node Coverage Ratio', 'Mission Efficiency per Energy', 'Mission Efficiency per Time', 'Total Number of Constraints', 'Total Number of Variables']
+        filename = f'{os.getcwd()}/assets/results/global_results.csv'
+        
+        df = pd.DataFrame.from_dict(final_results, orient='index').T
+
+        if not os.path.exists(filename):
+            with open(filename, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=field_names)
+                writer.writeheader()
+
+            df.to_csv(filename, mode='a', index=False, header=False)
+        else:
+            df.to_csv(filename, mode='a', index=False, header=False) 
+
+        self.global_nodes_visited = 0 
+        self.visits_per_nodes = {}
+        self.problem_results = defaultdict()
+        self.num_constraints = 0
+        self.variables_count = 0
+        self.total_number_cluster = 0
+        self.coordinated_plan = defaultdict(dict)
+        
 

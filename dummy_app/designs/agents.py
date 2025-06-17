@@ -1,8 +1,34 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import colorsys 
 
 from typing import Any 
+from matplotlib.colors import to_rgb, to_hex
+
+
+def clamp_rgb(rgb):
+    """Ensure RGB values are within [0, 1] range."""
+    return tuple(min(1.0, max(0.0, c)) for c in rgb)
+
+def generate_agent_colormap(n_agents: int):
+    cmap = plt.get_cmap("tab10")  # Up to 20 visually distinct colors
+    agent_colors = []
+    path_colors = []
+
+    for i in range(n_agents):
+        base_rgb = cmap(i % cmap.N)[:3]  # Get RGB tuple
+        base_rgb = clamp_rgb(base_rgb)
+        agent_colors.append(base_rgb)
+
+        # Lighten color by increasing brightness in HSV space
+        h, l, s = colorsys.rgb_to_hls(*base_rgb)
+        lighter_rgb = colorsys.hls_to_rgb(h, min(1, l + 0.3), s)
+        lighter_rgb = clamp_rgb(lighter_rgb)
+        path_colors.append((*lighter_rgb, 0.9))  # Transparent version
+
+    return agent_colors, path_colors
+
 
 
 class TSPAgent: 
@@ -21,48 +47,15 @@ class TSPAgent:
         self.z = altitude
         self.history = [] 
 
+
     def update_position(self, current_sim_time):
-        if not self.plan:
-            return
+        while self.index < len(self.plan) and self.plan[self.index][2] <= current_sim_time:
+            self.x, self.y, _ = self.plan[self.index]
+            # print(f"Agent _ id {self.agent_id}({self.x},{ self.y})")
+            self.index += 1
 
-        start_event = None 
-        end_event = None 
-
-        for i in range(len(self.plan)-1): 
-            if self.plan[i][2] <= current_sim_time < self.plan[i+1][2]: 
-                start_event = self.plan[i] 
-                end_event = self.plan[i+1]
-                break 
-
-        if start_event is None : 
-            final_node = self.plan[-1]
-            self.x, self.y = final_node[0], final_node[1] 
-            return
-       
-        if end_event is None:
-            self.x, self.y = self.plan[-1][0], self.plan[-1][1]
-            return
-
-        start_time = start_event[2] 
-        end_time = end_event[2] 
-
-        start_pos = (start_event[0], start_event[1])
-        end_pos = (end_event[0], end_event[1])
-
-        if start_event[0] == start_event[1] : 
-            self.x, self.y = start_pos 
-            return 
-        
-        travel_duration = end_time - start_time 
-        if travel_duration <= 0: 
-            self.x, self.y = end_pos 
-            return 
-        
-        fraction = (current_sim_time - start_time) / travel_duration 
-
-        self.x = start_pos[0] + fraction * (end_pos[0] - start_pos[0])
-        self.y = start_pos[1] + fraction * (end_pos[1] - start_pos[1])
-        
+    def append_history(self, current_sim_time):
+        self.history.append((self.x, self.y, current_sim_time)) 
 
 
 class TSPAgents: 
@@ -75,9 +68,10 @@ class TSPAgents:
             self.agents = []
             self.path_lines = [] 
             self.agent_colors = [] 
+            self.path_colors = []
             self.scatter:Any = None 
             self.altitude = altitude
-            
+
 
         else: 
             self.mobility_env = mobility_env
@@ -87,18 +81,18 @@ class TSPAgents:
             self.agents = [TSPAgent(id, path, self.altitude) for (id), path in agent_paths.items()]
             
             self.path_lines = []  # To store line objects for each agent
-
-            for agent in self.agents:
+            n_agents = len(self.agents)
+            self.agent_colors, self.path_colors = generate_agent_colormap(n_agents)
+           
+            for i, agent in enumerate(self.agents):
                 # Initially empty line plot for each agent
-                line, = self.ax.plot([], [], linestyle='--', linewidth=2.5 , zorder=5)
+                line, = self.ax.plot([], [], color=self.path_colors[i],linestyle='--', linewidth=2.5 , zorder=5)
                 self.path_lines.append(line)
 
-            # n_agents = len(self.agents)
-            # self.agent_colors = cm.get_cmap('tab10', n_agents)(np.arange(n_agents))
-            # self.scatter = self.ax.scatter([], [], s=100, label='Agents', edgecolors='black')
+            self.scatter = self.ax.scatter([], [], s=200,  marker='^', label='Agents',  edgecolors='black', alpha=1 )
             
-            # for i, agent in enumerate(self.agents):
-            #     self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
+            for i, agent in enumerate(self.agents):
+                self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
             # self.ax.legend()
 
             # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
@@ -108,17 +102,23 @@ class TSPAgents:
     def get_coords(self):
         x = [agent.x for agent in self.agents]
         y = [agent.y for agent in self.agents]
-        z = [self.altitude] * len(x)
+        return np.column_stack((x,y))
 
-        return np.column_stack((x,y,z))
+        # z = [self.altitude] * len(x)
+
+        # return np.column_stack((x,y,z))
 
 
     def update_plot(self):
-        coords = self.get_coords()
-        xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
         if self.scatter: 
-            self.scatter._offsets3d = (xs, ys, zs)
-            self.scatter.set_color(self.agent_colors)
+           self.scatter.set_offsets(self.get_coords())
+           self.scatter.set_color(self.agent_colors)
+         
+        # coords = self.get_coords()
+        # xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
+        # if self.scatter: 
+        #     self.scatter._offsets3d = (xs, ys, zs)
+        #     self.scatter.set_color(self.agent_colors)
          
          
 
@@ -126,13 +126,18 @@ class TSPAgents:
 
         # This process now just triggers updates. The agent itself knows what to do.
         while True:
-            current_time = self.mobility_env.env.now
-            for agent in self.agents:
-                agent.update_position(current_time)
-            
-            # This part remains the same to update the plot
+            timestep = self.mobility_env.env.now 
+            for i, agent in enumerate(self.agents):
+                agent.update_position(timestep)
+                agent.append_history(timestep)
+                path = agent.plan  # Assume path is a list of (x, y) coordinates
+                if path:
+                    history = agent.history
+                    x_hist, y_hist,t  = zip(*history)
+                    self.path_lines[i].set_data(x_hist, y_hist)
+
             self.update_plot()
-            # plt.draw()
-            
-            yield self.mobility_env.env.timeout(1) # Advance simulation by one step
-            
+            plt.draw()
+            # if hasattr(self.mobility_env, "timestep"):
+            #     self.mobility_env.timestep += 1 
+            yield self.mobility_env.env.timeout(1)

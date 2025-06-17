@@ -9,6 +9,7 @@ from dummy_app.models.coverage import *
 from dummy_app.tools.common import deallocate_memory
 
 import os 
+import uuid 
 import argparse
 import matplotlib.pyplot as plt
 
@@ -33,7 +34,7 @@ def frame_generator():
 # Simulation Environment Configuration 
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
-TRIALS = 300 
+TRIALS = 500 
 MAX_BATTERY = 1500 #Wh 
 NUMBER_OF_AGENTS = 6 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
@@ -47,7 +48,6 @@ LOW_BOUND = 1500 #Considered in meters
 HIGH_BOUND = 1500 #Considered in meters
 ALTITUDE = 1250 # Optimal Coverage Altitude 
 MAX_COVERAGE_TIME = 5
-logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {TRIALS}\n Number of Agents -> {NUMBER_OF_AGENTS}\n Max Battery -> {MAX_BATTERY} Wh\n Number of Areas -> {NUMBER_OF_AREAS}\n Vertical Velocity -> {VERTICAL_VELOCITY} m/s\n Horizontal Velocity -> {HORIZONTAL_VELOCITY} m/s")
 
 scenario_choices = ['cooperative', 'individual']
 objective_choices = ['energy', 'coverage', 'idleness']
@@ -75,6 +75,7 @@ NUMBER_OF_USERS = args.num_users
 MAX_BATTERY = args.max_battery
 MAX_COVERAGE_TIME = args.max_coverage_time
 NUMBER_OF_AREAS = args.num_areas
+logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {TRIALS}\n Number of Agents -> {NUMBER_OF_AGENTS}\n Max Battery -> {MAX_BATTERY} Wh\n Number of Areas -> {NUMBER_OF_AREAS}\n Vertical Velocity -> {VERTICAL_VELOCITY} m/s\n Horizontal Velocity -> {HORIZONTAL_VELOCITY} m/s")
 
 if args.scenario not in scenario_choices: 
     logger.error(f"Invalid scenario choice. Please choose from: {scenario_choices}")
@@ -143,8 +144,6 @@ problem = Builder(config, TRIALS)
 # Create Simulation environment to simulate mobility for users and agents
 mobility_sim = EnvSim(trials=TRIALS) 
 
-#
-
 # Generate Map Generator Object 
 map_generator = MapGenerator(
     num_areas = NUMBER_OF_AREAS,
@@ -185,7 +184,7 @@ all_user_points = [point for points in user_points.values() for point in points]
 #         user_points=all_user_points
 #     )
 # else:
-#     mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
+mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
 
 
 
@@ -208,53 +207,50 @@ deallocate_memory(map_generator)
 deallocate_memory(regions)
 deallocate_memory(centroids)
 deallocate_memory(user_points)
+animation_directory = f"{PROJECT_ASSETS}/animations" 
+if not os.path.exists(animation_directory): 
+    os.makedirs(animation_directory) 
 
-mobility_sim.run_simulation(
-    trials=TRIALS, 
-    constructor=problem, 
-    cues=ground_users,
-    regions=regions,
-    centroids=centroids,
-)
+animation_filename = f"{animation_directory}/simulation_output_{uuid.uuid4()}.mp4"
 
+try: 
+    # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
+    ani = FuncAnimation(
+        mobility_sim.fig,
+        mobility_sim.simulations,
+        frames=frame_generator(),
+        fargs=(problem,
+               ground_users, 
+               vor_map, 
+               distance_matrix, 
+               data, 
+               regions,
+               centroids,
+               user_points,
+               ALTITUDE,
+               TRIALS),
 
-# try: 
-#     # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
-#     ani = FuncAnimation(
-#         mobility_sim.fig,
-#         mobility_sim.simulations,
-#         frames=frame_generator(),
-#         fargs=(problem,
-#                ground_users, 
-#                vor_map, 
-#                distance_matrix, 
-#                data, 
-#                regions,
-#                centroids,
-#                user_points,
-#                ALTITUDE,
-#                TRIALS),
-
-#         interval=100,
-#         blit=False, 
-#         cache_frame_data=False)
+        interval=100,
+        blit=False, 
+        cache_frame_data=False)
     
-#     plt.show()
-#     import time 
-#     while True:
-#         plt.pause(0.001)  # keeps the plot interactive
-#         time.sleep(0.001)
+    # plt.show(block=False)  # Non-blocking show to keep the script running
+    
+    # import time 
+    # while True:
+    #     plt.pause(0.001)  # keeps the plot interactive
+    #     time.sleep(0.001)
 
-#     # Save as MP4 (requires ffmpeg)
-#     ani.save("simulation_output.mp4", writer='ffmpeg', fps=10)
+    # Save as MP4 (requires ffmpeg)
+    ani.save(animation_filename, writer='ffmpeg', fps=10)
 
-# except KeyboardInterrupt as kb:
-#     plt.close(mobility_sim.fig)
-#     logger.exception(f"KeyboardInterrupt: {kb}")
-#     exit(1)
+except KeyboardInterrupt as kb:
+    plt.close(mobility_sim.fig)
+    logger.exception(f"KeyboardInterrupt: {kb}")
+    exit(1)
 
-# except Exception as e:
-#     plt.close(mobility_sim.fig)
-#     logger.exception(f"Exception: {e}")
-#     exit(1)
+except Exception as e:
+    plt.close(mobility_sim.fig)
+    logger.exception(f"Exception: {e}")
+    exit(1)
 

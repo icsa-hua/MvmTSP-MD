@@ -2,6 +2,7 @@ assets/logs/*
 assets/env_settings/*
 assets/results/* 
 assets/data/*
+assets/animations/*
 MV_MTSP.egg-info 
 resources 
 tspenv
@@ -17,3 +18,7 @@ thesis
 .vscode
 assets/scalers/*
 .DS_Store
+mvmtsp_experimentation_log.txt 
+test.py 
+test_time.py
+voronoi_test.ipynb
