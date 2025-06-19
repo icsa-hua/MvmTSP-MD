@@ -22,3 +22,4 @@ mvmtsp_experimentation_log.txt
 test.py 
 test_time.py
 voronoi_test.ipynb
+*.log

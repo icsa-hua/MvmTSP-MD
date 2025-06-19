@@ -50,7 +50,7 @@ ALTITUDE = 1250 # Optimal Coverage Altitude
 MAX_COVERAGE_TIME = 5
 
 scenario_choices = ['cooperative', 'individual']
-objective_choices = ['energy', 'coverage', 'idleness']
+objective_choices = ['energy', 'coverage', 'pareto']
 env_choices = ['urban', 'rural', 'forest', 'mountain']
 
 # Progress bar 

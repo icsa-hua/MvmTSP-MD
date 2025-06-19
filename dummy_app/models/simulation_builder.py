@@ -47,6 +47,7 @@ class Builder(MVMTSPConfig):
         self.total_number_cluster: int = 0 
         self.coverage_file_id = uuid.uuid4() 
         self.coordinated_plan = defaultdict(dict)
+        
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
@@ -161,6 +162,11 @@ class Builder(MVMTSPConfig):
             cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
         elif self.objective_function == "coverage":
             cluster.problem.solve(pl.GLPK_CMD(timeLimit=500, msg=False, options=['--mipgap', '0.0','--seed', '42']))
+
+        elif self.objective_function == "pareto": 
+            cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
+
+
 
     def preprocess_generated_data(self, distance_matrix:np.ndarray, centroids:list, depots:np.ndarray, num_of_agents:int,  v_ver:float,  v_hor:float,  altitude:int,  coverage_time:int,  user_points=defaultdict()):
         data = super().preprocess_generated_data(
@@ -702,16 +708,36 @@ class Builder(MVMTSPConfig):
             "Node Coverage Ratio": node_coverage_ration,
             "Mission Efficiency per Energy": mission_efficiency_per_energy,
             "Scaled Mission Efficiency per Energy (nodes per kWh)": scaled_mission_efficiency,
-            "Scaled Mission Efficiency per Time (nodes per hour)": scaled_mission_efficiency_time,
             "Mission Efficiency per Time": mission_efficiency_per_time,
+            "Scaled Mission Efficiency per Time (nodes per hour)": scaled_mission_efficiency_time,
             "Idle Ratio": idle_ration,
             "Total Number of Constraints": self.num_constraints,
             "Total Number of Variables": self.variables_count,
-            "Problem Results": results
+            "Computational Time": self.metrics.elapsed_time if hasattr(self.metrics, 'elapsed_time') else None,
+            "Memory Usage": self.metrics.memory_usage if hasattr(self.metrics, 'memory_usage') else None
         }
         
-        field_names = ['Total Number of Clusters', 'Total Nodes Visited', 'Visits per Node', 'Total Mission Time', 'Total Energy Consumption', 'Average Visits per Node', 'Node Coverage Ratio', 'Mission Efficiency per Energy', 'Mission Efficiency per Time', 'Total Number of Constraints', 'Total Number of Variables']
-        filename = f'{os.getcwd()}/assets/results/global_results.csv'
+        field_names = [
+            "Scenario",
+            "Objective Function",
+            'Total Number of Clusters',
+            'Total Nodes Visited', 
+            'Visits per Node', 
+            'Total Mission Time', 
+            'Total Energy Consumption',
+            'Total Distance Covered',
+            'Average Visits per Node', 
+            'Node Coverage Ratio', 
+            'Mission Efficiency per Energy', 
+            'Scaled Mission Efficiency per Energy (nodes per kWh)',
+            'Mission Efficiency per Time', 
+            'Scaled Mission Efficiency per Time (nodes per hour)',
+            'Idle Ratio',
+            'Total Number of Constraints',
+            'Total Number of Variables'
+        ]
+
+        filename = f'{os.getcwd()}/assets/results/global_results_{self.coverage_file_id}.csv'
         
         df = pd.DataFrame.from_dict(final_results, orient='index').T
 

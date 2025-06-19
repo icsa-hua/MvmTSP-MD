@@ -1,13 +1,13 @@
 #!/bin/bash 
 
 # Possible values for each parameters 
-NUM_OF_AREAS=(50 75 100 150)
-NUM_OF_AGENTS=(2 4 6 8)
+NUM_OF_AREAS=(50 100 150 200)
+NUM_OF_AGENTS=(4 6 8)
 NUM_OF_USERS=(7 12 15 20) 
-ENV_TYPES=("urban" "rural" "forest")
+ENV_TYPES=("urban")
 SCENARIO=("cooperative")
 OBJECTIVE=("energy" "coverage")
-ENVIRONMENT=("urban" "rural" "forest")
+
 SUCCESS_LOG="success_runs.log"
 FAILURE_LOG="failed_runs.log"
 LOG_FILE="mvmtsp_experimentation_log.txt"

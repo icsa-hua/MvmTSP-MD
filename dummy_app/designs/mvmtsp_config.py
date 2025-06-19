@@ -286,7 +286,7 @@ class MVMTSPConfig(ABC):
         max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 1
 
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
-        charge_points = int(np.floor(self.v/max_nodes))
+        # charge_points = int(np.floor(self.v/max_nodes))
 
         if hasattr(self, 'depots') and self.depots is not None:
             non_depot_gdf = GDF[~GDF['Area_id'].isin(self.depots)].copy() 
@@ -301,18 +301,17 @@ class MVMTSPConfig(ABC):
         
         # n_clusters = len(self.agents) # NOTE: Why is this n_clusters = 4 e.g.? 
         # Determine total demand (total nodes to cover)
-        total_nodes = len(GDF) - len(self.depots) if self.depots is not None and len(self.depots) != 0 else len(GDF)
+        total_nodes = len(GDF)
         n_clusters = int(np.ceil(total_nodes / max_nodes))
 
         logger.info(f"Total Nodes: {total_nodes}, Clusters: {n_clusters}")
         
         kmeans = KMeansConstrained(
             n_clusters=n_clusters, 
-            size_min=charge_points, 
+            size_min=4, 
             size_max=max_nodes,
             random_state=42
         )
-
         cluster_labels = kmeans.fit_predict(features)
         
         # Update GDF with cluster labels (only for non-depots)

@@ -31,7 +31,7 @@ class Metrics:
             logger.error("Performance timer was not properly started or stopped.")
             self.elapsed_time = None
         logger.info(f"Elapsed time: {self.elapsed_time} seconds")
-
+        
 
     def get_memory_usage(self):
         process = psutil.Process(os.getpid())
