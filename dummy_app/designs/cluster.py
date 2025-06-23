@@ -33,6 +33,7 @@ class Cluster:
         self.tr_times:Dict[(Tuple[int,int],int)] = {}
         self.cost = {}
         self.virtual_nodes = defaultdict()
+        self.allowed_visits = {}
         self.problem = pl.LpProblem()
         self.R = defaultdict(float) 
         self.sinr = defaultdict(float)
@@ -70,6 +71,13 @@ class Cluster:
         self.initial_population = {
             k: (list(v[0]), float(v[1])) for k, v in raw_population.items()
         }
+
+        for vn,hub in self.virtual_nodes.items(): 
+            if hub in self.allowed_visits: 
+                self.allowed_visits[hub] +=1 
+            else:
+                self.allowed_visits[hub] = 1
+
 
 
     def get_estimated_time_frame(self, builder:Any): 
@@ -109,9 +117,10 @@ class Cluster:
         self.timeframe = list(range(0, total_time + 1))
 
 
-    def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy'): 
+    def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy', stage_solution:int=2): 
         
         V_nodes = list(self.original_nodes_dict.keys())
+        logger.info("Number of Cluster's vertices:: {0}".format(len(V_nodes)))
 
         # Get duration of each trip (arc) 
         self.tr_times = {(self.original_nodes_dict[i],self.original_nodes_dict[j]):self.get_travel_times(i, j, self.original_nodes_dict, builder) for i in V_nodes for j in V_nodes}
@@ -127,118 +136,230 @@ class Cluster:
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
         
 
-        if objective_function == "pareto":
+        # if objective_function == "pareto":
 
-            if scenario != 'cooperative':
-                logger.error("Pareto objective function is only available for cooperative scenario")
-                raise ValueError("Pareto objective function is only available for cooperative scenario")
-            import pdb;pdb.set_trace()
-            self.problem.setObjective(self.makespan) 
-            cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+        #     if scenario != 'cooperative':
+        #         logger.error("Pareto objective function is only available for cooperative scenario")
+        #         raise ValueError("Pareto objective function is only available for cooperative scenario")
+        #     import pdb;pdb.set_trace()
+        #     self.problem.setObjective(self.makespan) 
+        #     cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
 
-            builder.solve_problem(self) 
+        #     builder.solve_problem(self) 
 
-            min_makespan = self.makespan.varValue
-            logger.info(f"Minimum makespan found: {min_makespan}")
+        #     min_makespan = self.makespan.varValue
+        #     logger.info(f"Minimum makespan found: {min_makespan}")
 
-            self.set_pareto_energy_objective(energy=self.cost['energy'])
+        #     self.set_pareto_energy_objective(energy=self.cost['energy'])
 
-            builder.solve_problem(self) 
-            min_spatial_cost =  self.spatial_cost.value() 
+        #     builder.solve_problem(self) 
+        #     min_spatial_cost =  self.spatial_cost.value() 
 
-            max_makespan = self.makespan.varValue
+        #     max_makespan = self.makespan.varValue
 
-            logger.info(f"Maximum makespan found: {max_makespan}")
+        #     logger.info(f"Maximum makespan found: {max_makespan}")
 
-            pareto_points = [] 
+        #     pareto_points = [] 
 
-            num_points_on_front = 15 
+        #     num_points_on_front = 15 
 
-            epsilon_values = np.linspace(min_makespan, max_makespan, num_points_on_front)
+        #     epsilon_values = np.linspace(min_makespan, max_makespan, num_points_on_front)
 
-            for epsilon in epsilon_values: 
+        #     for epsilon in epsilon_values: 
 
-                self.problem.setObjective(self.spatial_cost) 
+        #         self.problem.setObjective(self.spatial_cost) 
 
-                constraint_name = "makespan_epsilon_constraint"
-                if constraint_name in self.problem.constraints:
-                    del self.problem.constraints[constraint_name] 
+        #         constraint_name = "makespan_epsilon_constraint"
+        #         if constraint_name in self.problem.constraints:
+        #             del self.problem.constraints[constraint_name] 
 
-                self.problem += self.makespan <= epsilon, constraint_name
-                logger.info(f"Setting makespan upper bound to {epsilon}")
-                builder.solve_problem(self)
-                if self.problem.status != pl.LpStatusOptimal:
-                    logger.warning(f"Problem is not optimal for epsilon {epsilon}, skipping...")
-                    continue
+        #         self.problem += self.makespan <= epsilon, constraint_name
+        #         logger.info(f"Setting makespan upper bound to {epsilon}")
+        #         builder.solve_problem(self)
+        #         if self.problem.status != pl.LpStatusOptimal:
+        #             logger.warning(f"Problem is not optimal for epsilon {epsilon}, skipping...")
+        #             continue
 
-                cost_result = self.spatial_cost.value() 
-                makespan_result = self.makespan.varValue 
-                logger.info(f"Pareto point found: (Cost: {cost_result}, Makespan: {makespan_result})")
-                pareto_points.append((cost_result, makespan_result))
+        #         cost_result = self.spatial_cost.value() 
+        #         makespan_result = self.makespan.varValue 
+        #         logger.info(f"Pareto point found: (Cost: {cost_result}, Makespan: {makespan_result})")
+        #         pareto_points.append((cost_result, makespan_result))
 
 
-            import matplotlib.pyplot as plt
-            if pareto_points:
-                # Unzip the list of tuples into separate lists for plotting
-                makespan_values, cost_values = zip(*sorted(pareto_points))
+        #     import matplotlib.pyplot as plt
+        #     if pareto_points:
+        #         # Unzip the list of tuples into separate lists for plotting
+        #         makespan_values, cost_values = zip(*sorted(pareto_points))
 
-                plt.figure(figsize=(10, 6))
-                plt.plot(makespan_values, cost_values, marker='o', linestyle='-', color='b')
-                plt.xlabel("Makespan (Total Time)")
-                plt.ylabel("Total Energy Cost")
-                plt.title("Pareto Front: Trade-off between Time and Energy")
-                plt.grid(True)
-                plt.show()
+        #         plt.figure(figsize=(10, 6))
+        #         plt.plot(makespan_values, cost_values, marker='o', linestyle='-', color='b')
+        #         plt.xlabel("Makespan (Total Time)")
+        #         plt.ylabel("Total Energy Cost")
+        #         plt.title("Pareto Front: Trade-off between Time and Energy")
+        #         plt.grid(True)
+        #         plt.show()
 
-            return 
-
+        #     return 
 
         if scenario == 'cooperative':
-            if objective_function == "energy":
+            cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents) 
+
+        elif scenario == 'individual': 
+            individual_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+        else:
+            logger.error(f"Scenario {scenario} not implemented")
+            raise ValueError(f"Scenario {scenario} not implemented")
+
+        if scenario == 'individual':
+            if objective_function == 'energy': 
                 self.set_energy_objective(
+                    distance=self.cost['distance'],
+                    energy=self.cost['energy'],
+                    time=self.cost['travel_time'],
+                )
+            elif objective_function == "coverage":    
+                self.set_makespan_objective(
+                    distance=self.cost['distance'],
+                    energy=self.cost['energy'],
+                    time=self.cost['travel_time']
+                ) 
+            builder.solve_problem(self)
+            return self.get_results(builder=builder) 
+
+        # STAGE 1 SOLUTION : ONLY Objective Function. 
+        if stage_solution == 1: 
+
+            if objective_function == 'energy':
+                self.set_energy_objective(
+                    distance=self.cost['distance'],
+                    energy=self.cost['energy'],
+                    time=self.cost['travel_time'],
+                )
+
+            elif objective_function == "coverage":
+                self.set_max_coverage_objective(builder)
+                # self.set_makespan_objective(
+                #     distance=self.cost['distance'],
+                #     energy=self.cost['energy'],
+                #     time=self.cost['travel_time']
+                # ) 
+
+            builder.solve_problem(self)
+
+            makespan = self.makespan.varValue
+            total_data_collected = self.total_data_collected_main.value() 
+
+            logger.info(f"{objective_function} optimization returned makespan: {makespan} and total data collected: {total_data_collected}")
+
+
+        # STAGE 2 SOLUTION : Objective Function + Second Objective Function.
+        elif stage_solution == 2: 
+            if objective_function == 'energy':
+                self.set_hybrid_objective(
                     distance=self.cost['distance'],
                     energy=self.cost['energy'], 
                     time=self.cost['travel_time'],
                 )
-            elif objective_function == "coverage":
-                self.set_coverage_objective(
+
+                builder.solve_problem(self) 
+
+                if self.problem.status != pl.LpStatusOptimal:
+                    raise Exception("Could not solve for the initial bound in Stage 1.")
+
+                feasible_makespan = self.makespan.varValue
+                C_optimal = self.total_cost.value()
+
+                logger.info(f"Found a tight, feasible makespan bound of: {feasible_makespan}")
+                self.problem += self.makespan <= feasible_makespan 
+
+                delta = 0.15 # Percentage of huw much energy we can compromise for a better makespan.
+                self.problem += self.total_cost <= C_optimal * (1 + delta)
+
+                self.set_makespan_objective(
                     distance=self.cost['distance'],
                     energy=self.cost['energy'],
                     time=self.cost['travel_time']
                 )
-        
-            cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+                builder.solve_problem(self)
+
+            elif objective_function == "coverage":
+                isolation_thr = 0.85
+                self.set_max_coverage_objective(builder)
+                builder.solve_problem(self)
+
+                if self.problem.status != pl.LpStatusOptimal:
+                    raise Exception("Could not solve for the initial bound in Stage 2.")
+
+                max_possible_data = self.total_data_collected_main.value()
+                feasible_makespan = self.makespan.varValue
+
+                logger.info(f"The theoretical maximum data collection for this scenario is: {max_possible_data}")
+
+                dynamic_quota = max_possible_data * isolation_thr
+
+                self.problem += self.total_data_collected_main >= dynamic_quota, "Data_Quota_Constraint"
+                self.problem += self.makespan <= feasible_makespan 
+
+                self.set_makespan_objective(
+                    distance=self.cost['distance'],
+                    energy=self.cost['energy'],
+                    time=self.cost['travel_time']
+                )
+                builder.solve_problem(self)
+
+            makespan = self.makespan.varValue
+            total_data_collected = self.total_data_collected_main.value() 
+
+            logger.info(f"{objective_function} optimization returned makespan: {makespan} and total data collected: {total_data_collected}")
+
             
-            builder.solve_problem(self) 
+        # elif stage_solution == 3: 
+        #     # Stage 1 
+        #     self.set_hybrid_objective(
+        #             distance=self.cost['distance'],
+        #             energy=self.cost['energy'], 
+        #             time=self.cost['travel_time'],
+        #     )
+            
+        #     builder.solve_problem(self) 
 
+        #     if self.problem.status != pl.LpStatusOptimal:
+        #         raise Exception("Could not solve for the initial bound in Stage 1.")
 
-        elif scenario == 'individual':
+        #     # This makespan bound will be MUCH tighter and more useful!
+        #     feasible_makespan = self.makespan.varValue
+        #     logger.info(f"Found a tight, feasible makespan bound of: {feasible_makespan}")
 
-            self.set_energy_objective( 
-                distance=self.cost['distance'],
-                energy=self.cost['energy'], 
-                time=self.cost['travel_time'],
-            )
-            individual_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
-           
-            builder.solve_problem(self) 
-           
-            if builder.objective_function == "coverage": 
-                if self.problem.status == pl.LpStatusOptimal: 
-                    feasible_makespan = self.makespan.varValue 
-                    logger.info(f"Feasible makespan: {feasible_makespan}")
+        #     # Stage 2
+        #     isolation_thr = 0.85 # Achieve 85% of the maximum coverage 
+        #     self.set_max_coverage_objective(builder)
+        #     builder.solve_problem(self)
 
-                    self.problem += self.makespan <= feasible_makespan * 0.99 
+        #     if self.problem.status != pl.LpStatusOptimal:
+        #         raise Exception("Could not solve for the initial bound in Stage 2.")
 
-                    self.set_coverage_objective(
-                        distance=self.cost['distance'],
-                        energy=self.cost['energy'],
-                        time=self.cost['travel_time']
-                    )
+        #     max_possible_data = self.total_data_collected_main.value()
+        #     logger.info(f"The theoretical maximum data collection for this scenario is: {max_possible_data}")
 
-                    logger.info("\n--- Re-solving with makespan objective and upper bound constraint... ---")
+        #     # Stage 3 
+        #     dynamic_quota = max_possible_data * isolation_thr
+        #     makespan_bound = feasible_makespan * 0.99
 
-                    builder.solve_problem(self)
+        #     self.problem += self.total_data_collected_main >= dynamic_quota
+        #     # self.problem += self.makespan <= makespan_bound 
+            
+        #     self.set_makespan_objective(
+        #         distance=self.cost['distance'],
+        #         energy=self.cost['energy'],
+        #         time=self.cost['travel_time']
+        #     )
+
+        #     builder.solve_problem(self)
+
+        #     makespan = self.makespan.varValue
+        #     total_data_collected = self.total_data_collected_main.value() 
+
+        #     logger.info(f"{objective_function} optimization returned makespan: {makespan} and total data collected: {total_data_collected}")
 
 
         return self.get_results(builder=builder)
@@ -269,10 +390,29 @@ class Cluster:
 
         self.makespan = pl.LpVariable("makespan", lowBound=0, cat='Continuous')
 
+        self.service_time = pl.LpVariable.dicts("service_time", ((i,v) for i in V for v in self.employed_agents),lowBound=0, cat='Continuous')
+
         self.problem = pl.LpProblem(name=f"MVMTSP_Cluster_{self.id}", sense=pl.LpMinimize)
+
+        self.total_data_collected_main = pl.LpVariable("total_data_collected_main", lowBound=0, cat='Continuous')
 
         if scenario == 'individual': 
             self.precedes = pl.LpVariable.dicts("precedes", ((j, k1, k2) for j in V for k1 in self.employed_agents for k2 in self.employed_agents if k1 < k2), cat='Binary')
+
+
+    def set_hybrid_objective(self, distance, energy, time):
+        weights = get_weights()
+        energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        return_times_sum = pl.lpSum(self.return_step[k] for k in self.employed_agents) 
+        self.total_cost = energy_cost + spatial_cost + travel_time_cost
+
+        alpha_stage1 = 1.0 
+        beta_stage1 = 0.001 
+
+        hybrid_objective = alpha_stage1 * self.total_cost + beta_stage1 * return_times_sum
+        self.problem.setObjective(hybrid_objective)
 
 
     def set_energy_objective(self, distance, energy, time): 
@@ -281,19 +421,9 @@ class Cluster:
         energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
-        self.problem.setObjective( energy_cost + spatial_cost +  travel_time_cost)
+        self.total_cost = energy_cost + spatial_cost + travel_time_cost
+        self.problem.setObjective(self.total_cost)
         
-        
-        # self.problem.setObjective(
-        #         pl.lpSum(
-        #                 self.x[i,j,v] * energy[self.nodes_dict[i]][self.nodes_dict[j]] * weights['energy'] +
-        #                 self.x[i,j,v] * distance[self.nodes_dict[i]][self.nodes_dict[j]] * weights['distance'] +
-        #                 self.x[i,j,v] * time[self.nodes_dict[i]][self.nodes_dict[j]] * weights['travel_time']
-        #                 for i in V_nodes
-        #                 for j in V_nodes if i != j
-        #                 for v in self.employed_agents
-        #         )   
-            # )
         
        
     def set_pareto_energy_objective(self,energy): 
@@ -302,36 +432,41 @@ class Cluster:
 
 
 
-    def set_idleness_objective(self,energy):
-        # Makespan 
-        makespan = pl.LpVariable("makespan", lowBound=0, cat='Continuous')
+    def set_max_coverage_objective(self, builder):
 
-        for k in self.employed_agents: 
-           self.problem += makespan >= self.return_step[k] 
+        # data_per_visit = {node:rate * builder.coverage_time for node, rate in self.R.items()}
+        # # Define the data collection expression again for this problem
+        # self.total_data_collected_main = pl.lpSum(
+        #     self.visit[j, k] * data_per_visit.get(j, 0)
+        #     for j in self.NODES 
+        #     for k in self.employed_agents
+        # )
 
-        alpha = 0.8
-        beta = 0.02
-        spatial_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j for k in self.employed_agents)
-        self.problem.setObjective(
-            alpha * spatial_cost + beta * makespan
-        )
+        self.problem.setObjective(-self.total_data_collected_main)
 
 
-    def set_coverage_objective(self,distance, energy, time)->None:
+    def set_sum_return_times_objective(self):
 
-        # Makespan
-        alpha = 0.6 
-        beta = 0.4
-        weights = get_weights() 
+        return_times_sum = pl.lpSum(self.return_step[k] for k in self.employed_agents)
 
-        energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
-        spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
-        travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        self.problem.setObjective(return_times_sum)
+
+
+    def set_makespan_objective(self, distance, energy, time)->None:
+
+        # # Makespan
+        # alpha = 0.6 
+        # beta = 0.001
+        # weights = get_weights() 
+        # energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        # spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        # travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         
+        self.problem.setObjective(self.makespan)
 
-        self.problem.setObjective(
-            alpha * (spatial_cost + travel_time_cost + energy_cost) + beta * self.makespan
-        )
+        # self.problem.setObjective(
+        #     alpha * (spatial_cost + travel_time_cost + energy_cost) + beta * self.makespan
+        # )
 
 
     def set_up_virtual_nodes_properties(self): 
@@ -404,7 +539,7 @@ class Cluster:
             # Convert to numpy arrays for easier calculations
             average_R[i] = float(np.mean(R[i])/1e6) # Convert to Mbps
             average_sinr[i] = float(np.mean(sinr[i]))
-            logger.info(f"R: {average_R[i] } Mbps, SINR: {average_sinr[i]} dB for area {area}")
+            logger.debug(f"R: {average_R[i] } Mbps, SINR: {average_sinr[i]} dB for area {area}")
         
         savefilename = f'{coverage_directory}/{coverage_probability_filename}'
         
@@ -584,10 +719,10 @@ class Cluster:
         logger.info(f"Memory usage: {memory_usage:.2f} MB")
         builder.num_constraints += len(self.problem.constraints)
         builder.variables_count += len(self.problem.variables())
-        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{len(self.NODES)}")
+        logger.info(f"The amount of unique nodes visited COLLECTIVELY is {len(unique_nodes_among_paths)}/{(builder.v)}")
         builder.global_nodes_visited += len(unique_nodes_among_paths)
         builder.validate_paths(paths=detailed_log, nodes_dict=self.nodes_dict, cluster=self)
-        logger.info("✅ Solutions validated successfully...")
+        logger.info("Solutions validated successfully...")
         logger.info("--------------------------------------------------------------------------")
         return detailed_log
 

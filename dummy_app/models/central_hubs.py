@@ -73,7 +73,12 @@ class CentralHub:
         }
         composite_df = pd.DataFrame.from_dict(composite_dict)
         bridge_nodes = int(composite_df.idxmax().iloc[0])
-       
+
+        # Ensure no node has zero allowed visits
+        for k in self.number_allowed_visits:
+            if self.number_allowed_visits[k] == 0:
+                self.number_allowed_visits[k] = 1
+
         # Ensure at least one node gets more than 1 visit
         if all(v == 1 for v in self.number_allowed_visits.values()):
             self.number_allowed_visits[bridge_nodes] = n_agents + 1 

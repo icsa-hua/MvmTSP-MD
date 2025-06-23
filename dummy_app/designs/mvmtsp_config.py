@@ -27,7 +27,7 @@ from typing import Any, Union, List, Dict, Mapping, Tuple, Optional
 class MVMTSPConfig(ABC): 
 
     @abstractmethod
-    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str )->None: 
+    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str, stage_solution:int )->None: 
 
         self.problem = pl.LpProblem() 
         self.V:pd.DataFrame = pd.DataFrame()
@@ -49,6 +49,7 @@ class MVMTSPConfig(ABC):
         self.enable_ga = enable_ga
         self.objective_function:str = objective_function
         self.env_type:str = env_type
+        self.stage_solution:int = stage_solution
         
 
     @abstractmethod
@@ -275,15 +276,16 @@ class MVMTSPConfig(ABC):
         
         # Reserve 10–15% for emergency return
         if self.scenario == 'cooperative': 
-            reserve = self.max_battery * 0.15
+            reserve = self.max_battery * 0.35
         elif self.scenario == 'individual': 
+
             reserve = self.max_battery * 0.35 
         else: 
-            reserve = self.max_battery * 0.10
+            reserve = self.max_battery * 0.30
 
         adjusted_energy = self.average_energy + self.average_coverage_energy 
         
-        max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 1
+        max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
 
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
         # charge_points = int(np.floor(self.v/max_nodes))

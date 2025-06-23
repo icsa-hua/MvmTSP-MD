@@ -20,7 +20,7 @@ class GASolution:
         self.depot = depot 
 
         if not hasattr(creator, "FitnessMax"):
-            creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+            creator.create("FitnessMax", base.Fitness, weights=(-1.0,))
         if not hasattr(creator, "Individual"):
             creator.create("Individual", list, fitness=creator.FitnessMax)
         self.toolbox = base.Toolbox() 

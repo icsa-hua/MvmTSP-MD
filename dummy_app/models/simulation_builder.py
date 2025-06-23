@@ -33,7 +33,8 @@ class Builder(MVMTSPConfig):
             max_coverage_time=config["max_coverage_time"],
             enable_ga=config["enable_ga"],
             scenario=config["scenario"],
-            objective_function=config["objective_function"]
+            objective_function=config["objective_function"],
+            stage_solution=config["stage_solution"],
         )
         
         self.metrics = Metrics(verbose=True) 
@@ -156,7 +157,7 @@ class Builder(MVMTSPConfig):
         return assignments 
 
 
-    @timeout_decorator.timeout(3600)
+    @timeout_decorator.timeout(7200)
     def solve_problem(self, cluster:Any):
         if self.objective_function == "energy":
             cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
@@ -322,7 +323,7 @@ class Builder(MVMTSPConfig):
 
         SCENARIO = self.scenario 
         OBJECTIVE = self.objective_function
-
+        STAGE_SOLUTION = self.stage_solution
         # Step 1: Create the cluster object to accomodate the problem.  
         cluster_object = Cluster(
             cluster=cluster, 
@@ -364,7 +365,14 @@ class Builder(MVMTSPConfig):
 
         # Step 4: Create and configure the optimization problem 
         try: 
-            paths = cluster_object.problem_formulation(builder=self, scenario=SCENARIO, objective_function=OBJECTIVE ) 
+            paths = cluster_object.problem_formulation(
+                builder=self, 
+                scenario=SCENARIO, 
+                objective_function=OBJECTIVE,
+                 stage_solution=STAGE_SOLUTION)
+            
+            logger.debug(f"✅ Problem created for cluster {cluster_id} successfully...")
+
         except Exception as e:
             logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
@@ -392,7 +400,9 @@ class Builder(MVMTSPConfig):
             "Total Energy":totalEnergy, 
             "Total Time": totalTime, 
             "Average Throughput": cluster_object.R, 
-            "Average SINR" : cluster_object.sinr
+            "Average SINR" : cluster_object.sinr,
+            "Makespan": cluster_object.makespan,
+            "Total_Data_Transfer": cluster_object.total_data_collected_main,
         }
 
         field_names = ['scenario_name', 'objective_function', 'agent_results', 'Total Distance', 'Total Energy', 'Total Time', 'Average Throughput', 'Average SINR']
@@ -734,7 +744,9 @@ class Builder(MVMTSPConfig):
             'Scaled Mission Efficiency per Time (nodes per hour)',
             'Idle Ratio',
             'Total Number of Constraints',
-            'Total Number of Variables'
+            'Total Number of Variables',
+            "Computational Time",
+            "Memory Usage"
         ]
 
         filename = f'{os.getcwd()}/assets/results/global_results_{self.coverage_file_id}.csv'

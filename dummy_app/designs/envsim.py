@@ -260,7 +260,7 @@ class EnvSim:
     def __init_plot(self) -> tuple[Figure, Axes]:
         fig, ax = plt.subplots(figsize=(8,8))
         # Set 3D background color
-        ax.set_facecolor('grey')  # plot area
+        ax.set_facecolor('white')  # plot area
         fig.patch.set_facecolor('grey')  
         ax.set_title("2D S&R Simulation")
         ax.grid(True)

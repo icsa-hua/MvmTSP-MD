@@ -35,7 +35,7 @@ def frame_generator():
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
 TRIALS = 500 
-MAX_BATTERY = 1500 #Wh 
+MAX_BATTERY = 2000 #Wh 
 NUMBER_OF_AGENTS = 6 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
 NUMBER_OF_AREAS = 50 # NOTE: used for Voronoi map generation.
@@ -50,8 +50,10 @@ ALTITUDE = 1250 # Optimal Coverage Altitude
 MAX_COVERAGE_TIME = 5
 
 scenario_choices = ['cooperative', 'individual']
-objective_choices = ['energy', 'coverage', 'pareto']
+objective_choices = ['energy', 'coverage', 'sum_of_times','pareto']
 env_choices = ['urban', 'rural', 'forest', 'mountain']
+stage_options = [1,2,3]
+agents_choices = [3,4,5,6,7,8,9,10]
 
 # Progress bar 
 progress = tqdm(total=TRIALS, desc="Progress")
@@ -68,6 +70,7 @@ parser.add_argument("--max_battery", type=int, default=MAX_BATTERY, help="Maximu
 parser.add_argument("--max_coverage_time", type=int, default=MAX_COVERAGE_TIME, help="Maximum coverage time.")
 parser.add_argument("--num_areas", type=int, default=NUMBER_OF_AREAS, help="Number of areas to simulate.")
 parser.add_argument("--env", type=str, default="urban", help="Environment to simulate.")
+parser.add_argument("--stage_solution", type=int, default=2, help="What objective stage architecture to use.")
 args = parser.parse_args()
 
 NUMBER_OF_AGENTS = args.num_agents
@@ -89,6 +92,17 @@ if args.env not in env_choices:
     logger.error(f"Invalid environment choice. Please choose from: {env_choices}")
     exit(1)
 
+if args.stage_solution not in stage_options:
+    logger.error(f"Invalid stage solution choice. Please choose from: {stage_options}")
+    exit(1)
+
+if args.num_agents not in agents_choices:
+    logger.error(f"Invalid number of agents choice. Please choose from: {agents_choices}")
+    exit(1)
+
+# if args.stage_solution == 2 and args.scenario == 'cooperative': 
+#     logger.error(f"Stage 2 is only available for individual scenarios.")
+#     exit(1)
 
 # Declare which constraints to use 
 """
@@ -135,7 +149,8 @@ config = {
     "max_coverage_time":args.max_coverage_time,
     "scenario":args.scenario, 
     "enable_ga":args.enable_ga,
-    "objective_function":args.objective
+    "objective_function":args.objective,
+    "stage_solution":args.stage_solution
 }
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 

@@ -81,7 +81,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
 
     reverse_nodes = {v: k for k, v in nodes_dict.items()} 
     virtual_nodes = defaultdict(int)
-  
+
     if not all(rp==1 for rp in R_points) or len(bridge_nodes) > 1:
         # Create virtual nodes inside the current dictionary 
         for node in bridge_nodes: 
@@ -98,6 +98,11 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
             nodes_dict[count] = i      
             count += 1    
 
+    ga_nodes = nodes_dict.copy() 
+    for rem in bridge_nodes: 
+        ga_nodes.pop(reverse_nodes[rem])
+
+
 
     assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
     "Mismatch between distance, energy, travel_time and R_points dictionary length"
@@ -105,14 +110,13 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     if hasattr(problem_builder, 'enable_ga') and problem_builder.enable_ga: 
         for agent in employed_agents: 
             solution_path, solution_cost = problem_builder.call_genetic_algorithm(
-                nodes_dict=nodes_dict, 
+                nodes_dict=ga_nodes, 
                 cost=cost_bundle, 
                 depot=depot, 
                 verbose=False   
             )
             # print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
             initial_population[agent] = (solution_path, solution_cost) 
-
     return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
 
 
