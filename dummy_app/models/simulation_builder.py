@@ -157,7 +157,7 @@ class Builder(MVMTSPConfig):
         return assignments 
 
 
-    @timeout_decorator.timeout(7200)
+    @timeout_decorator.timeout(1800)
     def solve_problem(self, cluster:Any):
         if self.objective_function == "energy":
             cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))

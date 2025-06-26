@@ -167,6 +167,8 @@ class GroundUserGroup:
 
             self.update_plot() 
             plt.draw()  
+            if hasattr(self.mobility_env, "timestep"):
+                self.mobility_env.timestep += 1 
             yield self.mobility_env.env.timeout(1)
 
 

@@ -126,7 +126,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 if i == j: continue
                 
                 source = cluster.original_nodes_dict[i]
-                target = cluster.original_nodes_dict[j] - 1
+                target = cluster.original_nodes_dict[j] 
                 if source in cluster.virtual_nodes: 
                     source = cluster.virtual_nodes[source] 
                 if target in cluster.virtual_nodes: 
@@ -142,11 +142,11 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 model += cluster.e[i, k] >= total_energy_cost - M_energy * (1 - cluster.x[i, j, k])
 
 
-    # visit_counts = [pl.lpSum(cluster.visit[i,k] for i in NODES) for k in agents]
-    # for i in range(len(visit_counts)):
-    #     for j in range(i +1, len(visit_counts)):
-    #         model += visit_counts[i] - visit_counts[j] <= 3 
-    #         model += visit_counts[j] - visit_counts[i] <= 3
+    visit_counts = [pl.lpSum(cluster.visit[i,k] for i in NODES) for k in agents]
+    for i in range(len(visit_counts)):
+        for j in range(i +1, len(visit_counts)):
+            model += visit_counts[i] - visit_counts[j] <= 2 
+            model += visit_counts[j] - visit_counts[i] <= 2
 
     for k in agents:
         model += cluster.makespan >= cluster.return_step[k], f"makespan_constraint_{k}"
@@ -289,7 +289,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 if i == j: continue
                 
                 source = cluster.original_nodes_dict[i]
-                target = cluster.original_nodes_dict[j] - 1
+                target = cluster.original_nodes_dict[j]
                 if source in cluster.virtual_nodes: 
                     source = cluster.virtual_nodes[source] 
                 if target in cluster.virtual_nodes: 

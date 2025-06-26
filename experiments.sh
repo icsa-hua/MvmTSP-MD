@@ -4,10 +4,10 @@
 NUM_OF_AREAS=(50 100 150 200)
 NUM_OF_AGENTS=(4 6)
 NUM_OF_USERS=(15 20) 
-ENV_TYPES=("urban" "rural" "forest")
-SCENARIO=("cooperative" "individual")
+ENV_TYPES=("urban")
+SCENARIO=("cooperative")
 OBJECTIVE=("energy" "coverage")
-SOLUTION_STAGES=(1)
+SOLUTION_STAGES=(2)
 
 SUCCESS_LOG="success_runs.log"
 FAILURE_LOG="failed_runs.log"

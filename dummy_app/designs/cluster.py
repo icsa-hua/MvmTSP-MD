@@ -218,11 +218,13 @@ class Cluster:
                     time=self.cost['travel_time'],
                 )
             elif objective_function == "coverage":    
-                self.set_makespan_objective(
-                    distance=self.cost['distance'],
-                    energy=self.cost['energy'],
-                    time=self.cost['travel_time']
-                ) 
+                self.set_max_coverage_objective(builder)
+
+                # self.set_makespan_objective(
+                #     distance=self.cost['distance'],
+                #     energy=self.cost['energy'],
+                #     time=self.cost['travel_time']
+                # ) 
             builder.solve_problem(self)
             return self.get_results(builder=builder) 
 

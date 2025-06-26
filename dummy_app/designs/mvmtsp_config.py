@@ -279,7 +279,7 @@ class MVMTSPConfig(ABC):
             reserve = self.max_battery * 0.35
         elif self.scenario == 'individual': 
 
-            reserve = self.max_battery * 0.35 
+            reserve = self.max_battery * 0.50 
         else: 
             reserve = self.max_battery * 0.30
 
