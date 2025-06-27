@@ -137,7 +137,7 @@ class TSPAgents:
                     self.path_lines[i].set_data(x_hist, y_hist)
 
             self.update_plot()
-            plt.draw()
+            # plt.draw()
             if hasattr(self.mobility_env, "timestep"):
                 self.mobility_env.timestep += 1 
             yield self.mobility_env.env.timeout(1)

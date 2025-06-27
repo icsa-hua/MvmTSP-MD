@@ -41,6 +41,8 @@ class Cluster:
         self.original_nodes_dict = self.nodes_dict 
         self.V_nodes = list() 
         self.NODES = list() 
+        self.makespan_value:float = 0.0
+        self.total_data_achievable:float = 0.0
         
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -210,29 +212,39 @@ class Cluster:
             logger.error(f"Scenario {scenario} not implemented")
             raise ValueError(f"Scenario {scenario} not implemented")
 
-        if scenario == 'individual':
-            if objective_function == 'energy': 
-                self.set_energy_objective(
-                    distance=self.cost['distance'],
-                    energy=self.cost['energy'],
-                    time=self.cost['travel_time'],
-                )
-            elif objective_function == "coverage":    
-                self.set_max_coverage_objective(builder)
+        # if scenario == 'individual':
+        #     if objective_function == 'energy': 
+        #         self.set_hybrid_objective(
+        #             distance=self.cost['distance'],
+        #             energy=self.cost['energy'],
+        #             time=self.cost['travel_time'],
+        #         )
+        #     elif objective_function == "coverage":    
+        #         self.set_max_coverage_objective(builder)
 
-                # self.set_makespan_objective(
-                #     distance=self.cost['distance'],
-                #     energy=self.cost['energy'],
-                #     time=self.cost['travel_time']
-                # ) 
-            builder.solve_problem(self)
-            return self.get_results(builder=builder) 
+        #         # self.set_makespan_objective(
+        #         #     distance=self.cost['distance'],
+        #         #     energy=self.cost['energy'],
+        #         #     time=self.cost['travel_time']
+        #         # ) 
+
+        #     builder.solve_problem(self)
+
+        #     if builder.validate:
+        #         self.validate_solution(objective_function=objective_function, builder=builder)
+
+        #     self.makespan_value = self.makespan.varValue
+        #     self.total_data_achievable = self.total_data_collected_main.value() 
+
+        #     logger.info(f"{objective_function} optimization returned makespan: {self.makespan_value} and total data collected: {self.total_data_achievable}")
+
+        #     return self.get_results(builder=builder) 
 
         # STAGE 1 SOLUTION : ONLY Objective Function. 
         if stage_solution == 1: 
 
             if objective_function == 'energy':
-                self.set_energy_objective(
+                self.set_hybrid_objective(
                     distance=self.cost['distance'],
                     energy=self.cost['energy'],
                     time=self.cost['travel_time'],
@@ -248,10 +260,13 @@ class Cluster:
 
             builder.solve_problem(self)
 
-            makespan = self.makespan.varValue
-            total_data_collected = self.total_data_collected_main.value() 
+            if builder.validate: 
+                self.validate_solution(objective_function=objective_function, builder=builder)
 
-            logger.info(f"{objective_function} optimization returned makespan: {makespan} and total data collected: {total_data_collected}")
+            self.makespan_value = self.makespan.varValue
+            self.total_data_achievable = self.total_data_collected_main.value() 
+
+            logger.info(f"{objective_function} optimization returned makespan: {self.makespan_value} and total data collected: {self.total_data_achievable}")
 
 
         # STAGE 2 SOLUTION : Objective Function + Second Objective Function.
@@ -309,10 +324,10 @@ class Cluster:
                 )
                 builder.solve_problem(self)
 
-            makespan = self.makespan.varValue
-            total_data_collected = self.total_data_collected_main.value() 
+            self.makespan_value = self.makespan.varValue
+            self.total_data_achievable = self.total_data_collected_main.value() 
 
-            logger.info(f"{objective_function} optimization returned makespan: {makespan} and total data collected: {total_data_collected}")
+            logger.info(f"{objective_function} optimization returned makespan: {self.makespan_value} and total data collected: {self.total_data_achievable}")
 
             
         # elif stage_solution == 3: 
@@ -457,12 +472,12 @@ class Cluster:
     def set_makespan_objective(self, distance, energy, time)->None:
 
         # # Makespan
-        # alpha = 0.6 
-        # beta = 0.001
-        # weights = get_weights() 
-        # energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
-        # spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
-        # travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        alpha = 0.6 
+        beta = 0.4
+        weights = get_weights() 
+        energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
+        travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         
         self.problem.setObjective(self.makespan)
 
@@ -763,4 +778,22 @@ class Cluster:
 
 
  
-                
+    def validate_solution(self, objective_function, builder): 
+        if objective_function == 'energy':
+            const = self.total_cost.value()
+
+            self.problem += self.total_cost <= const - 0.00001
+
+            builder.solve_problem(self)
+
+            if self.problem.status != pl.LpStatusOptimal:
+                raise Exception("Solution is Truly Optimal")
+
+        elif objective_function == "coverage":
+            total_data_collected = self.total_data_collected_main.value()
+            self.problem += self.total_data_collected_main >= total_data_collected + 0.00001
+
+            builder.solve_problem(self)
+
+            if self.problem.status != pl.LpStatusOptimal:
+                raise Exception("Solution is Truly Optimal")

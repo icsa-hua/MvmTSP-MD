@@ -116,7 +116,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 total_energy_cost = energy_cost
                 
                 if i != depot_ind: 
-                    total_energy_cost += wait_energy_consumption 
+                    total_energy_cost += wait_energy_consumption * cluster.service_time[i, k]
                 
                 model += cluster.e[j, k] <= cluster.e[i, k] - total_energy_cost + M_energy * (1 - cluster.x[i, j, k])
 
@@ -136,7 +136,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 
                 total_energy_cost = energy_cost
                 if i != depot_ind:
-                    total_energy_cost += wait_energy_consumption
+                    total_energy_cost += wait_energy_consumption * cluster.service_time[i, k]
                 
                 # Energy at i must be >= the energy needed for the next leg
                 model += cluster.e[i, k] >= total_energy_cost - M_energy * (1 - cluster.x[i, j, k])
@@ -154,7 +154,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
     for k in agents: 
         for j in NODES: 
             model += cluster.service_time[j,k] >= MANDATORY_WAIT_TIME * cluster.visit[j,k]
-            model += cluster.service_time[j,k] <= M * cluster.visit[j,k]
+            model += cluster.service_time[j,k] <= MANDATORY_WAIT_TIME * 2 * cluster.visit[j,k]
 
     cluster.total_data_collected_main = pl.lpSum(
             cluster.visit[j, k] * data_per_visit.get(j, 0)
@@ -279,7 +279,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 total_energy_cost = energy_cost
                 
                 if i != depot_ind: 
-                    total_energy_cost += wait_energy_consumption 
+                    total_energy_cost += wait_energy_consumption * cluster.service_time[i,k]
                 
                 model += cluster.e[j, k] <= cluster.e[i, k] - total_energy_cost + M_energy * (1 - cluster.x[i, j, k])
 
@@ -299,7 +299,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 
                 total_energy_cost = energy_cost
                 if i != depot_ind:
-                    total_energy_cost += wait_energy_consumption
+                    total_energy_cost += wait_energy_consumption * cluster.service_time[i,k]
                 
                 # Energy at i must be >= the energy needed for the next leg
                 model += cluster.e[i, k] >= total_energy_cost - M_energy * (1 - cluster.x[i, j, k])
@@ -310,7 +310,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
     for k in agents: 
         for j in NODES: 
             model += cluster.service_time[j,k] >= MANDATORY_WAIT_TIME * cluster.visit[j,k]
-            model += cluster.service_time[j,k] <= M * cluster.visit[j,k]
+            model += cluster.service_time[j,k] <= MANDATORY_WAIT_TIME * 2 * cluster.visit[j,k]
     
     cluster.total_data_collected_main = pl.lpSum(
             cluster.visit[j, k] * data_per_visit.get(j, 0)

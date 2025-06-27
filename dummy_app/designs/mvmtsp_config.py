@@ -27,7 +27,7 @@ from typing import Any, Union, List, Dict, Mapping, Tuple, Optional
 class MVMTSPConfig(ABC): 
 
     @abstractmethod
-    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str, stage_solution:int )->None: 
+    def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str, stage_solution:int, priority:str,validate:bool )->None: 
 
         self.problem = pl.LpProblem() 
         self.V:pd.DataFrame = pd.DataFrame()
@@ -50,6 +50,8 @@ class MVMTSPConfig(ABC):
         self.objective_function:str = objective_function
         self.env_type:str = env_type
         self.stage_solution:int = stage_solution
+        self.priority = priority 
+        self.validate = validate
         
 
     @abstractmethod
@@ -158,7 +160,7 @@ class MVMTSPConfig(ABC):
         energies.to_csv(f"{data_path}/energies.csv")
         self.coverage_time = coverage_time 
         self.move_energy = energies.values.astype(np.float32)
-        self.average_coverage_energy = energy_model.coverage_energy(altitude, self.coverage_time) # In J 
+        self.average_coverage_energy = energy_model.coverage_energy(altitude, 1) # In J for a single time step 
         self.average_coverage_energy = self.average_coverage_energy / 3600.0  # Convert to Wh
 
         logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
@@ -279,13 +281,19 @@ class MVMTSPConfig(ABC):
             reserve = self.max_battery * 0.35
         elif self.scenario == 'individual': 
 
-            reserve = self.max_battery * 0.50 
+            reserve = self.max_battery * 0.60
         else: 
             reserve = self.max_battery * 0.30
 
-        adjusted_energy = self.average_energy + self.average_coverage_energy 
+        adjusted_energy = self.average_energy + self.average_coverage_energy * self.coverage_time
         
-        max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
+        if self.scenario == 'cooperative':
+            max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
+        elif self.scenario == 'individual':
+            max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 3
+            if max_nodes == 0: raise ValueError("Insufficient battery capacity for the given coverage time and coverage energy.")
+        else:
+            max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
 
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
         # charge_points = int(np.floor(self.v/max_nodes))
@@ -310,7 +318,7 @@ class MVMTSPConfig(ABC):
         
         kmeans = KMeansConstrained(
             n_clusters=n_clusters, 
-            size_min=4, 
+            size_min=2, 
             size_max=max_nodes,
             random_state=42
         )

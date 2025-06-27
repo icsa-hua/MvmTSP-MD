@@ -154,6 +154,7 @@ class GroundUserGroup:
                     point = user.move(self.map_obj)
                     new_region = self.map_obj.get_point_region(point, regions)
                     if new_region is not None: 
+                        logger.debug(f"User {user.user_id} moved to region {new_region}")
                         user.current_area = new_region  
                     
                     # Update motion 
@@ -167,8 +168,8 @@ class GroundUserGroup:
 
             self.update_plot() 
             plt.draw()  
-            if hasattr(self.mobility_env, "timestep"):
-                self.mobility_env.timestep += 1 
+            # if hasattr(self.mobility_env, "timestep"):
+            #     self.mobility_env.timestep += 1 
             yield self.mobility_env.env.timeout(1)
 
 

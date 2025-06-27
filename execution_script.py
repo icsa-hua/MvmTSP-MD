@@ -34,7 +34,7 @@ def frame_generator():
 # Simulation Environment Configuration 
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
-TRIALS = 500 
+TRIALS = 300 
 MAX_BATTERY = 2000 #Wh 
 NUMBER_OF_AGENTS = 6 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
@@ -71,6 +71,8 @@ parser.add_argument("--max_coverage_time", type=int, default=MAX_COVERAGE_TIME, 
 parser.add_argument("--num_areas", type=int, default=NUMBER_OF_AREAS, help="Number of areas to simulate.")
 parser.add_argument("--env", type=str, default="urban", help="Environment to simulate.")
 parser.add_argument("--stage_solution", type=int, default=2, help="What objective stage architecture to use.")
+parser.add_argument("--priority", type=str, default="yes", help="Use prioritization")
+parser.add_argument("--validate", action="store_true", help="Validate the solution.")
 args = parser.parse_args()
 
 NUMBER_OF_AGENTS = args.num_agents
@@ -150,7 +152,12 @@ config = {
     "scenario":args.scenario, 
     "enable_ga":args.enable_ga,
     "objective_function":args.objective,
-    "stage_solution":args.stage_solution
+    "stage_solution":args.stage_solution, 
+    "priority":args.priority,
+    "validate":args.validate,
+    "NUMBER_OF_AGENTS":NUMBER_OF_AGENTS,
+    "NUMBER_OF_USERS":NUMBER_OF_USERS,
+    "NUMBER_OF_AREAS":NUMBER_OF_AREAS
 }
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 
@@ -177,7 +184,7 @@ ground_users = GroundUserGroup(
     mobility_env=mobility_sim, 
     map_obj=map_generator, 
     alpha=0.85, 
-    mean_velocity=2.0, 
+    mean_velocity=10.0, 
     sigma=0.5
 )
 logger.debug(f"✅ Ground Users Group Initialized")

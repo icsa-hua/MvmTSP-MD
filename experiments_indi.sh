@@ -5,13 +5,13 @@ NUM_OF_AREAS=(50 100 150 200)
 NUM_OF_AGENTS=(4 6)
 NUM_OF_USERS=(15 20) 
 ENV_TYPES=("urban" "rural" "forest")
-SCENARIO=("cooperative")
+SCENARIO=("individual")
 OBJECTIVE=("energy" "coverage")
 SOLUTION_STAGES=(1)
 
-SUCCESS_LOG="success_runs_coop.log"
-FAILURE_LOG="failed_runs_coop.log"
-LOG_FILE="mvmtsp_experimentation_log_coop.txt"
+SUCCESS_LOG="success_runs_indi.log"
+FAILURE_LOG="failed_runs_indi.log"
+LOG_FILE="mvmtsp_experimentation_log_indi.txt"
 
 # Clear previous logs
 echo "Starting MvMTSP Experimentation runs..." > "$LOG_FILE"
@@ -29,7 +29,7 @@ for scenario in "${SCENARIO[@]}"; do
                             # Construct the command to run the experiment 
                             CMD="python3 execution_script.py --scenario ${scenario} --objective ${objective} --num_areas=${num_of_areas} --num_users=${num_of_users} --num_agents=${num_of_agents} --env=${env_type} --stage_solution=${stage}"
 
-                            echo "Executing: $CMD" | tee -a mvmtsp_experimentation_log_coop.txt
+                            echo "Executing: $CMD" | tee -a mvmtsp_experimentation_log_indi.txt
 
                             # Execute th command (waits for completion before starting the next) 
                             eval $CMD 
@@ -44,7 +44,7 @@ for scenario in "${SCENARIO[@]}"; do
 
                             # Log completion 
                             echo "Finished simulation with scenario=$scenario, objective=$objective, num_of_areas=$num_of_areas, num_of_users=$num_of_users, num_agents=$num_of_agents, env_type=$env_type --stage_solution=${stage}" >> "mvmtsp_experimentation_log.txt"
-                            echo "------------------------------------------" >> mvmtsp_experimentation_log_coop.txt
+                            echo "------------------------------------------" >> mvmtsp_experimentation_log_indi.txt
                         done 
                     done
                 done 

@@ -1,5 +1,5 @@
 from dummy_app.tools.logger import logger
-from dummy_app.tools.common import get_session_duration
+from dummy_app.tools.common import get_session_duration, add_session_time
 from dummy_app.designs.agents import TSPAgents
 
 import simpy
@@ -147,8 +147,10 @@ class EnvSim:
         constructor.gather_results() 
 
         self.agent_group = TSPAgents(self, detailed_log, altitude=altitude)
-
+        if self.session_duration > 0 :
+           detailed_log = add_session_time(detailed_log, self.session_duration)
         self.session_duration += get_session_duration(detailed_log)
+
         constructor.Time += self.session_duration 
         self.ready_event.succeed()
         self.optimization_guard_flag = False 

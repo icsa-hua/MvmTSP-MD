@@ -351,3 +351,17 @@ def add_virtual_nodes(cost_bundle: dict, clones: dict, add_epsilon:bool=True) ->
             assert len(row) == n_new, f"{metric}:{node} is wrong length"
 
     return out
+
+
+def add_session_time(paths, session_duration): 
+    updated_paths = {}
+    for agent, path in paths.items(): 
+        updated_paths[agent] = [] 
+        for triplet in path: 
+            cur_pos = triplet[0]
+            new_pos = triplet[1]
+            time_step = triplet[2] + session_duration
+            new_triplet = (cur_pos, new_pos, time_step)
+            updated_paths[agent].append(new_triplet)
+
+    return updated_paths

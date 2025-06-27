@@ -35,6 +35,8 @@ class Builder(MVMTSPConfig):
             scenario=config["scenario"],
             objective_function=config["objective_function"],
             stage_solution=config["stage_solution"],
+            priority=config["priority"],
+            validate=config["validate"]
         )
         
         self.metrics = Metrics(verbose=True) 
@@ -48,6 +50,11 @@ class Builder(MVMTSPConfig):
         self.total_number_cluster: int = 0 
         self.coverage_file_id = uuid.uuid4() 
         self.coordinated_plan = defaultdict(dict)
+        self.total_data_rate = 0.0 
+        self.makespan = 0.0 
+        self.NUMBER_OF_AGENTS = config["NUMBER_OF_AGENTS"]
+        self.NUMBER_OF_USERS = config["NUMBER_OF_USERS"]
+        self.NUMBER_OF_AREAS = config["NUMBER_OF_AREAS"]
         
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
@@ -224,6 +231,10 @@ class Builder(MVMTSPConfig):
             except Exception as e:
                 logger.exception(f"❌ Error occurred during clustering: {e}")
                 raise ValueError("Error occurred during clustering.")
+            
+            if self.priority != "yes":
+                priority['Rank'] = priority['Rank'].apply(lambda x: 1)
+                
 
             # Phase 3: Agent Assignment for all clusters 
             try: 
@@ -249,7 +260,7 @@ class Builder(MVMTSPConfig):
                 deallocate_memory(data)
                 deallocate_memory(gdf)
                 deallocate_memory(clusters)
-                deallocate_memory(priority)
+                # deallocate_memory(priority)
                 deallocate_memory(cluster_with_depots)
                 deallocate_memory(same_depot_agents)
                 deallocate_memory(depots)
@@ -264,6 +275,9 @@ class Builder(MVMTSPConfig):
         paths = {} 
         self.metrics.start_performance_timer() 
         self.total_number_cluster = len(clusters)
+
+        logger.debug(f"Priority for Problem:{priority} ")
+
         # Phase 5: Problem Construction and Solution
         with tqdm(total=len(clusters), desc="Solving problem ", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
@@ -391,6 +405,9 @@ class Builder(MVMTSPConfig):
         totalDistance, totalEnergy, totalTime = calculate_totals_from_paths(
             results=results
         )
+        
+        self.total_data_rate += cluster_object.total_data_achievable
+        self.makespan += cluster_object.makespan_value
 
         self.problem_results[f'Cluster_{cluster_object.id}'] = {
             "scenario_name":SCENARIO,
@@ -689,6 +706,7 @@ class Builder(MVMTSPConfig):
         total_mission_time = 0 
         total_distance = 0
         idle_times = 0 
+
         for cluster in results: 
             
             total_energy_consumption += results[cluster]['Total Energy'] 
@@ -705,9 +723,17 @@ class Builder(MVMTSPConfig):
         
         idle_ration = idle_times / total_mission_time if total_mission_time > 0 else 0
         
+        average_data_per_cluster = self.total_data_rate / self.total_number_cluster
+        average_makespan_per_cluster = self.makespan / self.total_number_cluster
+
+
         final_results = {
             "Scenario": self.scenario, 
             "Objective Function": self.objective_function,
+            "Number of Areas":self.NUMBER_OF_AREAS,
+            "Number of Agents":self.NUMBER_OF_AGENTS,
+            "Number of Users":self.NUMBER_OF_USERS,
+            "Environment Type":self.env_type,
             "Total Number of Clusters": self.total_number_cluster,
             "Total Nodes Visited": self.global_nodes_visited,
             "Visits per Node": self.visits_per_nodes,
@@ -721,6 +747,10 @@ class Builder(MVMTSPConfig):
             "Mission Efficiency per Time": mission_efficiency_per_time,
             "Scaled Mission Efficiency per Time (nodes per hour)": scaled_mission_efficiency_time,
             "Idle Ratio": idle_ration,
+            "Total Makespan": self.makespan,
+            "Total Achievable DR": self.total_data_rate,
+            "Average Data Rate per Cluster": average_data_per_cluster,
+            "Average Makespan per Cluster": average_makespan_per_cluster,
             "Total Number of Constraints": self.num_constraints,
             "Total Number of Variables": self.variables_count,
             "Computational Time": self.metrics.elapsed_time if hasattr(self.metrics, 'elapsed_time') else None,
@@ -730,6 +760,10 @@ class Builder(MVMTSPConfig):
         field_names = [
             "Scenario",
             "Objective Function",
+            "Number of Areas",
+            "Number of Agents",
+            "Number of Users",
+            "Environment Type",
             'Total Number of Clusters',
             'Total Nodes Visited', 
             'Visits per Node', 
@@ -743,6 +777,10 @@ class Builder(MVMTSPConfig):
             'Mission Efficiency per Time', 
             'Scaled Mission Efficiency per Time (nodes per hour)',
             'Idle Ratio',
+            'Total Makespan',
+            'Total Achievable DR',
+            'Average Data Rate per Cluster',
+            'Average Makespan per Cluster',
             'Total Number of Constraints',
             'Total Number of Variables',
             "Computational Time",
