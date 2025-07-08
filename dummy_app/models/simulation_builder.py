@@ -425,7 +425,7 @@ class Builder(MVMTSPConfig):
             "Makespan": cluster_object.makespan,
             "Total_Data_Transfer": cluster_object.total_data_collected_main,
         }
-
+        import pdb;pdb.set_trace()
         field_names = ['scenario_name', 'objective_function', 'agent_results', 'Total Distance', 'Total Energy', 'Total Time', 'Average Throughput', 'Average SINR']
         filename = self.create_filename(cluster_object.id, field_names) 
         df = pd.DataFrame([self.problem_results[f'Cluster_{cluster_object.id}']])
@@ -669,7 +669,7 @@ class Builder(MVMTSPConfig):
     def get_cluster_coverage(self, cluster:Any):
         filename = 'coverage_results_{}.csv'.format(self.coverage_file_id)
         altitude = 1250/1e3 
-        user_height = 12.5/1e3 
+        user_height = 1.25/1e3 
         terrain_type = self.env_type 
         cluster.get_average_coverage(
             user_points = self.user_points,

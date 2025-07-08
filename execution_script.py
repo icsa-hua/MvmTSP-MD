@@ -70,7 +70,7 @@ parser.add_argument("--max_battery", type=int, default=MAX_BATTERY, help="Maximu
 parser.add_argument("--max_coverage_time", type=int, default=MAX_COVERAGE_TIME, help="Maximum coverage time.")
 parser.add_argument("--num_areas", type=int, default=NUMBER_OF_AREAS, help="Number of areas to simulate.")
 parser.add_argument("--env", type=str, default="urban", help="Environment to simulate.")
-parser.add_argument("--stage_solution", type=int, default=2, help="What objective stage architecture to use.")
+parser.add_argument("--stage_solution", type=int, default=1, help="What objective stage architecture to use.")
 parser.add_argument("--priority", type=str, default="yes", help="Use prioritization")
 parser.add_argument("--validate", action="store_true", help="Validate the solution.")
 parser.add_argument("--trials", type=int, default=TRIALS, help="Number of trials to run.")

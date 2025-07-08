@@ -202,7 +202,6 @@ class Cluster:
         #         plt.show()
 
         #     return 
-
         if scenario == 'cooperative':
             cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents) 
 
