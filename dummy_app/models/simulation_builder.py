@@ -11,6 +11,7 @@ import os
 import sys
 import csv
 import math
+import copy 
 import pdb
 import time
 import uuid
@@ -50,6 +51,7 @@ class Builder(MVMTSPConfig):
         self.total_number_cluster: int = 0 
         self.coverage_file_id = uuid.uuid4() 
         self.coordinated_plan = defaultdict(dict)
+        self.plan_with_nodes =  defaultdict(dict)
         self.total_data_rate = 0.0 
         self.makespan = 0.0 
         self.NUMBER_OF_AGENTS = config["NUMBER_OF_AGENTS"]
@@ -297,6 +299,7 @@ class Builder(MVMTSPConfig):
         logger.info("Total Number of Variables : {}".format(self.variables_count))
 
         # Step 6: Flatten all the paths to form a single path for each agent        
+        self.plan_with_nodes = copy.deepcopy(self.coordinated_plan)
 
         # Step 7: Transform positions to coordinates
         for agent, plan in self.coordinated_plan.items():
@@ -392,13 +395,14 @@ class Builder(MVMTSPConfig):
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5: Calculate the results for the cluster 
-        cost = load_generated_data()
+        cost = load_generated_data(self.problem_data_path)
         results = extract_per_agent_metrics(
             paths=paths, 
             costs=cost,
             coverage_energy=self.average_coverage_energy, 
             virtual_nodes=cluster_object.virtual_nodes,
-            area_ids=cluster_object.original_nodes_dict.values() 
+            area_ids=cluster_object.original_nodes_dict.values(), 
+            file_id=self.id  
         )
 
         # Total results for all agents inside the cluster. 
@@ -428,7 +432,8 @@ class Builder(MVMTSPConfig):
         df.to_csv(filename, mode='a', index=False, header=False) 
 
         paths = self.synchronize_agent_paths(paths, cluster_object)
-        self.flatten_paths_on_time(self.coordinated_plan, paths)  
+        paths = self.flatten_paths_on_time(self.coordinated_plan, paths)  
+
 
         return paths 
 
@@ -714,7 +719,7 @@ class Builder(MVMTSPConfig):
             total_distance += results[cluster]['Total Distance']
 
             for agent, agent_results in results[cluster]['agent_results'].items():
-                idle_times += agent_results.get('recharge_steps', 0) 
+                idle_times += agent_results.get('   ', 0) 
 
         mission_efficiency_per_energy = self.global_nodes_visited / total_energy_consumption if total_energy_consumption > 0 else 0
         scaled_mission_efficiency = 1000 * mission_efficiency_per_energy # (nodes per kWh) 
@@ -809,3 +814,117 @@ class Builder(MVMTSPConfig):
         self.coordinated_plan = defaultdict(dict)
         
 
+
+    def process_path_for_gantt(self,path_log):
+        """
+        Converts a detailed step-by-step log into a list of activity blocks.
+        An activity block is a tuple: (label, start_time, duration).
+        """
+        if not path_log:
+            return []
+
+        activities = []
+        # Start with the first step in the log
+        current_from, current_to, start_time = path_log[0]
+        
+        for i in range(1, len(path_log)):
+            next_from, next_to, _ = path_log[i]
+            
+            # If the activity changes, log the previous one and start a new one
+            if (current_from, current_to) != (next_from, next_to):
+                end_time = path_log[i-1][2]
+                duration = (end_time - start_time) + 1
+                
+                # Create a label for the activity
+                if current_from == current_to:
+                    label = f'Wait @ N{current_from}'
+                else:
+                    label = f'Move {current_from}→{current_to}'
+                
+                activities.append((label, start_time, duration))
+                
+                # Start the new activity
+                current_from, current_to, start_time = path_log[i]
+        
+        # Add the very last activity in the log
+        end_time = path_log[-1][2]
+        duration = (end_time - start_time) + 1
+        if current_from == current_to:
+            label = f'Wait @ N{current_from}'
+        else:
+            label = f'Move {current_from}→{current_to}'
+        activities.append((label, start_time, duration))
+        
+        return activities
+    
+    def create_gantt_chart(self):
+        import matplotlib.pyplot as plt 
+        import matplotlib.patches as mpatches
+        fig, ax = plt.subplots(figsize=(18, 12))
+        paths = self.plan_with_nodes
+        # Define colors for different activities
+        colors = {
+            'Move': 'blue',
+            'Wait': 'green'
+        }
+
+        agent_lanes = list(paths.keys())
+        y_positions = range(len(agent_lanes))
+
+        min_start = float('inf')
+        max_end = float('-inf')
+
+        text_vertical_spacing = 1.85  # Increase this value for more space between text labels
+
+        for i, agent_id in enumerate(agent_lanes):
+            path = paths[agent_id]
+            activities = self.process_path_for_gantt(path)
+            label_y = i - 0.25  # Initial label y position
+            for j, (activity_label, start, duration) in enumerate(activities):
+                activity_type = activity_label.split(' ')[0] # 'Move' or 'Wait'
+                color = colors.get(activity_type, 'grey') # Default to grey
+                
+                # Draw the horizontal bar for the activity
+                ax.barh(
+                    y=i,                # The lane for this agent
+                    width=duration,     # The length of the bar
+                    left=start,         # Where the bar starts on the time axis
+                    height=0.6,
+                    align='center',
+                    color=color,
+                    edgecolor='black'
+                )
+                # Add text label inside the bar, staggered vertically for readability
+                ax.text(start + duration / 2, label_y, activity_label, 
+                        ha='center', va='center', color='white', weight='bold', fontsize=5, clip_on=True)
+                # Track min/max for axis limits
+                min_start = min(min_start, start)
+                max_end = max(max_end, start + duration)
+
+                # Move label_y for next label
+                label_y += text_vertical_spacing / max(1, len(activities))  # Use the spacing variable
+
+                # Reset label_y after a long wait period (reset after, not before)
+                if activity_type == 'Wait' and duration > 25:
+                    label_y = i - 0.25
+
+        # --- 3. Formatting the Plot ---
+        ax.set_yticks(list(y_positions))
+        ax.set_yticklabels(agent_lanes)
+        ax.set_ylabel('Agent ID', fontsize=12)
+        ax.invert_yaxis()  # Puts Agent 1 at the top
+
+        ax.set_xlabel('Mission Time (steps)', fontsize=12)
+        ax.set_title('Mission Schedule Gantt Chart', fontsize=16, weight='bold')
+        ax.grid(axis='x', linestyle='--', alpha=0.7)
+
+        # Set xlim to ensure the first step is fully visible
+        ax.set_xlim(left=min_start - 1, right=max_end + 1)
+
+        # Create a custom legend
+        legend_patches = [mpatches.Patch(color=color, label=label) for label, color in colors.items()]
+        ax.legend(handles=legend_patches, loc='upper right')
+
+        plt.tight_layout()
+        plt.show()
+        plt.close()

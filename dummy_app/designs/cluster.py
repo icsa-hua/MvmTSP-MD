@@ -289,7 +289,7 @@ class Cluster:
                 logger.info(f"Found a tight, feasible makespan bound of: {feasible_makespan}")
                 self.problem += self.makespan <= feasible_makespan 
 
-                delta = 0.15 # Percentage of huw much energy we can compromise for a better makespan.
+                delta = 0.20 # Percentage of huw much energy we can compromise for a better makespan.
                 self.problem += self.total_cost <= C_optimal * (1 + delta)
 
                 self.set_makespan_objective(

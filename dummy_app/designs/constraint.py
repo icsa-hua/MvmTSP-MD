@@ -164,33 +164,41 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
     
     
 def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
-    
+
     depot_ind, NODES, agents, model, D, TF, MANDATORY_WAIT_TIME, wait_energy_consumption, data_per_visit, bridge_nodes, reverse_nodes = configuration_set_up(cluster=cluster, builder=builder, V_nodes=V_nodes, list_of_agents=list_of_agents)
     
     for k in agents: 
         for j in NODES: 
             if cluster.nodes_dict[j] in bridge_nodes: continue 
             model += cluster.visit[j,k] == 1 
-
+    logger.info(f"Number of constraints after 1 {cluster.problem.variables()}")
     hubs = set(cluster.virtual_nodes.values())
     for k in agents: 
         for hub in hubs: 
             virtual_copies = [vn for vn ,h in cluster.virtual_nodes.items() if h == hub] 
             model += pl.lpSum(cluster.visit[reverse_nodes[v_node],k] for v_node in virtual_copies) == cluster.allowed_visits[hub]
+    
+    logger.info(f"Number of constraints after 2 {cluster.problem.variables()}")
 
     for j in NODES:
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for i in V_nodes) == cluster.visit[j,k]
             model += pl.lpSum(cluster.x[j,i,k] for i in V_nodes) == cluster.visit[j,k]
+    
+    logger.info(f"Number of constraints after 3 {cluster.problem.variables()}")
 
     for k in agents: 
         model += pl.lpSum(cluster.x[depot_ind,i,k] for i in NODES) == 1
         model += pl.lpSum(cluster.x[i,depot_ind,k] for i in NODES) == 1 
 
+    logger.info(f"Number of constraints after 4 {cluster.problem.variables()}")
+
+
     for i in V_nodes: 
         for j in V_nodes: 
             for k in agents: 
                 model += cluster.x[i,j,k] + cluster.x[j,i,k] <= 1 
+    logger.info(f"Number of constraints after 5 {cluster.problem.variables()}")
 
     # Redundant since all nodes visited is enforced. 
     # for k in agents: 
@@ -203,6 +211,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
     # At any given time agent k can only be on 1 travel . No overlap 
+    logger.info(f"Number of constraints after 6 {cluster.problem.variables()}")
 
     # MTZ 
     n = len(NODES)
@@ -211,9 +220,12 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
             for j in NODES: 
                 if i == j: continue 
                 model += cluster.p[i,k] - cluster.p[j,k] + n*cluster.x[i,j,k] <= n - 1
+    logger.info(f"Number of constraints after 7 {cluster.problem.variables()}")
 
     for k in agents: 
         model += cluster.p[depot_ind,k] == 0
+    
+    logger.info(f"Number of constraints after 8 {cluster.problem.variables()}")
 
     M = TF[-1]
 
@@ -227,6 +239,8 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 model += cluster.t[j,k2] >= (cluster.t[j,k1] + cluster.service_time[j,k1]) - M * (1 - cluster.precedes[j,k1,k2]) 
 
                 model += cluster.t[j,k1] >= (cluster.t[j,k2] + cluster.service_time[j,k2]) - M * (cluster.precedes[j,k1,k2])
+    
+    logger.info(f"Number of constraints after 9 {cluster.problem.variables()}")
 
     # Solver has to choose a precesed value for each node conflict, which in turn forces the arrival time variables to be spaced-out, thus 
     # preventing collisions.  

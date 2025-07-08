@@ -15,6 +15,7 @@ import timeout_decorator
 import resource
 import random 
 import networkx as nx
+import uuid 
 
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler 
@@ -28,7 +29,7 @@ class MVMTSPConfig(ABC):
 
     @abstractmethod
     def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str, stage_solution:int, priority:str,validate:bool )->None: 
-
+        self.id = uuid.uuid4()
         self.problem = pl.LpProblem() 
         self.V:pd.DataFrame = pd.DataFrame()
         self.agents:List[int] = [] 
@@ -52,6 +53,7 @@ class MVMTSPConfig(ABC):
         self.stage_solution:int = stage_solution
         self.priority = priority 
         self.validate = validate
+        self.problem_data_path = ""
         
 
     @abstractmethod
@@ -122,7 +124,7 @@ class MVMTSPConfig(ABC):
         
         def normalize_data(df:pd.DataFrame, name:str='')->pd.DataFrame:
             scalers_path = f"{os.getcwd()}/assets/scalers"
-            scaler_file_name = f"scaler_{name}.pkl"
+            scaler_file_name = f"scaler{self.id}_{name}.pkl"
             if not os.path.exists(scalers_path):
                 os.mkdir(scalers_path)
             scaler_file_path = os.path.join(scalers_path,scaler_file_name)
@@ -133,12 +135,15 @@ class MVMTSPConfig(ABC):
             return pd.DataFrame(scaled_data, columns=df.columns, index=df.index)
 
         data_path = f"{os.getcwd()}/assets/data"
+        data_problem_path = f"{data_path}/problem_{self.id}"
+
         if not os.path.exists(data_path):
             os.mkdir(data_path)
-
+        if not os.path.exists(data_problem_path):
+            os.mkdir(data_problem_path)
 
         distances = pd.DataFrame(distance_matrix, columns=[f'dist_{i}' for i in range(1, len(distance_matrix)+1)])
-        distances.to_csv(f"{data_path}/distances.csv")
+        distances.to_csv(f"{data_problem_path}/distances.csv")
 
         energy_model = DroneEnergyModel(
             v_hor=v_hor, 
@@ -157,7 +162,7 @@ class MVMTSPConfig(ABC):
 
         # NOTE: To convert it to Wh 
         energies = energies / 3600.0
-        energies.to_csv(f"{data_path}/energies.csv")
+        energies.to_csv(f"{data_problem_path}/energies.csv")
         self.coverage_time = coverage_time 
         self.move_energy = energies.values.astype(np.float32)
         self.average_coverage_energy = energy_model.coverage_energy(altitude, 1) # In J for a single time step 
@@ -207,7 +212,7 @@ class MVMTSPConfig(ABC):
         travel_times = (distance_matrix * 1e3) / v_hor / 60.0  # Convert to minutes
         travel_times = pd.DataFrame(travel_times, columns=[f'tt_{i}' for i in range(1, len(travel_times)+1)])
         self.travel_cost = travel_times.values
-        travel_times.to_csv(f'{data_path}/times.csv')
+        travel_times.to_csv(f'{data_problem_path}/times.csv')
         assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
 
         distances = normalize_data(distances,name='distance')
@@ -220,7 +225,7 @@ class MVMTSPConfig(ABC):
 
         self.depots = depots 
         # combine al normalized data
-
+        self.problem_data_path = data_problem_path
         data = pd.concat([distances, energies, travel_times, nodes], axis=1, join='inner')
         return data 
 

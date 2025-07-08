@@ -34,7 +34,7 @@ def frame_generator():
 # Simulation Environment Configuration 
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
-TRIALS = 300 
+TRIALS = 2500
 MAX_BATTERY = 2000 #Wh 
 NUMBER_OF_AGENTS = 6 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
@@ -73,8 +73,10 @@ parser.add_argument("--env", type=str, default="urban", help="Environment to sim
 parser.add_argument("--stage_solution", type=int, default=2, help="What objective stage architecture to use.")
 parser.add_argument("--priority", type=str, default="yes", help="Use prioritization")
 parser.add_argument("--validate", action="store_true", help="Validate the solution.")
+parser.add_argument("--trials", type=int, default=TRIALS, help="Number of trials to run.")
 args = parser.parse_args()
 
+TRIALS = args.trials
 NUMBER_OF_AGENTS = args.num_agents
 NUMBER_OF_USERS = args.num_users
 MAX_BATTERY = args.max_battery
@@ -207,8 +209,6 @@ all_user_points = [point for points in user_points.values() for point in points]
 #     )
 # else:
 mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
-
-
 
 # Preprocess the data based on the map, the energy/coverage model and the ground users. 
 data = problem.preprocess_generated_data(

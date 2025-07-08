@@ -188,7 +188,8 @@ def extract_per_agent_metrics(
     costs: dict,
     coverage_energy:float, 
     virtual_nodes:dict, 
-    area_ids:Any  
+    area_ids:Any, 
+    file_id:Any,  
 
 ) -> Dict[str,Dict[str, float]]:
     """
@@ -210,7 +211,7 @@ def extract_per_agent_metrics(
             
 
     cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes, add_epsilon=False)
-
+    
     results = defaultdict(dict)
     for agent in paths:
         visited_nodes = []
@@ -229,10 +230,13 @@ def extract_per_agent_metrics(
                 duration += 1
                 visited_nodes.append((i,j))
                 continue
-
-            dist += cost_bundle['distance'][i][j]
-            energy += cost_bundle['energy'][i][j] 
-            duration += cost_bundle['travel_time'][i][j]
+            try:
+                dist += cost_bundle['distance'][i][j]
+                energy += cost_bundle['energy'][i][j] 
+                duration += cost_bundle['travel_time'][i][j]
+            except Exception as e:
+                print(e)
+                import pdb;pdb.set_trace()
             visited_nodes.append((i,j))
 
         results[agent] = {'distance': dist, 'energy': energy, 'time': duration}
@@ -267,9 +271,9 @@ def denormalize_cost(scalers:defaultdict, cost:dict):
     return cost             
 
 
-def load_generated_data(): 
+def load_generated_data(data_path): 
     cost = defaultdict()
-    data_path = f"{os.getcwd()}/assets/data"
+    
     for metric in os.listdir(data_path): 
         name = metric.split('.')[0]
 
@@ -327,24 +331,36 @@ def add_virtual_nodes(cost_bundle: dict, clones: dict, add_epsilon:bool=True) ->
 
     out = deepcopy(cost_bundle)          
 
+    try: 
+        for metric, rows in out.items():
+            for node, row in rows.items():
 
-    for metric, rows in out.items():
-        for node, row in rows.items():
-            # collect, in order, the distance from this node to each prototype
-            addon = np.fromiter((row[prototype_lookup[c]] for c in clone_ids),
-                                dtype=dtype, count=k)
-            rows[node] = np.concatenate([row, addon])
+                # collect, in order, the distance from this node to each prototype
+                try:
+                    addon = np.fromiter((row[prototype_lookup[c]] for c in clone_ids), dtype=dtype, count=k)
+                    rows[node] = np.concatenate([row, addon])
 
-    for metric, rows in out.items():
-        for j, clone_id in enumerate(clone_ids):
-            p = prototype_lookup[clone_id]
-            base_row  = rows[p][:n_old]            # original part (length n_old)
-            zeros_blk = np.zeros(k, dtype=dtype) # clone-vs-clone block
-            if add_epsilon: 
-                zeros_blk = zeros_blk + 1   #epsilon factor. 
-            new_row = np.concatenate([base_row, zeros_blk])
-            new_row[clone_id] = 0 
-            rows[clone_id] = new_row
+                except Exception as e: 
+                    print(e)
+                    print(prototype_lookup)
+                    import pdb;pdb.set_trace()
+
+    
+        for metric, rows in out.items():
+            for j, clone_id in enumerate(clone_ids):
+                p = prototype_lookup[clone_id]
+                base_row  = rows[p][:n_old]            # original part (length n_old)
+                zeros_blk = np.zeros(k, dtype=dtype) # clone-vs-clone block
+                if add_epsilon: 
+                    zeros_blk = zeros_blk + 1   #epsilon factor. 
+                new_row = np.concatenate([base_row, zeros_blk])
+                # Find the correct positional index for clone_id in new_row
+                clone_pos = n_old + j  # j is the index in clone_ids
+                new_row[clone_pos] = 0 
+                rows[clone_id] = new_row
+    except Exception as e: 
+        print(e)
+        import pdb;pdb.set_trace() 
 
     for metric, rows in out.items():
         for node, row in rows.items():

@@ -23,3 +23,10 @@ test.py
 test_time.py
 voronoi_test.ipynb
 *.log
+*.txt
+*.gif
+*.mp4
+*.ipynb
+*.csv
+'from dummy_app.tools.py'
+from dummy_app.tools.py

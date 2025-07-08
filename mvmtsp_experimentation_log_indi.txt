@@ -1,17 +1,144 @@
 Starting MvMTSP Experimentation runs...
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=15 --num_agents=4 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=15 --num_agents=6 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=20 --num_agents=4 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=20 --num_agents=6 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=4 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=6 --env=urban --stage_solution=1
-❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=6 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=4 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
 ------------------------------------------
-Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=6 --env=urban --stage_solution=1
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=15 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=15 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=20 --num_agents=4 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=20 --num_agents=6 --env=rural --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=50 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=100 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=150 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective energy --num_areas=200 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=50 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+❌ FAILED: python3 execution_script.py --scenario individual --objective coverage --num_areas=100 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=150 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=15 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=15 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=20 --num_agents=4 --env=forest --stage_solution=1
+------------------------------------------
+Executing: python3 execution_script.py --scenario individual --objective coverage --num_areas=200 --num_users=20 --num_agents=6 --env=forest --stage_solution=1
+------------------------------------------
+Finished running all experiments!

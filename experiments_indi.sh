@@ -4,7 +4,7 @@
 NUM_OF_AREAS=(50 100 150 200)
 NUM_OF_AGENTS=(4 6)
 NUM_OF_USERS=(15 20) 
-ENV_TYPES=("urban" "rural" "forest")
+ENV_TYPES=("rural" "forest")
 SCENARIO=("individual")
 OBJECTIVE=("energy" "coverage")
 SOLUTION_STAGES=(1)
