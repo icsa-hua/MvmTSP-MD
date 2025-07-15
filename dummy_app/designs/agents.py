@@ -11,6 +11,7 @@ def clamp_rgb(rgb):
     """Ensure RGB values are within [0, 1] range."""
     return tuple(min(1.0, max(0.0, c)) for c in rgb)
 
+
 def generate_agent_colormap(n_agents: int):
     cmap = plt.get_cmap("tab10")  # Up to 20 visually distinct colors
     agent_colors = []
@@ -34,24 +35,27 @@ def generate_agent_colormap(n_agents: int):
 class TSPAgent: 
 
     def __init__(self, agent_id, path, altitude):
-        
-        self.agent_id = agent_id 
+         
         # Ensure each element in path is a tuple/list with at least 3 elements
         self.plan = sorted(
             [tuple(item) for item in path if hasattr(item, '__getitem__') and len(item) >= 3],
             key=lambda x: x[2]
         )  # list of (x, y, t)
+        
+        self.agent_id = agent_id 
         self.index = 0 
+
         self.x = self.plan[0][0] if self.plan is not None else 0 
         self.y = self.plan[0][1] if self.plan is not None else 0
+        # Utilized only when the 3D enabled
         self.z = altitude
         self.history = [] 
 
 
     def update_position(self, current_sim_time):
+        # Update the position (inside the plot) based on the coordinated plan (1 time step at a time)
         while self.index < len(self.plan) and self.plan[self.index][2] <= current_sim_time:
             self.x, self.y, _ = self.plan[self.index]
-            # print(f"Agent _ id {self.agent_id}({self.x},{ self.y})")
             self.index += 1
 
     def append_history(self, current_sim_time):
@@ -62,6 +66,7 @@ class TSPAgents:
 
     def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False, altitude:int=1250):
         
+        # Placeholder for the group of agents when initializing the map
         if empty: 
             self.mobility_env = mobility_env
             self.ax = None 
@@ -74,6 +79,7 @@ class TSPAgents:
 
 
         else: 
+            
             self.mobility_env = mobility_env
             self.ax = self.mobility_env.ax
             agent_paths = agent_paths or {}
@@ -93,13 +99,14 @@ class TSPAgents:
             
             for i, agent in enumerate(self.agents):
                 self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
-            # self.ax.legend()
 
             # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
             self.process = self.mobility_env.env.process(self.simulate())
 
 
     def get_coords(self):
+
+        # Update the coordinates for all agents at every simulation step
         x = [agent.x for agent in self.agents]
         y = [agent.y for agent in self.agents]
         return np.column_stack((x,y))
@@ -113,7 +120,8 @@ class TSPAgents:
         if self.scatter: 
            self.scatter.set_offsets(self.get_coords())
            self.scatter.set_color(self.agent_colors)
-         
+
+        # NOTE: This would only work with a 3D environment but tests didn't work  
         # coords = self.get_coords()
         # xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
         # if self.scatter: 
@@ -124,20 +132,24 @@ class TSPAgents:
 
     def simulate(self):
 
-        # This process now just triggers updates. The agent itself knows what to do.
+        # This process triggers updates. The agents are assigned abased on their assigned paths.
         while True:
-            timestep = self.mobility_env.env.now 
+            
+            timestep = self.mobility_env.env.now # progress simulation step
             for i, agent in enumerate(self.agents):
                 agent.update_position(timestep)
                 agent.append_history(timestep)
                 path = agent.plan  # Assume path is a list of (x, y) coordinates
                 if path:
+                    # Update paths with each simulation iteration (not the best)
                     history = agent.history
                     x_hist, y_hist,t  = zip(*history)
                     self.path_lines[i].set_data(x_hist, y_hist)
 
             self.update_plot()
             # plt.draw()
+            
             if hasattr(self.mobility_env, "timestep"):
                 self.mobility_env.timestep += 1 
+            # simulate(self) function is a process of the simulator so it needs to yield a generator
             yield self.mobility_env.env.timeout(1)

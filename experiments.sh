@@ -4,10 +4,10 @@
 NUM_OF_AREAS=(50 100 150 200)
 NUM_OF_AGENTS=(4 6)
 NUM_OF_USERS=(15 20) 
-ENV_TYPES=("rural" "forest")
+ENV_TYPES=("urban" "rural" "forest")
 SCENARIO=("cooperative")
 OBJECTIVE=("energy" "coverage")
-SOLUTION_STAGES=(1)
+SOLUTION_STAGES=(1) # Tow-Stage solution is available but hinders computational performance
 
 SUCCESS_LOG="success_runs_coop.log"
 FAILURE_LOG="failed_runs_coop.log"

@@ -1,3 +1,8 @@
+from dummy_app.tools.logger import logger
+from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+from dummy_app.models.coverage import coverage_u2c, coverage_probability
+from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
+
 import os
 import sys
 import math 
@@ -11,11 +16,6 @@ import networkx as nx
 from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Tuple, List, Any
-
-from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
-from dummy_app.tools.logger import logger
-from dummy_app.models.coverage import coverage_u2c, coverage_probability
-from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
 
 
 class Cluster: 
@@ -47,7 +47,7 @@ class Cluster:
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
 
-
+        # Get the available data that are assoiated to the areas of the cluster
         context = extract_context_for_cluster(
             cluster=self.cluster, 
             columns=[
@@ -64,12 +64,19 @@ class Cluster:
 
     def prepare_context(self, context:Dict, builder:Any): 
 
+        """ 
+        Prepare virtual node installation and use Central-Hybs to find
+        the bridge nodes and use GA for the initial path and estimate 
+        Time Window for the cluster to solve. 
+        """
+
         self.cost, self.virtual_nodes, self.bridge_nodes, self.nodes_dict, raw_population = process_extraction(
             problem_builder=builder, 
             extraction=context,
             depot=self.depot_id, 
             employed_agents=self.employed_agents,
         )
+        
         self.initial_population = {
             k: (list(v[0]), float(v[1])) for k, v in raw_population.items()
         }
@@ -81,26 +88,32 @@ class Cluster:
                 self.allowed_visits[hub] = 1
 
 
-
     def get_estimated_time_frame(self, builder:Any): 
         total_time = 0 
 
+        # NOTE: the GA is not enabled, no initial population of paths is generated.
+        # This does not account for scenario or coverage mandatory time. 
         if self.initial_population is None: 
+            
             G = create_model_graph(
                 cost=self.cost['travel_time'], 
                 nodes=self.nodes_dict, 
                 weights={'travel_time':1}
             )
-
+            
+            # Find the minimum spanning tree to consider it as a solution and estimate the time frame for the cluster
             mst = nx.minimum_spanning_tree(G, weight='weight')
             estimated_time = sum(edge[2]['weight'] for edge in mst.edges(data=True))
             total_time = math.ceil(estimated_time)
 
         else: 
+            # Get the travel time baed on the GA paths considering the scenario and the coverage wait time.  
             best_agent = min(self.initial_population.items(), key=lambda item: item[1][1])
             best_path = best_agent[1][0]
+
             if builder.scenario == 'cooperative': 
                 num_travels = int((len(best_path) - 1) /len(self.employed_agents))
+
             elif builder.scenario == 'individual':
                 num_travels = len(best_path) - 1 
 
@@ -121,6 +134,11 @@ class Cluster:
 
     def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy', stage_solution:int=2): 
         
+
+        if not hasattr(builder, 'get_travel_time'):
+            logger.error("Builder does not have get_travel_time method") 
+            raise ValueError("Builder does not have get_travel_time method")    
+        
         V_nodes = list(self.original_nodes_dict.keys())
         logger.info("Number of Cluster's vertices:: {0}".format(len(V_nodes)))
 
@@ -130,14 +148,10 @@ class Cluster:
         # Set the decision variables 
         self.create_problem(scenario=scenario, objective_functions=objective_function) 
 
-        if not hasattr(builder, 'get_travel_time'):
-            logger.error("Builder does not have get_travel_time method") 
-            raise ValueError("Builder does not have get_travel_time method")    
-        
         employed_agents = ["Agent_" + str(i) for i in self.employed_agents]
         list_of_agents = {name: int(name.split("_")[1]) for name in employed_agents}
         
-
+        #NOTE: Pareto is not fully functional. 
         # if objective_function == "pareto":
 
         #     if scenario != 'cooperative':
@@ -202,44 +216,19 @@ class Cluster:
         #         plt.show()
 
         #     return 
+
+        # Set Scenario Constraints for the MILP MVMTSP optimization
         if scenario == 'cooperative':
             cooperative_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents) 
 
         elif scenario == 'individual': 
             individual_scenario_constraints(cluster=self,builder=builder, V_nodes=self.V_nodes, list_of_agents=list_of_agents)
+
         else:
             logger.error(f"Scenario {scenario} not implemented")
             raise ValueError(f"Scenario {scenario} not implemented")
-
-        # if scenario == 'individual':
-        #     if objective_function == 'energy': 
-        #         self.set_hybrid_objective(
-        #             distance=self.cost['distance'],
-        #             energy=self.cost['energy'],
-        #             time=self.cost['travel_time'],
-        #         )
-        #     elif objective_function == "coverage":    
-        #         self.set_max_coverage_objective(builder)
-
-        #         # self.set_makespan_objective(
-        #         #     distance=self.cost['distance'],
-        #         #     energy=self.cost['energy'],
-        #         #     time=self.cost['travel_time']
-        #         # ) 
-
-        #     builder.solve_problem(self)
-
-        #     if builder.validate:
-        #         self.validate_solution(objective_function=objective_function, builder=builder)
-
-        #     self.makespan_value = self.makespan.varValue
-        #     self.total_data_achievable = self.total_data_collected_main.value() 
-
-        #     logger.info(f"{objective_function} optimization returned makespan: {self.makespan_value} and total data collected: {self.total_data_achievable}")
-
-        #     return self.get_results(builder=builder) 
-
-        # STAGE 1 SOLUTION : ONLY Objective Function. 
+        
+        # STAGE 1 SOLUTION : ONLY Objective Functions to solve
         if stage_solution == 1: 
 
             if objective_function == 'energy':
@@ -259,6 +248,8 @@ class Cluster:
 
             builder.solve_problem(self)
 
+            # NOTE: In the case the solution from the MILP solver is indeed optimal, this should terminate the implenetation. 
+            # Remove it to execute normally. This is just a check. 
             if builder.validate: 
                 self.validate_solution(objective_function=objective_function, builder=builder)
 
@@ -270,6 +261,7 @@ class Cluster:
 
         # STAGE 2 SOLUTION : Objective Function + Second Objective Function.
         elif stage_solution == 2: 
+
             if objective_function == 'energy':
                 self.set_hybrid_objective(
                     distance=self.cost['distance'],
