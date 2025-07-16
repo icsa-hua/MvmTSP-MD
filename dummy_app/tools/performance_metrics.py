@@ -1,8 +1,9 @@
+from dummy_app.tools.logger import logger 
+
 import os 
 import time 
 import psutil
 import tracemalloc 
-from dummy_app.tools.logger import logger 
 
 
 class Metrics: 

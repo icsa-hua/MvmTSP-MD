@@ -1,3 +1,7 @@
+from dummy_app.models.central_hubs import CentralHub
+from dummy_app.tools.graphs import is_eulerian_digraph
+from dummy_app.models.energy_model import DroneEnergyModel
+
 import gc
 import os 
 import sys 
@@ -6,13 +10,11 @@ import pandas as pd
 import numpy as np 
 import networkx as nx 
 import logging 
-from collections import defaultdict
 import matplotlib.pyplot as plt 
+
 from copy import deepcopy
 from typing import Any, List, Dict, Union, Tuple
-from dummy_app.models.central_hubs import CentralHub
-from dummy_app.tools.graphs import is_eulerian_digraph
-from dummy_app.models.energy_model import DroneEnergyModel
+from collections import defaultdict
 
 
 def deallocate_memory(variable:Any)->None:
@@ -102,8 +104,6 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     for rem in bridge_nodes: 
         ga_nodes.pop(reverse_nodes[rem])
 
-
-
     assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
     "Mismatch between distance, energy, travel_time and R_points dictionary length"
     
@@ -115,7 +115,6 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
                 depot=depot, 
                 verbose=False   
             )
-            # print(f"Agent {agent} has solution path: {solution_path} with cost: {solution_cost}")
             initial_population[agent] = (solution_path, solution_cost) 
     return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
 
@@ -195,8 +194,6 @@ def extract_per_agent_metrics(
     """
     Return individual distance, energy, and time for each agent's path.
     """
-    
-
 
     cost_bundle = {}
     for cost_type in costs.keys():
@@ -358,6 +355,7 @@ def add_virtual_nodes(cost_bundle: dict, clones: dict, add_epsilon:bool=True) ->
                 clone_pos = n_old + j  # j is the index in clone_ids
                 new_row[clone_pos] = 0 
                 rows[clone_id] = new_row
+
     except Exception as e: 
         print(e)
         import pdb;pdb.set_trace() 

@@ -24,11 +24,12 @@ class GroundUser:
         self.x:Union[int,float] = x 
         self.y:Union[int,float] = y 
         self.z:Union[int,float] = z 
-        self.velocity:float = mean_velocity 
         self.theta:float = 0.0 
         self.angle_mean:float = 0.0
         self.current_area:int = 0 
         self.user_id = uuid.uuid4()
+        self.velocity:float = mean_velocity 
+
 
     def move(self, map_obj:Map)->Point: 
 
@@ -49,7 +50,7 @@ class GroundUser:
 
         # Update region 
         return Point(self.x, self.y) 
-    
+        # Update region for 3D env    
         # return Point(self.x, self.y, self.z) 
     
 
@@ -72,10 +73,10 @@ class GroundUserGroup:
         self.alpha2 = 1.0 - self.alpha
         self.alpha3 = np.sqrt(1.0 - self.alpha * self.alpha) * self.sigma
 
-        self.group: Dict[int, list[GroundUser]] = {}
-        self.fig = self.mobility_env.fig 
-        self.ax = self.mobility_env.ax
         self.scatter = None 
+        self.ax = self.mobility_env.ax
+        self.fig = self.mobility_env.fig 
+        self.group: Dict[int, list[GroundUser]] = {}
         self.process = self.mobility_env.env.process(self.simulate())
 
 
@@ -114,13 +115,15 @@ class GroundUserGroup:
 
 
     def get_coords(self)->np.ndarray: 
+        
         x = [user.x for area in self.group.values() for user in area]
         y = [user.y for area in self.group.values() for user in area]
         return np.column_stack((x,y))
-        # z = [user.z for area in self.group.values() for user in area]
 
+        # z = [user.z for area in self.group.values() for user in area]
         # return np.column_stack((x,y,z))
     
+
     def plot_users(self, vor_map:Voronoi)->Tuple: 
 
         voronoi_plot_2d(
@@ -176,6 +179,7 @@ class GroundUserGroup:
     def update_plot(self)->None:
         if self.scatter: 
             self.scatter.set_offsets(self.get_coords())
+        # For 3D visualization
         # coords = self.get_coords()
         # xs, ys, zs = coords[:,0], coords[:,1], coords[:,2]
         # if self.scatter: 

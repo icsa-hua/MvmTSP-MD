@@ -63,8 +63,8 @@ class TOPSISPriority:
     
     def gather_criteria(self, cluster:pd.DataFrame, cue_groups:Any,  distance_matrix:str) -> Dict[str,float]: 
 
-        # find the users inside the areas of the cluster. 
-        # the areas outside the cluster are not considered. 
+        # Find the users inside the areas of the cluster. 
+        # The areas outside the cluster are not considered. 
         num_customers = 0 
         for area_id in cluster['Area_id']:
             if area_id in cue_groups.keys(): 

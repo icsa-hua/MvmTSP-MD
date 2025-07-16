@@ -5,7 +5,6 @@ from dummy_app.designs.cluster import Cluster
 from dummy_app.designs.agents import TSPAgent 
 from dummy_app.designs.constraint import * 
 from dummy_app.tools.logger import logger 
-from typing import Any, List, Dict, Union, Tuple, Mapping
 
 import os 
 import sys
@@ -20,11 +19,18 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import timeout_decorator 
+
 from tqdm import tqdm 
 from collections import defaultdict
+from typing import Any, List, Dict, Union, Tuple, Mapping
 
 
 class Builder(MVMTSPConfig):
+    """
+    This class is the builder for the problem formulation. It utilizes PuLP 
+    to create the problem and interfaces the distinct components such as 
+    clustering, VNI, central hubs and genetic algorithm. 
+    """
 
     def __init__(self, config:Dict[str,Any], trials:int): 
         
@@ -40,11 +46,16 @@ class Builder(MVMTSPConfig):
             validate=config["validate"]
         )
         
+        self.NUMBER_OF_AGENTS = config["NUMBER_OF_AGENTS"]
+        self.NUMBER_OF_USERS = config["NUMBER_OF_USERS"]
+        self.NUMBER_OF_AREAS = config["NUMBER_OF_AREAS"]
+        self.agent_altitude = config["altitude"]
+        self.Time = 0 
+
         self.metrics = Metrics(verbose=True) 
         self.recharge_time_window:int = 5 #descrete time steps
         self.num_constraints = 0 
         self.variables_count = 0
-        self.Time = 0 
         self.problem_results = defaultdict()
         self.global_nodes_visited:int = 0
         self.visits_per_nodes:Dict[int,int] = {}
@@ -54,10 +65,7 @@ class Builder(MVMTSPConfig):
         self.plan_with_nodes =  defaultdict(dict)
         self.total_data_rate = 0.0 
         self.makespan = 0.0 
-        self.NUMBER_OF_AGENTS = config["NUMBER_OF_AGENTS"]
-        self.NUMBER_OF_USERS = config["NUMBER_OF_USERS"]
-        self.NUMBER_OF_AREAS = config["NUMBER_OF_AREAS"]
-        
+
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
@@ -104,13 +112,8 @@ class Builder(MVMTSPConfig):
     def separate_depots_from_clusters(self, data: pd.DataFrame): 
         """
         Separates depot rows from cluster data based on depots assigned to agents.
-
-        Args:
-            data (pd.DataFrame): Dataset containing Area_id and other attributes.
-
-        Returns:
-            Tuple[pd.DataFrame, pd.DataFrame]: (cluster_data, depot_data)
         """
+
         unique_depots= list(set(self.depots_for_agents.values()))
 
         is_depot = data['Area_id'].isin(unique_depots)
@@ -121,6 +124,7 @@ class Builder(MVMTSPConfig):
     
 
     def add_depot_data_to_cluster(self, cluster_df:Tuple[int,pd.DataFrame], depot_row:pd.DataFrame, depot_id:int):
+
         depot_row= depot_row.copy()
         depot_row  = depot_row[depot_row['Area_id']==depot_id]
         depot_row.loc[:, 'cluster'] = np.mean(cluster_df[1]['cluster'])        
@@ -148,8 +152,6 @@ class Builder(MVMTSPConfig):
                     assignments[(top_cluster, depot)] = depot_agents
                 cluster_df = cluster_df.drop(index=top_cluster)
                 
-                # cluster_df.drop(index=top_cluster, inplace=True)
-
             return cluster_df, assignments 
 
         # Convert depot assignments to dataframe 
@@ -262,7 +264,6 @@ class Builder(MVMTSPConfig):
                 deallocate_memory(data)
                 deallocate_memory(gdf)
                 deallocate_memory(clusters)
-                # deallocate_memory(priority)
                 deallocate_memory(cluster_with_depots)
                 deallocate_memory(same_depot_agents)
                 deallocate_memory(depots)
@@ -293,19 +294,19 @@ class Builder(MVMTSPConfig):
                 time.sleep(2)
                 logger.debug(f"✅ Cluster {cluster_tuple[0]} solved successfully...")
         
-        # Step 6: Agent Generation for simulation
+        # Phase 6: Agent Generation for simulation
         self.metrics.end_performance_timer() 
         logger.info("Total Number of Constraints : {}".format(self.num_constraints))
         logger.info("Total Number of Variables : {}".format(self.variables_count))
 
-        # Step 6: Flatten all the paths to form a single path for each agent        
+        # Phase 7: Flatten all the paths to form a single path for each agent        
         self.plan_with_nodes = copy.deepcopy(self.coordinated_plan)
 
-        # Step 7: Transform positions to coordinates
+        # Phase 8: Transform positions to coordinates
         for agent, plan in self.coordinated_plan.items():
             self.coordinated_plan[agent] = self.get_coordinates_for_path(plan)
             
-        # Step 8: Add interpolation steps for the paths (visualizatino) 
+        # Phase 9: Add interpolation steps for the paths (visualizatino) 
         # self.coordinated_plan = self.post_process(self.coordinated_plan)
 
         return self.coordinated_plan     
@@ -320,11 +321,11 @@ class Builder(MVMTSPConfig):
                 current_coords = (float(self.V['X_coords'].iloc[current_node]), float(self.V['Y_coords'].iloc[current_node]))
                 next_coords = (float(self.V['X_coords'].iloc[next_node]), float(self.V['Y_coords'].iloc[next_node]))
                 coordinates.append((current_coords, next_coords, point[2]))
-                # coordinates.append((point[0], point[1], point[2]))
-            
+           
             except IndexError:
                 logger.error(f"❌ Node {point[0]} or {point[1]} not found in the dataframe.")
                 continue
+
         return coordinates
 
 
@@ -341,6 +342,7 @@ class Builder(MVMTSPConfig):
         SCENARIO = self.scenario 
         OBJECTIVE = self.objective_function
         STAGE_SOLUTION = self.stage_solution
+
         # Step 1: Create the cluster object to accomodate the problem.  
         cluster_object = Cluster(
             cluster=cluster, 
@@ -425,7 +427,7 @@ class Builder(MVMTSPConfig):
             "Makespan": cluster_object.makespan,
             "Total_Data_Transfer": cluster_object.total_data_collected_main,
         }
-        import pdb;pdb.set_trace()
+        
         field_names = ['scenario_name', 'objective_function', 'agent_results', 'Total Distance', 'Total Energy', 'Total Time', 'Average Throughput', 'Average SINR']
         filename = self.create_filename(cluster_object.id, field_names) 
         df = pd.DataFrame([self.problem_results[f'Cluster_{cluster_object.id}']])
@@ -433,7 +435,6 @@ class Builder(MVMTSPConfig):
 
         paths = self.synchronize_agent_paths(paths, cluster_object)
         paths = self.flatten_paths_on_time(self.coordinated_plan, paths)  
-
 
         return paths 
 
@@ -454,7 +455,7 @@ class Builder(MVMTSPConfig):
             visit_nodes = set() 
             seen_edges = set()
 
-            # Reject agents that haven't been used at this point. 
+            # 1. Reject agents that haven't been used at this point. 
             if len(path) == 0: 
                 logger.debug(f"Agent {agent_id} has no path")
                 continue 
@@ -464,7 +465,7 @@ class Builder(MVMTSPConfig):
             
             visit_nodes.add(cluster.depot_id)
 
-            # 2.  include the very last arrival node
+            # 2. Include the very last arrival node
             for step in path:
                 for node in (step[0], step[1]):
                     if node not in (cluster.depot_id,) + tuple(cluster.bridge_nodes):
@@ -542,6 +543,7 @@ class Builder(MVMTSPConfig):
             if not plan:
                 logger.debug(f"Agent {agent} has no path in cluster {agent}")
                 continue
+
             path = check_for_duplicates(plan)
             
             detailed_log = [] 
@@ -558,20 +560,15 @@ class Builder(MVMTSPConfig):
 
                 duration = int(round(end_time - start_time))
 
-                # Get the 3D coordinates for the start and end nodes
                 start_pos = (from_node_id[0], from_node_id[1])
                 end_pos = (to_node_id[0], to_node_id[1]) 
 
-                # --- LOGIC SEPARATION ---
     
-                # Case 1: The agent is WAITING at a node
                 if from_node_id == to_node_id:
-                    # For a waiting period, simply append the same position for the duration.
-                    # No interpolation is needed.
                     for t in range(duration):
                         current_time = int(round(start_time)) + t
                         detailed_log.append((*start_pos, current_time))
-                # Case 2: The agent is MOVING between nodes
+
                 else:
                     if duration == 0: # If duration is zero, just add the start point
                         detailed_log.append((*start_pos, int(round(start_time))))
@@ -579,9 +576,11 @@ class Builder(MVMTSPConfig):
 
                     x_coords = np.linspace(start_pos[0], end_pos[0], duration)
                     y_coords = np.linspace(start_pos[1], end_pos[1], duration)
+
                     for t in range(duration):
                         current_time = int(round(start_time)) + t
                         detailed_log.append((x_coords[t], y_coords[t], current_time))
+                        
             interpolated_paths[agent] = detailed_log
 
         return interpolated_paths
@@ -668,7 +667,7 @@ class Builder(MVMTSPConfig):
 
     def get_cluster_coverage(self, cluster:Any):
         filename = 'coverage_results_{}.csv'.format(self.coverage_file_id)
-        altitude = 1250/1e3 
+        altitude = self.agent_altitude/1e3 
         user_height = 1.25/1e3 
         terrain_type = self.env_type 
         cluster.get_average_coverage(
@@ -730,7 +729,6 @@ class Builder(MVMTSPConfig):
         
         average_data_per_cluster = self.total_data_rate / self.total_number_cluster
         average_makespan_per_cluster = self.makespan / self.total_number_cluster
-
 
         final_results = {
             "Scenario": self.scenario, 
@@ -897,6 +895,7 @@ class Builder(MVMTSPConfig):
                 # Add text label inside the bar, staggered vertically for readability
                 ax.text(start + duration / 2, label_y, activity_label, 
                         ha='center', va='center', color='white', weight='bold', fontsize=5, clip_on=True)
+
                 # Track min/max for axis limits
                 min_start = min(min_start, start)
                 max_end = max(max_end, start + duration)
@@ -908,7 +907,6 @@ class Builder(MVMTSPConfig):
                 if activity_type == 'Wait' and duration > 25:
                     label_y = i - 0.25
 
-        # --- 3. Formatting the Plot ---
         ax.set_yticks(list(y_positions))
         ax.set_yticklabels(agent_lanes)
         ax.set_ylabel('Agent ID', fontsize=12)

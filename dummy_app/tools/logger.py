@@ -1,7 +1,6 @@
 import logging 
 import datetime 
 import os 
-import matplotlib 
 from dummy_app.tools.common import jupyter_logger
 
 logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
@@ -14,7 +13,6 @@ if not os.path.exists(assets_dir):
 log_dir = parent_dir + "/assets/logs"
 
 if not os.path.exists(log_dir):
-
     os.mkdir(log_dir)
 
 log_file = os.path.join(log_dir, f"log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")

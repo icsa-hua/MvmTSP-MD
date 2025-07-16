@@ -2,6 +2,11 @@ import numpy as np
 
 
 class DroneEnergyModel: 
+    """
+    This class is an offline estimation model that considers the distances 
+    between the points to visit and the profile of the UAV, to compute 
+    action-based energy. 
+    """
 
     def __init__(self, v_hor:float=5.55, v_ver:float=2.78, alpha:float=0.2, lambda_coef:float=0.08, dt:int=600, max_battery:float=1500): 
 
@@ -37,6 +42,7 @@ class DroneEnergyModel:
         #Total descend time in seconds 
         dt_vertical = altitude / self.vertical_velocity  # s
         T = self.mass * self.g
+
         # Vertical Energy in J
         E_u = T * (self.vertical_velocity) * dt_vertical
         
@@ -80,7 +86,6 @@ class DroneEnergyModel:
         return E_cov
         
     
-
     def descend_energy(self, current_node, next_node, altitude, distance_matrix): 
         #Total descend time in seconds 
         dt_vertical = np.abs(altitude/self.vertical_velocity) 

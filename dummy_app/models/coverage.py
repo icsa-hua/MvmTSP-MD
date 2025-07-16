@@ -1,3 +1,9 @@
+"""
+This script provides all the required functions and methodology to 
+calculate the achievable data rate for each agent. It imitates the 
+environmental conditions and the probability a  link to be LoS, or NLoS.
+"""
+
 from dummy_app.tools.logger import logger 
 
 import os 
@@ -5,6 +11,7 @@ import uuid
 import numpy as np 
 import pandas as pd 
 import matplotlib.pyplot as plt
+
 from scipy.stats import norm 
 from scipy.integrate import quad
 from scipy.stats import gamma, lognorm, weibull_min 
@@ -71,7 +78,6 @@ def pathloss_generation(nlos:int=1, nNlos:int=20, fc:float=2.4e9, c:float=(3e8/1
     P_los = los_probability(theta, terrain_type)
     P_nlos = 1 - P_los 
 
-    # r = np.linalg.norm([agent_pos[0], agent_pos[1], agent_height]) / 1e7 
     r = agent_user_dist # In the case that agent position is in lat/lon coordinates, we assume agent_user_dist is already in km.
     
     fading_los = gamma_pdf(r=r,
@@ -102,18 +108,9 @@ def gamma_pdf(r, agent_altitude:float=0.0,fading_type="LoS", terrain_type='rural
 
     """
     Computes a fading or shadowing factor based on gamma/exponential/lognormal PDFs.
-
     LoS : Nakagami-m fading via Gamma 
     NLOS : Rayleigh fading via Exponential (Rayleigh is a special case of Weibull distribution)
     Shadowing U2C : Log-normal with height decay Inspired by 3GPP urban macrocell models where LoS likelihood increases with UAV height 
-
-    Parameters:
-    - xcoord, ycoord, altitude: coordinates and altitude of the UAV
-    - fading_type: one of ['LoS', 'NLoS', 'Shadowing_U2U', 'Shadowing_U2I']
-    - uav_height: only required for Shadowing_U2I
-
-    Returns:
-    - y: PDF value based on distance and model
     """
 
     if fading_type == 'LoS': 
@@ -126,12 +123,14 @@ def gamma_pdf(r, agent_altitude:float=0.0,fading_type="LoS", terrain_type='rural
         return weibull_min.pdf(r, c=1.5 if terrain_type == "forest" else 1.2)
     
     elif fading_type == 'Shadowing_U2I': 
+
         if agent_altitude == 0:
             raise ValueError("Agent has no altitude to be used for shadowing") 
 
         base_sigma = 4.2 * np.exp(-0.0046 * agent_altitude) 
         env_factor = 1.2  if terrain_type == 'forest' else 1.0 
         sigma = base_sigma * env_factor 
+
         return lognorm.pdf(r, s=sigma) 
     
     return 0 

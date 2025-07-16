@@ -107,45 +107,7 @@ if args.num_agents not in agents_choices:
 # if args.stage_solution == 2 and args.scenario == 'cooperative': 
 #     logger.error(f"Stage 2 is only available for individual scenarios.")
 #     exit(1)
-
-# Declare which constraints to use 
-"""
-Const 0 --> Enables Multiple Visits per node in the 
-Const 1 --> Only allow a single travel from depot to all nodes and reverse. (Per Agent & all agents)
-Const 2 --> Allow dynamic return and static departure based on time
-Const 3 --> Single Journey between nodes and depot
-Const 4 --> Prohibit Depot Looping 
-Const 5 --> Enable Arcs for all nodes 
-Const 6 --> Collision Avoidance (Unique time visits)
-Const 7 --> Miss Indicator per node 
-Const 8 --> Synchronization between spatial and time variable
-Const 9 --> Time dependency for travel (consider duration) 
-Const 10 --> Account for visits per agent 
-Const 11 --> Load Balancing for all agents 
-Const 12 --> Energy Management (Including Move & Coverage) 
-Const 13 --> Energy at Depot and non-negative 
-Const 14 --> Positional dependency for start and finish of time frame 
-Const 15 --> Busy and Wait decleration per agent for valid arcs 
-Const 16 --> Connect busy and wait activity 
-Const 17 --> Dynamic Time enforcement for departure and return (time based)
-Const 18 --> Symmetry keeping (equal load balancing)
-Const 19 --> Busy constraint (Double enforce) 
-Const 20 --> Strict Wait after travel (Double enforce) 
-Const 21 --> Penalize repeat nodes (energy objective)
-Const 22 --> Flow Conservation Not time expanded 
-Const 23 --> No loops in path 
-Const 24 --> Minimum visits per agent (dual constraint accounting for single agent travel)
-Const 25 --> Target Edge count (the number of arcs enabled by x) 
-"""                                                              
-
-
-# NOTE: Create different pipelines based on scenario choice.  
    
-# Config should pass all the information necessary inside the builder. 
-# -scenario, 
-# -environment type 
-# -max_battery 
-# -max_coverage_time
 config = {
     "genetic_algorithm": True if args.enable_ga=='yes' else False, 
     "env_type": args.env, 
@@ -159,7 +121,8 @@ config = {
     "validate":args.validate,
     "NUMBER_OF_AGENTS":NUMBER_OF_AGENTS,
     "NUMBER_OF_USERS":NUMBER_OF_USERS,
-    "NUMBER_OF_AREAS":NUMBER_OF_AREAS
+    "NUMBER_OF_AREAS":NUMBER_OF_AREAS,
+    "altitude": ALTITUDE
 }
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 
@@ -200,14 +163,6 @@ if map_generator.vor_map is None:
 
 all_user_points = [point for points in user_points.values() for point in points]
 
-# if args.show_map: 
-#     mobility_sim.fig, mobility_sim.ax = ground_users.plot_generated_users(
-#         map_generator,
-#         regions=regions, 
-#         centroids=centroids,
-#         user_points=all_user_points
-#     )
-# else:
 mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
 
 # Preprocess the data based on the map, the energy/coverage model and the ground users. 
@@ -222,13 +177,17 @@ data = problem.preprocess_generated_data(
     coverage_time=MAX_COVERAGE_TIME,
     user_points=user_points,
 )
+
 logger.debug(f"✅ Preprocessed Data Completed successfully")  
 
 vor_map = map_generator.vor_map
+
+# Deallocate all the non necessary components
 deallocate_memory(map_generator)
 deallocate_memory(regions)
 deallocate_memory(centroids)
 deallocate_memory(user_points)
+
 animation_directory = f"{PROJECT_ASSETS}/animations" 
 if not os.path.exists(animation_directory): 
     os.makedirs(animation_directory) 
@@ -256,13 +215,6 @@ try:
         blit=False, 
         cache_frame_data=False)
     
-    # plt.show(block=False)  # Non-blocking show to keep the script running
-    
-    # import time 
-    # while True:
-    #     plt.pause(0.001)  # keeps the plot interactive
-    #     time.sleep(0.001)
-
     # Save as MP4 (requires ffmpeg)
     ani.save(animation_filename, writer='ffmpeg', fps=10)
 

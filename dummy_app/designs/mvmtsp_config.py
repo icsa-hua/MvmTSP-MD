@@ -24,8 +24,12 @@ from k_means_constrained import KMeansConstrained
 from typing import Any, Union, List, Dict, Mapping, Tuple, Optional
 
 
-
 class MVMTSPConfig(ABC): 
+    """
+    This is the constructor for the builder to help with the data preperation 
+    and to interface the problem builder with different components such as 
+    regionalization
+    """
 
     @abstractmethod
     def __init__(self, env_type:str, max_battery:int, max_coverage_time:int, enable_ga:bool, scenario:str, objective_function:str, stage_solution:int, priority:str,validate:bool )->None: 
@@ -58,20 +62,10 @@ class MVMTSPConfig(ABC):
 
     @abstractmethod
     def assign_agents_to_areas(self, plethos:int, depots:Any)->Dict[int,int]:
-        """ 
-            Assign agents randomly and equally to depot areas.
 
-            Args:
-                num_agents (int): Total number of agents.
-                depots (list): List of depot areas.
-
-            Returns:
-                dict: Mapping of each agent to their assigned area.
-            """
         if plethos <= 0 or depots is None: 
             logger.error("Number of agents and depots must be specified")
             raise ValueError("Number of agents and depots must be specified")
-
 
         random.shuffle(self.agents)
         base_agents_per_area = plethos // len(depots) 
@@ -100,6 +94,7 @@ class MVMTSPConfig(ABC):
         if data is None:
             logger.error("Data is not initialized")
             raise ValueError("Data is not initialized")
+
         return geopandas.GeoDataFrame(data, geometry=geopandas.points_from_xy(data.X_coords,data.Y_coords), crs="EPSG:4326")
 
 
@@ -123,12 +118,14 @@ class MVMTSPConfig(ABC):
     )->pd.DataFrame:
         
         def normalize_data(df:pd.DataFrame, name:str='')->pd.DataFrame:
+            scaler = MinMaxScaler()
             scalers_path = f"{os.getcwd()}/assets/scalers"
             scaler_file_name = f"scaler{self.id}_{name}.pkl"
+
             if not os.path.exists(scalers_path):
                 os.mkdir(scalers_path)
+
             scaler_file_path = os.path.join(scalers_path,scaler_file_name)
-            scaler = MinMaxScaler()
             scaled_data = scaler.fit_transform(df.values)
             joblib.dump(scaler, scaler_file_path) 
             
@@ -139,6 +136,7 @@ class MVMTSPConfig(ABC):
 
         if not os.path.exists(data_path):
             os.mkdir(data_path)
+
         if not os.path.exists(data_problem_path):
             os.mkdir(data_problem_path)
 
@@ -155,6 +153,7 @@ class MVMTSPConfig(ABC):
         for i in range(len(distance_matrix)):
             for j in range(len(distance_matrix)):
                 energy_matrix[i,j] = energy_model.move_energy(current_node=i,next_node=j,distance_matrix=distance_matrix)
+
         logger.debug(f"Average_energy expend for Move: {energy_matrix.mean()}")
 
         # NOTE: Energies here are in JOULE 
@@ -163,6 +162,7 @@ class MVMTSPConfig(ABC):
         # NOTE: To convert it to Wh 
         energies = energies / 3600.0
         energies.to_csv(f"{data_problem_path}/energies.csv")
+
         self.coverage_time = coverage_time 
         self.move_energy = energies.values.astype(np.float32)
         self.average_coverage_energy = energy_model.coverage_energy(altitude, 1) # In J for a single time step 
@@ -211,8 +211,10 @@ class MVMTSPConfig(ABC):
         # Here distance must be in meters
         travel_times = (distance_matrix * 1e3) / v_hor / 60.0  # Convert to minutes
         travel_times = pd.DataFrame(travel_times, columns=[f'tt_{i}' for i in range(1, len(travel_times)+1)])
+
         self.travel_cost = travel_times.values
         travel_times.to_csv(f'{data_problem_path}/times.csv')
+
         assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
 
         distances = normalize_data(distances,name='distance')
@@ -224,8 +226,8 @@ class MVMTSPConfig(ABC):
         self.travel_time_columns = travel_times.columns.tolist()
 
         self.depots = depots 
-        # combine al normalized data
         self.problem_data_path = data_problem_path
+
         data = pd.concat([distances, energies, travel_times, nodes], axis=1, join='inner')
         return data 
 
@@ -268,25 +270,17 @@ class MVMTSPConfig(ABC):
     def regionalization(self, GDF:geopandas.GeoDataFrame)->Any:
         """
         Cluster nodes (excluding depots) into constrained regions based on agent capacity.
-
-        Args:
-            GDF (pd.DataFrame): Geospatial or feature DataFrame of all nodes.
-
-        Returns:
-            clusters (pd.core.groupby.generic.DataFrameGroupBy): Grouped clusters by label.
         """
 
-        # Determine the maximum number of nodes per cluster based on battery
-
-        # TODO: Calculate Maximum nodes based on Hover.
         max_nodes = 0 
         
         # Reserve 10–15% for emergency return
         if self.scenario == 'cooperative': 
             reserve = self.max_battery * 0.35
-        elif self.scenario == 'individual': 
 
+        elif self.scenario == 'individual': 
             reserve = self.max_battery * 0.60
+
         else: 
             reserve = self.max_battery * 0.30
 
@@ -294,9 +288,11 @@ class MVMTSPConfig(ABC):
         
         if self.scenario == 'cooperative':
             max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
+
         elif self.scenario == 'individual':
             max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 3
             if max_nodes == 0: raise ValueError("Insufficient battery capacity for the given coverage time and coverage energy.")
+
         else:
             max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
 
@@ -314,7 +310,6 @@ class MVMTSPConfig(ABC):
             non_depot_gdf[self.travel_time_columns]
         ], axis=1)
         
-        # n_clusters = len(self.agents) # NOTE: Why is this n_clusters = 4 e.g.? 
         # Determine total demand (total nodes to cover)
         total_nodes = len(GDF)
         n_clusters = int(np.ceil(total_nodes / max_nodes))

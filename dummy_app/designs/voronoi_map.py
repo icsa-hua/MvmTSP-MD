@@ -16,12 +16,17 @@ from collections import defaultdict
 from scipy.spatial.distance import pdist, squareform 
 from pyproj import Transformer 
 
-
+# Functions to transform coordinates from EPSG to UTM 
 transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
 transformer_to_latlon = Transformer.from_crs("EPSG:32633", "EPSG:4326", always_xy=True)
 
 
 class Map: 
+    """
+    This class is used to capture or provide the interface to generate the map based on real 
+    geographical latitude and longitude. The data are transformed between coordinate 
+    systems to accommodate for realistic distances and for visualization and user movement. 
+    """
 
     def __init__(self, data_path:Union[Path, str], incremental:int)->None: 
 
@@ -46,6 +51,7 @@ class Map:
     def plot_voronoi(self)->None: 
         voronoi_plot_2d(self.vor_map) 
         plt.show() 
+
 
     def extract_regions(self)->Dict[int,Polygon]: 
         regions = {} 
@@ -89,6 +95,10 @@ class Map:
 
         
 class MapGenerator(Map): 
+    """
+    Map generator that takes the center of a location and creates the Voronoi 
+    tessellation and generates the users based on Delaunay triangulation. 
+    """
 
     def __init__(self, num_areas:int=30, users_per_area:int=5, lat:float=13.5, lon:float=33.3, seed:int=0): 
         
@@ -231,13 +241,11 @@ class MapGenerator(Map):
             ax.text(x[i],y[i], labels[i], c='black')
         ax.set_xlabel("Longitude")
         ax.set_ylabel("Latitude")
-        # ax.set_title("Voronoi Diagram with Triangle-Based User Sampling")
         ax.legend()
-        # plt.grid(True)
         
 
-
     def get_central_depots(self, sites, number_of_areas=2): 
+
         sites = np.array(sites)
         n = len(sites)
         dist_matrix = np.zeros((n, n))
@@ -254,6 +262,7 @@ class MapGenerator(Map):
     
     
     def clip_voronoi_to_box(self)->Dict[int, Polygon]: 
+
         bounding_box = self.generate_bb()
         if self.vor_map is None:
             raise ValueError("Voronoi map is not initialized. Call 'voronoi_tessellation()' first.")

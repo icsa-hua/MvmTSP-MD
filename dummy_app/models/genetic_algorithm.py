@@ -10,7 +10,11 @@ from deap import base, creator, tools, algorithms
 
 
 class GASolution:
-
+    """
+    This class creates a custom genetic algorithm that is utilized to find an 
+    initial good enough solution and initialize the population of the 
+    optimization problem. 
+    """
 
     def __init__(self, population:int=200, generations:int=100, nodes_dict:Dict[int,int]={}, depot:int=0 )->None:
         self.population_size = population 
@@ -21,32 +25,19 @@ class GASolution:
 
         if not hasattr(creator, "FitnessMax"):
             creator.create("FitnessMax", base.Fitness, weights=(-1.0,))
+            
         if not hasattr(creator, "Individual"):
             creator.create("Individual", list, fitness=creator.FitnessMax)
+
         self.toolbox = base.Toolbox() 
 
 
     def create_graph(self, cost:Dict[str,Dict[int,np.ndarray]])->nx.Graph:
-        """ 
-        Creates a graph representation using the provided cost matrices.
-        
-        Args:
-            weights (dict): Dictionary containing 'distance', 'energy', and 'travel_time' cost matrices.
-
-        Returns:
-            nx.Graph: Graph with nodes and weighted edges.
-        """
         weights = get_weights()
         return create_model_graph(cost=cost, nodes=self.nodes, weights=weights)
 
 
     def initialize_tour(self):
-        """
-        Initializes a tour starting and ending at a depot, visiting all nodes.
-
-        Returns:
-            list: A complete tour (list of area IDs).
-        """
         all_nodes = list(self.nodes.keys()) 
         
         tmp = {v:k for k,v in self.nodes.items()}
@@ -69,14 +60,8 @@ class GASolution:
         The crossover operation selects a random crossover point that is a common node between 
         the two individuals, and then swaps the nodes between the two individuals around that
         crossover point, while maintaining the validity of the tours.
-        
-        Args:
-            ind1 (list): First tour.
-            ind2 (list): Second tour.
-
-        Returns:
-            tuple: Two new tours after crossover.
         """
+
         def clean_append(head, tail):
             return head + [n for n in tail if n not in head]
 
@@ -110,14 +95,8 @@ class GASolution:
         Mutate a tour by swapping two nodes with given probability.
         The mutation operation randomly selects two nodes in the tour and swaps their positions,
         as long as the resulting tour is still valid (i.e., all edges between the swapped nodes exist in the graph).
-        
-        Args:
-            individual (list): The tour.
-            indpb (float): Mutation probability.
-
-        Returns:
-            list: Mutated tour.
         """
+
         if len(individual)<=3: 
             return creator.Individual(individual), # Too small to mutate
 
@@ -137,14 +116,8 @@ class GASolution:
     def fitness_evaluation(self, individual:List[int], cost:Dict[str,Dict[int,np.ndarray]]) ->Tuple[float,]: 
         """
         Evaluates fitness: total travel cost (distance + energy).
-
-        Args:
-            individual (list): Tour sequence.
-            cost (dict): Dict of cost matrices.
-
-        Returns:
-            tuple: Total cost as single value.
         """
+
         weights = get_weights() 
         total_distance = 0.0 
         total_energy = 0.0 
@@ -154,7 +127,6 @@ class GASolution:
             if len(individual) != len(set(individual))+1:
                 return (float('inf'),) 
             
-
             try: 
                 node_from = self.nodes[individual[i]]
                 node_to = self.nodes[individual[i+1]] 
@@ -164,6 +136,7 @@ class GASolution:
 
             except KeyError as ke: 
                 logger.exception(f"KeyError during fitness evaluation at index {i}: {ke}")
+
             except IndexError as ie:
                 logger.exception(f"IndexError during fitness evaluation at index {i}: {ie}")
 
@@ -179,6 +152,7 @@ class GASolution:
         """
         Sanitize a tour by removing duplicate nodes and ensuring the first and last nodes are the depot.
         """
+
         depot = self.depot  # index of depot in self.nodes
         nodes = set(self.nodes.keys())
         reverse_nodes = {v: k for k, v in self.nodes.items()} 
@@ -200,6 +174,7 @@ class GASolution:
         """
         Setup DEAP toolbox for the Genetic Algorithm.
         """
+
         self.toolbox.register("individual", tools.initIterate, creator.Individual, self.initialize_tour) 
         self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
         self.toolbox.register("mate", self.crossover)
@@ -213,16 +188,6 @@ class GASolution:
     def run(self, crossover_rate:float, mutation_rate:float, cost:Dict, enable_indi_fitness:bool=True, verbose:bool=True)->Tuple:
         """
         Run the GA optimization.
-
-        Args:
-            crossover_rate (float): Probability of crossover.
-            mutation_rate (float): Probability of mutation.
-            cost (dict): Cost matrices.
-            enable_individual_fitness (bool): Re-evaluate individuals manually after GA.
-            seed (int): Random seed (optional).
-
-        Returns:
-            tuple: Best paths and fitness.
         """
 
         logger.debug("Starting Genetic Algorithm...")
@@ -234,6 +199,7 @@ class GASolution:
         # Initialize population
         if hasattr(self.toolbox, "population"):
             population = self.toolbox.population(n=self.population_size)
+        
         else: 
             raise ValueError("Population not initialized. Check toolbox configuration.")
         
@@ -248,8 +214,6 @@ class GASolution:
         stats.register("min", np.min, axis=0)
         stats.register("max", np.max, axis=0) 
         
-        # print(f"Population size: {self.population_size} + population type {type(population)} + what is in population {type(population[0])}" )
-
         algorithms.eaSimple(
             population, self.toolbox, 
             cxpb=crossover_rate, mutpb=mutation_rate,
@@ -260,11 +224,13 @@ class GASolution:
         best_individual = tools.selBest(population, 1)[0] 
         if enable_indi_fitness:
             fitness = self.fitness_evaluation(best_individual, cost)
+
         else: 
             fitness = best_individual.fitness.values    
 
         # convert internal node indexes back to Area IDs 
         best_path = [self.nodes[node] for node in best_individual]
         logger.debug(f"Best path: {best_path} with fitness: {fitness[0]}") 
+
         return best_path, fitness[0] 
     

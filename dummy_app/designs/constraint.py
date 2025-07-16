@@ -25,57 +25,46 @@ def get_depot_node(depot_id, nodes_dict):
 
 
 def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, list_of_agents:dict): 
-
+    """
+    This function sets all the constraints (Spatial flow, Energy constraints, Time progression, synchronization and path completion) 
+    NOTE: No objective function is enforced here. Constraints are mathematical inequalities and are linear. This scenario 
+          forces that the agents, collctively visit all areas inside the cluster graph. 
+    """
     depot_ind, NODES, agents, model, D, TF, MANDATORY_WAIT_TIME, wait_energy_consumption, data_per_visit = configuration_set_up(cluster=cluster, builder=builder, V_nodes=V_nodes, list_of_agents=list_of_agents)
 
+    # Collective visits for the group of agents. 
     for j in NODES:
         model += pl.lpSum(cluster.visit[j,k] for k in agents) == 1
 
-    logger.info(f"Number of constraints after visit constraint for all agents: {len(cluster.problem.constraints)}")
-
-
+    # Each agents traverses through all nodes the appropriate amount of times. 
     for j in NODES:
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for i in V_nodes) == cluster.visit[j,k]
             model += pl.lpSum(cluster.x[j,i,k] for i in V_nodes) == cluster.visit[j,k]
 
-    logger.info(f"Number of constraints after visit-spatial bounding: {len(cluster.problem.constraints)}")
-
+    # Start & End at depot 
     for k in agents: 
         model += pl.lpSum(cluster.x[depot_ind,i,k] for i in NODES) == 1
         model += pl.lpSum(cluster.x[i,depot_ind,k] for i in NODES) == 1 
 
-
-    logger.info(f"Number of constraints after depot initialitazion: {len(cluster.problem.constraints)}")
-
-
+    # Flow conservation (No loops)  
     for i in V_nodes: 
         for j in V_nodes: 
             for k in agents: 
                 model += cluster.x[i,j,k] + cluster.x[j,i,k] <= 1 
-
-    logger.info(f"Number of constraints after path-flow loop prohibibition: {len(cluster.problem.constraints)}")
-       
-
+    
+    # Minimum visits bound and count the total number of nodes visited
     for k in agents: 
         # this constraint won't function for larger agent population cases where only one location is feaisble. >=2 change to >= 1
         model += pl.lpSum(cluster.visit[j,k] for j in NODES) >= 1
         model += cluster.u[k] == pl.lpSum(cluster.visit[j,k] for j in NODES)
 
-    logger.info(f"Number of constraints after minimum visit constraint: {len(cluster.problem.constraints)}")
-
-    
     # Path continuity flow 
     for i in NODES: 
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
-    logger.info(f"Number of constraints after path continuity flow: {len(cluster.problem.constraints)}")
-
-
-    # At any given time agent k can only be on 1 travel . No overlap 
-      
-    # MTZ 
+    # MTZ subtour elimination constraints 
     n = len(NODES)
     for k in agents:
         for i in NODES: 
@@ -83,29 +72,23 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 if i == j: continue 
                 model += cluster.p[i,k] - cluster.p[j,k] + n*cluster.x[i,j,k] <= n - 1
 
-    logger.info(f"Number of constraints after MTZ subtour elimination: {len(cluster.problem.constraints)}")
-
-
+    # MTZ positional exclusion of depot
     for k in agents: 
         model += cluster.p[depot_ind,k] == 0
     
-    logger.info(f"Number of constraints after depot MTZ: {len(cluster.problem.constraints)}")
-
-
     M = TF[-1]
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
     dept = cluster.original_nodes_dict[original_depot_ind]
 
+    # Time progression specific to match the depot case (No coverage time added) 
     for k in agents:
         for j in NODES:
             target = cluster.original_nodes_dict[j]
             # Arrival at first node >= (Time at Depot + Wait at Depot) + Travel Time
             # Assuming no wait time at the depot itself before starting the tour.
             model += cluster.t[j, k] >= (0 + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
-
-    logger.info(f"Number of constraints after time depot initialization: {len(cluster.problem.constraints)}")
-
-
+    
+    # Time progression for the rest of the nodes in the cluster set (service time is dynamically allocated to find the optimal value) 
     for k in agents:
         for i in NODES:
             for j in NODES:
@@ -115,9 +98,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 # Arrival at j >= (Arrival at i + Wait at i) + Travel Time from i to j
                 model += cluster.t[j, k] >= (cluster.t[i, k] + cluster.service_time[i,k]) + D[(source, trgt)] - M * (1 - cluster.x[i, j, k])
 
-    logger.info(f"Number of constraints after time sync: {len(cluster.problem.constraints)}")
-
-
+    # Get the return step when the agent completes its journey  and recharges at the depot. 
     for k in agents:
         for i in NODES:
             source = cluster.original_nodes_dict[i]
@@ -125,15 +106,13 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
             # Return to depot >= (Arrival at last node i + Wait at i) + Travel Time to depot
             model += cluster.return_step[k] >= (cluster.t[i, k] + cluster.service_time[i, k]) + D[(source, dept)] - M * (1 - cluster.x[i, depot_ind, k])
     
-    logger.info(f"Number of constraints after return time sync: {len(cluster.problem.constraints)}")
-
+    # Each agent starts its journey at full battery capacity 
     M_energy = builder.max_battery
     for k in agents: 
         model += cluster.e[depot_ind, k] == builder.max_battery 
 
-    logger.info(f"Number of constraints after battery depot initialization: {len(cluster.problem.constraints)}")
 
-
+    # Energy Update after every arc traveled (uses the appropriate energy at every time step)  
     for k in agents: 
         for i in V_nodes: 
             for j in NODES: 
@@ -154,9 +133,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 
                 model += cluster.e[j, k] <= cluster.e[i, k] - total_energy_cost + M_energy * (1 - cluster.x[i, j, k])
 
-    logger.info(f"Number of constraints after energy update based on position : {len(cluster.problem.constraints)}")
-
-
+    # The energy required for the next travel has to be available at the current node. Otherwise no travel is allowed 
     for k in agents:
         for i in V_nodes:
             for j in V_nodes:
@@ -178,139 +155,96 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
                 # Energy at i must be >= the energy needed for the next leg
                 model += cluster.e[i, k] >= total_energy_cost - M_energy * (1 - cluster.x[i, j, k])
 
-
-    logger.info(f"Number of constraints after ensuring enough energy exists: {len(cluster.problem.constraints)}")
-
-
-
+    # Work balancing constraint (similar amount of nodes visited per agent) 
     visit_counts = [pl.lpSum(cluster.visit[i,k] for i in NODES) for k in agents]
     for i in range(len(visit_counts)):
         for j in range(i +1, len(visit_counts)):
             model += visit_counts[i] - visit_counts[j] <= 2 
             model += visit_counts[j] - visit_counts[i] <= 2
 
-    logger.info(f"Number of constraints after workload balance: {len(cluster.problem.constraints)}")
-
-
+    # Get the makespan for this problem formulation 
     for k in agents:
         model += cluster.makespan >= cluster.return_step[k], f"makespan_constraint_{k}"
     
-    logger.info(f"Number of constraints after calculating makespan: {len(cluster.problem.constraints)}")
-
-         
+    # Set the bound of service time, which have to consider that the agent has to at least 
+    # provide the mandatory wait time but also not overexceed the time frame
     for k in agents: 
         for j in NODES: 
             model += cluster.service_time[j,k] >= MANDATORY_WAIT_TIME * cluster.visit[j,k]
             model += cluster.service_time[j,k] <= MANDATORY_WAIT_TIME * 2 * cluster.visit[j,k]
 
-    logger.info(f"Number of constraints after setting up service time: {len(cluster.problem.constraints)}")
-
-
-    logger.info(f"Number of constraints after setting up service time: {len(cluster.problem.constraints)}")
-
-
+    # Calculate the total data rate that all agents can achieve through all areas 
     cluster.total_data_collected_main = pl.lpSum(
             cluster.visit[j, k] * data_per_visit.get(j, 0)
             for j in cluster.NODES 
             for k in cluster.employed_agents
         )
 
-    logger.info(f"Number of constraints after calculating the achievable data rate: {len(cluster.problem.constraints)}")
 
-    
     
 def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
-
+    """
+    This function sets all the constraints (Spatial flow, Energy constraints, Time progression, synchronization and path completion) 
+    NOTE: No objective function is enforced here. Constraints are mathematical inequalities and are linear. This scenario 
+          forces that the agents, visit all nodes individually and considers collision avoidance for their routes.  
+    """
+ 
     depot_ind, NODES, agents, model, D, TF, MANDATORY_WAIT_TIME, wait_energy_consumption, data_per_visit, bridge_nodes, reverse_nodes = configuration_set_up(cluster=cluster, builder=builder, V_nodes=V_nodes, list_of_agents=list_of_agents)
     
+    # For indivual paths the agents have to pass through the bridge nodes a certain amount of times 
+    # NOTE: These visits are determined by the central hubs mechanism as are the hub/bridges. 
     for k in agents: 
         for j in NODES: 
             if cluster.nodes_dict[j] in bridge_nodes: continue 
             model += cluster.visit[j,k] == 1 
-    logger.info(f"Number of constraints after 1 {cluster.problem.variables()}")    
-    logger.info(f"Number of constraints after visit constraint for all agents: {len(cluster.problem.constraints)}")
 
-
+    # Pass through the bridge node the appropriate amount of times 
     hubs = set(cluster.virtual_nodes.values())
     for k in agents: 
         for hub in hubs: 
             virtual_copies = [vn for vn ,h in cluster.virtual_nodes.items() if h == hub] 
             model += pl.lpSum(cluster.visit[reverse_nodes[v_node],k] for v_node in virtual_copies) == cluster.allowed_visits[hub]
     
-    logger.info(f"Number of constraints after 2 {cluster.problem.variables()}")
-
-    logger.info(f"Number of constraints after bridge-node handling: {len(cluster.problem.constraints)}")
-
-
-    logger.info(f"Number of constraints after bridge-node handling: {len(cluster.problem.constraints)}")
-
-
+    # Each agent must pass through all nodes the appropriate amount of times 
     for j in NODES:
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for i in V_nodes) == cluster.visit[j,k]
             model += pl.lpSum(cluster.x[j,i,k] for i in V_nodes) == cluster.visit[j,k]
-    
-    logger.info(f"Number of constraints after 3 {cluster.problem.variables()}")
-
-    logger.info(f"Number of constraints after visit-spatial bounding: {len(cluster.problem.constraints)}")
-
-
-    logger.info(f"Number of constraints after visit-spatial bounding: {len(cluster.problem.constraints)}")
-
-
+   
+    # Start & End the journey at the depot node 
     for k in agents: 
         model += pl.lpSum(cluster.x[depot_ind,i,k] for i in NODES) == 1
         model += pl.lpSum(cluster.x[i,depot_ind,k] for i in NODES) == 1 
 
-    logger.info(f"Number of constraints after 4 {cluster.problem.variables()}")
-
-
-    logger.info(f"Number of constraints after depot initialitazion: {len(cluster.problem.constraints)}")
-
+    # Spatial flow conservation (No loops) 
     for i in V_nodes: 
         for j in V_nodes: 
             for k in agents: 
                 model += cluster.x[i,j,k] + cluster.x[j,i,k] <= 1 
-    logger.info(f"Number of constraints after 5 {cluster.problem.variables()}")
-    logger.info(f"Number of constraints after path-flow loop prohibibition: {len(cluster.problem.constraints)}")
 
     # Path continuity flow 
     for i in NODES: 
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
-    logger.info(f"Number of constraints after path continuity flow: {len(cluster.problem.constraints)}")
-    logger.info(f"Number of constraints after 6 {cluster.problem.variables()}")
-
-    # MTZ 
+    # MTZ subtour elimination 
     n = len(NODES)
     for k in agents:
         for i in NODES: 
             for j in NODES: 
                 if i == j: continue 
                 model += cluster.p[i,k] - cluster.p[j,k] + n*cluster.x[i,j,k] <= n - 1
-    logger.info(f"Number of constraints after 7 {cluster.problem.variables()}")
 
-    logger.info(f"Number of constraints after MTZ subtour elimination: {len(cluster.problem.constraints)}")
-
-    logger.info(f"Number of constraints after MTZ subtour elimination: {len(cluster.problem.constraints)}")
-
+    # Depot exclusion from the MTZ elimination 
     for k in agents: 
         model += cluster.p[depot_ind,k] == 0
-    
-    logger.info(f"Number of constraints after 8 {cluster.problem.variables()}")
-
-    logger.info(f"Number of constraints after depot MTZ: {len(cluster.problem.constraints)}")
-
-
-    logger.info(f"Number of constraints after depot MTZ: {len(cluster.problem.constraints)}")
-
-
+   
+    # Collision avoidance defined by precedence (to visit a node, an agent must ensure that the other agent has entered, serviced and left the next node) 
     M = TF[-1]
-
     for j in NODES: 
 
         if cluster.nodes_dict[j] in bridge_nodes: continue 
+        
         for k1 in agents: 
             for k2 in agents: 
                 if k1 >= k2 : continue 
@@ -319,18 +253,12 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
 
                 model += cluster.t[j,k1] >= (cluster.t[j,k2] + cluster.service_time[j,k2]) - M * (cluster.precedes[j,k1,k2])
     
-    logger.info(f"Number of constraints after 9 {cluster.problem.variables()}")
-
-    logger.info(f"Number of constraints after collision avoidance: {len(cluster.problem.constraints)}")
-
-    logger.info(f"Number of constraints after collision avoidance: {len(cluster.problem.constraints)}")
-
-    # Solver has to choose a precesed value for each node conflict, which in turn forces the arrival time variables to be spaced-out, thus 
+    # NOTE: The solver has to choose a precesed value for each node conflict, which in turn forces the arrival time variables to be spaced-out, thus 
     # preventing collisions.  
 
+    # Time progression depot exclusion 
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
     dept = cluster.original_nodes_dict[original_depot_ind]
-
     for k in agents:
         for j in NODES:
             target = cluster.original_nodes_dict[j]
@@ -338,8 +266,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
             # Assuming no wait time at the depot itself before starting the tour.
             model += cluster.t[j, k] >= (0 + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
 
-    logger.info(f"Number of constraints after time depot initialization: {len(cluster.problem.constraints)}")
-
+    # Time progression for the rest of the nodes inside the cluster set
     for k in agents:
         for i in NODES:
             for j in NODES:
@@ -349,9 +276,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 # Arrival at j >= (Arrival at i + Wait at i) + Travel Time from i to j
                 model += cluster.t[j, k] >= (cluster.t[i, k] + cluster.service_time[i,k]) + D[(source, trgt)] - M * (1 - cluster.x[i, j, k])
 
-    logger.info(f"Number of constraints after time sync: {len(cluster.problem.constraints)}")
-
-
+    # Get the return_step when the agent completes its assigned mission 
     for k in agents:
         for i in NODES:
             source = cluster.original_nodes_dict[i]
@@ -359,15 +284,12 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
             # Return to depot >= (Arrival at last node i + Wait at i) + Travel Time to depot
             model += cluster.return_step[k] >= (cluster.t[i, k] + cluster.service_time[i, k]) + D[(source, dept)] - M * (1 - cluster.x[i, depot_ind, k])
 
-    logger.info(f"Number of constraints after return time sync: {len(cluster.problem.constraints)}")
-
+    # All agents start their journey with full battery capacity
     M_energy = builder.max_battery
     for k in agents: 
         model += cluster.e[depot_ind, k] == builder.max_battery 
 
-    logger.info(f"Number of constraints after battery depot initialization: {len(cluster.problem.constraints)}")
-
-
+    # Energy Update after every travel for each agent
     for k in agents: 
         for i in V_nodes: 
             for j in NODES: 
@@ -388,9 +310,8 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 
                 model += cluster.e[j, k] <= cluster.e[i, k] - total_energy_cost + M_energy * (1 - cluster.x[i, j, k])
 
-    logger.info(f"Number of constraints after energy update based on position : {len(cluster.problem.constraints)}")
 
-
+    # Energy to move and service the next node must be less than the energy available to agent at current node
     for k in agents:
         for i in V_nodes:
             for j in V_nodes:
@@ -412,39 +333,34 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
                 # Energy at i must be >= the energy needed for the next leg
                 model += cluster.e[i, k] >= total_energy_cost - M_energy * (1 - cluster.x[i, j, k])
     
-    logger.info(f"Number of constraints after ensuring enough energy exists: {len(cluster.problem.constraints)}")
-
+    # Calculate the makespan of the cluster
     for k in agents: 
         model += cluster.makespan >= cluster.return_step[k] 
 
-    logger.info(f"Number of constraints after calculating makespan: {len(cluster.problem.constraints)}")
-
+    # Bound the service time to include the mandatory visit time and not exceed the time frame for cluster completion
     for k in agents: 
         for j in NODES: 
             model += cluster.service_time[j,k] >= MANDATORY_WAIT_TIME * cluster.visit[j,k]
             model += cluster.service_time[j,k] <= MANDATORY_WAIT_TIME * 2 * cluster.visit[j,k]
     
-    logger.info(f"Number of constraints after setting up service time: {len(cluster.problem.constraints)}")
-
+    # Calculate the total achievable data for every agent
     cluster.total_data_collected_main = pl.lpSum(
             cluster.visit[j, k] * data_per_visit.get(j, 0)
             for j in cluster.NODES 
             for k in cluster.employed_agents
         )
     
-    logger.info(f"Number of constraints after calculating the achievable data rate: {len(cluster.problem.constraints)}")
-
-    
 
 def configuration_set_up(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
     
-    depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
     NODES = cluster.NODES
-    agents = cluster.employed_agents
-    model = cluster.problem 
+    MANDATORY_WAIT_TIME = builder.coverage_time
     D = cluster.tr_times
     TF = cluster.timeframe
-    MANDATORY_WAIT_TIME = builder.coverage_time
+    
+    depot_ind = get_depot_node(cluster.depot_id, cluster.nodes_dict)
+    agents = cluster.employed_agents
+    model = cluster.problem 
     wait_energy_consumption = builder.average_coverage_energy
     data_per_visit = {node:rate * builder.coverage_time for node, rate in cluster.R.items()}
 

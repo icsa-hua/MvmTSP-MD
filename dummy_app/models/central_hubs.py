@@ -13,7 +13,6 @@ class CentralHub:
         that the agent will be able to pass through multiple times. The node is determined 
         through the betweeness centrality and minimum distance to the centroid.
     """ 
-    # 
 
     def __init__(self)->None: 
         self.betweeness:np.ndarray = np.array([])  
@@ -22,6 +21,7 @@ class CentralHub:
 
 
     def calculate_betweeness(self, G:nx.DiGraph, cluster_nodes:List[int], nodes_dict, cost_dist, depot_id)->None:
+
         if not nx.is_strongly_connected(G):
             print("Directed graph is not strongly connected.")
             return
@@ -33,7 +33,6 @@ class CentralHub:
             centrality = {k: v for k, v in centrality.items() if k in central_candidates}
 
         else: 
-            # TODO: Change this one to walk centrality for larger graphs. 
             centrality = nx.betweenness_centrality(G, weight='cost')
 
         self.betweeness = np.array([centrality[nodes_dict[n]] for n in cluster_nodes if n != reverse_dict[depot_id]]).reshape(-1, 1)
@@ -85,6 +84,7 @@ class CentralHub:
 
             
     def get_bridge_nodes(self, graph:nx.DiGraph, cluster_nodes:List[int], cost_dist:Any, nodes_dict:Dict[int,int], n_agents:int )-> List[int]: 
+
         depot_id = nodes_dict[len(nodes_dict)-1]
     
         self.calculate_betweeness(graph, cluster_nodes, nodes_dict,cost_dist,depot_id=depot_id)
