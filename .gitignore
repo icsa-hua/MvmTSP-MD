@@ -10,6 +10,7 @@ assets/RESULTS_IMAGES/*
 MV_MTSP.egg-info 
 resources 
 tspenv
+mac_env
 test
 dummy_app/models/__pycache__
 dummy_app/tools/__pycache__

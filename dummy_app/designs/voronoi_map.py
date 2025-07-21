@@ -104,7 +104,9 @@ class MapGenerator(Map):
         
         logger.debug("Map Generator initialized...")
         # Transform lon and lat into UTM for better point management. 
-        self.lat, self.lon = transformer_to_utm.transform(lon,lat)
+        self.lat, self.lon = transformer_to_utm.transform(lat,lon)
+        logger.info(transformer_to_latlon.transform(self.lat,self.lon)) 
+        import pdb;pdb.set_trace()
         self.lat_wgs84 = lat 
         self.lon_wsg84 = lon 
         self.num_areas = num_areas 
