@@ -1,6 +1,6 @@
 # Energy-Aware MVMTSP Scheduling for UAV Swarms NTN-stations in Challenging Environments 
 
-## An optimization framework to always determine the optimal navigation for all 
+ An optimization framework to always determine the optimal navigation for all 
  agents in critical environments (Search and Rescue, SAR operations). 
 
 ![License](https://img.shields.io/badge/license-GPL-blue.svg)
