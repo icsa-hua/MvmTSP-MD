@@ -4,7 +4,7 @@
 ## agents in critical environments (Search and Rescue, SAR operations). 
 
 ![License](https://img.shields.io/badge/license-GPL-blue.svg)
-![Version](https://img.shields.io/badge0.2.0-brightblue.svg)
+![Version](https://img.shields.io/badge0.2.0-brightgreen.svg)
 
 ## Table of Contents
 
@@ -144,6 +144,3 @@ E) ```/scalers``` the scalers used to normalize the data. You can use them to in
 and use them how you want. 
 
 
-## License
-
-This project is licensed under the GPL License. See the [LICENSE](LICENSE) file for details.
