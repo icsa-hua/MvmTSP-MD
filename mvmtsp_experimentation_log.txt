@@ -1,4 +1,0 @@
-Finished simulation with scenario=cooperative, objective=energy, num_of_areas=50, num_of_users=15, num_agents=4, env_type=urban --stage_solution=1
-Finished simulation with scenario=cooperative, objective=energy, num_of_areas=50, num_of_users=15, num_agents=6, env_type=urban --stage_solution=1
-Finished simulation with scenario=cooperative, objective=energy, num_of_areas=50, num_of_users=20, num_agents=4, env_type=urban --stage_solution=1
-Finished simulation with scenario=cooperative, objective=energy, num_of_areas=50, num_of_users=20, num_agents=6, env_type=urban --stage_solution=1

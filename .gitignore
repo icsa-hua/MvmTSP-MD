@@ -16,6 +16,7 @@ dummy_app/models/__pycache__
 dummy_app/tools/__pycache__
 dummy_app/designs/__pycache__
 thesis 
+mvmtsp_experimentation_log.txt
 mvmtsp_experimentation_log_indi.txt 
 mvmtsp_experimentation_log_coop.txt 
 *.log
