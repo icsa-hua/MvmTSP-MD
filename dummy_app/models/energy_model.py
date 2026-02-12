@@ -21,7 +21,7 @@ class DroneEnergyModel:
         self.horizontal_velocity = 5.55 
         self.mass = 6.4 # In kg with the payload for coverage. 
         self.num_rot = 4 
-
+        
 
     def stay_energy(self, energy): 
         energy += 0.0 
