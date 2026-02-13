@@ -144,3 +144,90 @@ E) ```/scalers``` the scalers used to normalize the data. You can use them to in
 and use them how you want. 
 
 
+
+# Docker Execution Guide
+
+This section explains how to run the **MvmTSP-MD** project using Docker and retrieve the generated CSV output from the dummy application.
+
+---
+
+## Prerequisites
+
+Make sure you have installed:
+
+* Docker Desktop (and it is running)
+* Git
+
+You can verify Docker is installed with:
+
+```bash
+docker --version
+```
+
+---
+
+## Installation & Execution Steps
+
+### 1. Start Docker
+
+Open **Docker Desktop** and ensure it is running before continuing.
+
+---
+
+### 2. Clone the Repository
+
+```bash
+git clone https://github.com/icsa-hua/MvmTSP-MD.git
+```
+
+Move into the project directory:
+
+```bash
+cd MvmTSP-MD
+```
+
+---
+
+### 3. Pull the Required Docker Image
+
+```bash
+docker pull dgeorgiadishua/glpk-python3:mvmtsp
+```
+
+---
+
+### 4. Run the Application
+
+From inside the repository folder, execute:
+
+```bash
+docker compose run --rm mvmtsp-app
+```
+
+The container will execute the optimization process.
+
+The `--rm` flag ensures the container is automatically removed after execution.
+
+---
+
+## Output File
+
+After the execution completes, the generated CSV file is located at:
+
+```
+dummy_app/drone_centroids_path.csv
+```
+
+This is the final output file produced by the application.
+
+---
+
+## Expected CSV Structure
+
+The CSV follows this format:
+
+```
+agent,from_x,from_y,to_x,to_y,time_step
+```
+
+Each row corresponds to a movement step for a specific drone agent.
