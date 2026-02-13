@@ -15,10 +15,12 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     gdal-bin \ 
     wget \ 
     curl \ 
+    ffmpeg \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/*
 
-ENV PATH="${VENV_PATH}/bin/activate:${PATH}"
+ENV PATH="${VENV_PATH}/bin:${PATH}"
 
 WORKDIR /workspace
 
