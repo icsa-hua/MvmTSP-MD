@@ -100,18 +100,25 @@ class MapGenerator(Map):
     tessellation and generates the users based on Delaunay triangulation. 
     """
 
-    def __init__(self, num_areas:int=30, users_per_area:int=5, lat:float=13.5, lon:float=33.3, seed:int=0): 
+    def __init__(self, num_areas:int=30, users_per_area:int=5, lat:float=13.5, lon:float=33.3, seed:int=0, low:int=1, high:int=1): 
         
         logger.debug("Map Generator initialized...")
         # Transform lon and lat into UTM for better point management. 
+        # print("----------------------------artemis-----------------------------lat/lon", lat, lon)
         self.lat, self.lon = transformer_to_utm.transform(lat,lon)
+<<<<<<< HEAD
         logger.info(transformer_to_latlon.transform(self.lat,self.lon)) 
+=======
+>>>>>>> ff64c65 (Add files via upload)
         self.lat_wgs84 = lat 
         self.lon_wsg84 = lon 
         self.num_areas = num_areas 
         self.seed = seed 
         self.vor_map = None
         self.users_per_area = users_per_area
+        self.low = low
+        self.high = high
+        
         
     
     def create_environment(self, show_map:bool=False, show_3d_map:bool=False): 
@@ -127,6 +134,7 @@ class MapGenerator(Map):
 
             # Voronoi Map returns applicable regions to generate user points 
             regions, centroids, user_points = self.voronoi_polygons()
+            # print("-------voronoi_polygons-------------",centroids)
 
             # Transform centroids into WGS84 
             centroids_wgs84 = np.array([transformer_to_latlon.transform(lon,lat) for lon, lat in centroids])
@@ -142,38 +150,44 @@ class MapGenerator(Map):
         except Exception as E: 
             logger.exception("Raised exception {E}.")
 
+        transformer = Transformer.from_crs("epsg:32633", "epsg:4326", always_xy=True)
+        # x0, y0 = transformer.transform(centroids[0][0], centroids[0][1])
+        # print("lon/lat", x0, y0)
         return regions, centroids, user_points, depots, distance_matrix_wgs84, all_user_points
         
 
     def generate_points(self): 
-        
-        # Generate points based on UTM Lat Lon coordinates 
+        # 1. Δημιουργείς κατευθείαν το NumPy array
         np.random.seed(self.seed) 
-        latitudes = self.lat + np.random.uniform(-1500, 1500, self.num_areas)
-        longitudes = self.lon + np.random.uniform(-1500, 1500, self.num_areas)        
-        
-        # Points in UTM format to handle user generation and voronoi map more easily
-        points = np.column_stack((longitudes, latitudes))
+        latitudes  = self.lat + np.random.uniform(-self.low, self.high, self.num_areas)
+        longitudes = self.lon + np.random.uniform(-self.low, self.high, self.num_areas)        
+        points = np.column_stack((latitudes, longitudes))
+
+        # 2. Φτιάχνεις τη Voronoi πάνω στο καθαρό array
         self.vor_map = Voronoi(points) 
-        points_utm = pd.DataFrame(points, columns=['X_coords', 'Y_coords'])
-        
+
+        # 3. Φτιάχνεις το DataFrame για να το έχεις διαθέσιμο μετά
+        points_utm = pd.DataFrame(points, columns=['X_coords','Y_coords'])
+        self.points = points_utm
+
+        # print("-------------------------------", points_utm)
         return points_utm
     
 
-    def generate_bb(self): 
+    def generate_bb(self):
+        # Χρησιμοποιούμε το DataFrame self.points που ήδη περιέχει όλα τα σημεία
+        minx = self.points['X_coords'].min()
+        maxx = self.points['X_coords'].max()
+        miny = self.points['Y_coords'].min()
+        maxy = self.points['Y_coords'].max()
+        margin = max(maxx - minx, maxy - miny) * 0.1  # 10% έξτρα περιθώριο
 
-        # For bb generation lat/lon are in UTM 
-        low_lat = self.lat - 1600 
-        high_lat = self.lat + 1600 
-        low_lon = self.lon - 1600 
-        high_lon = self.lon + 1600 
-        
-        return Polygon([
-            (low_lon, low_lat), 
-            (high_lon, low_lat), 
-            (high_lon, high_lat), 
-            (low_lon, high_lat)
-        ])
+        return box(
+            minx - margin, 
+            miny - margin, 
+            maxx + margin, 
+            maxy + margin
+        )
     
 
     def voronoi_polygons(self): 
@@ -188,7 +202,9 @@ class MapGenerator(Map):
         unified_id = 0 
         for region_idx in self.vor_map.point_region:
             region = self.vor_map.regions[region_idx]
+            # print(f"Region {region_idx} → vertices indices: {region}")
             if not -1 in region and len(region) > 0:
+                
                 poly_points = [self.vor_map.vertices[i] for i in region]
                 
                 poly = Polygon(poly_points)
@@ -196,6 +212,7 @@ class MapGenerator(Map):
                 if poly.is_empty or not poly.is_valid or poly.area == 0: continue
 
                 regions.append(poly)
+                # print("  → good")
                 centroids.append(poly.centroid.coords[0]) # This is in UTM 
                 user_points[unified_id]= self.generate_users(poly, user_points[unified_id]) 
                 unified_id += 1 

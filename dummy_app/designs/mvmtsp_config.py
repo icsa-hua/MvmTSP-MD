@@ -171,6 +171,7 @@ class MVMTSPConfig(ABC):
         logger.debug(f"Average coverage energy: {self.average_coverage_energy} Wh")
 
         area_ids = list(user_points.keys()) 
+        # print("----------------------------centroids", centroids)
         centroids_x = [centroids[i][0] for i in range(len(centroids))]
         centroids_y = [centroids[i][1] for i in range(len(centroids))]
         nodes = {
