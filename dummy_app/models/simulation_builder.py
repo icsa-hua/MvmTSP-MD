@@ -19,11 +19,15 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import timeout_decorator 
+from pyproj import Transformer
 
 from tqdm import tqdm 
 from collections import defaultdict
 from typing import Any, List, Dict, Union, Tuple, Mapping
 
+# Functions to transform coordinates from EPSG to UTM 
+transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
+transformer_to_latlon = Transformer.from_crs("EPSG:32633", "EPSG:4326", always_xy=True)
 
 class Builder(MVMTSPConfig):
     """
@@ -308,6 +312,25 @@ class Builder(MVMTSPConfig):
             
         # Phase 9: Add interpolation steps for the paths (visualizatino) 
         # self.coordinated_plan = self.post_process(self.coordinated_plan)
+        transformer = Transformer.from_crs("epsg:32633", "epsg:4326", always_xy=True)
+
+        rows = []
+        for agent, path in self.coordinated_plan.items():
+            for (x0, y0), (x1, y1), t in path:
+                x0, y0 = transformer_to_latlon.transform(x0, y0)
+                x1, y1 = transformer_to_latlon.transform(x1, y1)
+                rows.append({
+                    'agent':      agent,
+                    'from_x':     x0,
+                    'from_y':     y0,
+                    'to_x':       x1,
+                    'to_y':       y1,
+                    'time_step':  t
+                })
+        df = pd.DataFrame(rows)
+        # print("--------------------------------artemis-------------------------------------------------", df)
+        df.to_csv('./dummy_app/drone_centroids_path.csv', index=False)
+
 
         return self.coordinated_plan     
     
@@ -716,6 +739,9 @@ class Builder(MVMTSPConfig):
             total_energy_consumption += results[cluster]['Total Energy'] 
             total_mission_time += results[cluster]['Total Time']
             total_distance += results[cluster]['Total Distance']
+
+            # print("results[cluster]['agent_results']")
+            # print(results[cluster]['agent_results'])
 
             for agent, agent_results in results[cluster]['agent_results'].items():
                 idle_times += agent_results.get('   ', 0) 
