@@ -34,23 +34,23 @@ def frame_generator():
 # Simulation Environment Configuration 
 PROJECT_DIR = os.getcwd() 
 PROJECT_ASSETS = f"{PROJECT_DIR}/assets"
-TRIALS = 2500
-MAX_BATTERY = 2000 #Wh 
-NUMBER_OF_AGENTS = 6 # MIN 2. 
+TRIALS = 2
+MAX_BATTERY = 355.2 #Wh 
+NUMBER_OF_AGENTS = 3 # MIN 2. 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
-NUMBER_OF_AREAS = 50 # NOTE: used for Voronoi map generation.
-NUMBER_OF_USERS = 7
+NUMBER_OF_AREAS = 21 # NOTE: used for Voronoi map generation.
+NUMBER_OF_USERS = 1
 VERTICAL_VELOCITY = 2.78 #m/s 
-HORIZONTAL_VELOCITY = 5.55 #m/s
-LATITUDE_ATHENS = 37.917
-LONGITUDE_ATHENS = 23.717
-LOW_BOUND = 1500 #Considered in meters 
-HIGH_BOUND = 1500 #Considered in meters
+HORIZONTAL_VELOCITY = 15.56 #m/s
+LATITUDE_ATHENS = 37.961322948559
+LONGITUDE_ATHENS = 23.708232317542667
+LOW_BOUND = 75 #Considered in meters 
+HIGH_BOUND = 120 #Considered in meters
 ALTITUDE = 1250 # Optimal Coverage Altitude 
-MAX_COVERAGE_TIME = 5
+MAX_COVERAGE_TIME = 3
 
 scenario_choices = ['cooperative', 'individual']
-objective_choices = ['energy', 'coverage', 'sum_of_times','pareto']
+objective_choices = ['energy', 'coverage'] #  , 'sum_of_times','pareto']
 env_choices = ['urban', 'rural', 'forest', 'mountain']
 stage_options = [1,2,3]
 agents_choices = [3,4,5,6,7,8,9,10]
@@ -137,7 +137,9 @@ map_generator = MapGenerator(
     users_per_area = NUMBER_OF_USERS, 
     lon=LONGITUDE_ATHENS, 
     lat=LATITUDE_ATHENS,
-    seed=42, 
+    low = LOW_BOUND,
+    high = HIGH_BOUND,
+    seed=42 
 )
 
 logger.debug(f"✅ Map Generator Initialized")
@@ -163,8 +165,8 @@ if map_generator.vor_map is None:
 
 all_user_points = [point for points in user_points.values() for point in points]
 
-mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
-
+mobility_sim.fig,mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
+# import pdb;pdb.set_trace()
 # Preprocess the data based on the map, the energy/coverage model and the ground users. 
 data = problem.preprocess_generated_data(
     distance_matrix=distance_matrix, 
