@@ -1,7 +1,7 @@
 services: 
   mvmtsp-app: 
     build: . 
-    image: glpk-python3:mvmtsp 
+    image: dgeorgiadishua/glpk-python3:mvmtsp 
 
     volumes: 
      - ./:/workspace 
