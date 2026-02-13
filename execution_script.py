@@ -9,6 +9,7 @@ from dummy_app.models.coverage import *
 from dummy_app.tools.common import deallocate_memory
 
 import os 
+import sys
 import uuid 
 import argparse
 import matplotlib.pyplot as plt
@@ -86,23 +87,24 @@ logger.debug(f"Configuration: Asset Directory -> {PROJECT_ASSETS}\n Trials -> {T
 
 if args.scenario not in scenario_choices: 
     logger.error(f"Invalid scenario choice. Please choose from: {scenario_choices}")
-    exit(1)
+    sys.exit(1)
 
 if args.objective not in objective_choices:
     logger.error(f"Invalid objective choice. Please choose from: {objective_choices}")
-    exit(1)
+    sys.exit(1)
 
 if args.env not in env_choices: 
     logger.error(f"Invalid environment choice. Please choose from: {env_choices}")
-    exit(1)
+    sys.exit(1)
 
 if args.stage_solution not in stage_options:
     logger.error(f"Invalid stage solution choice. Please choose from: {stage_options}")
-    exit(1)
+    sys.exit(1)
+
 
 if args.num_agents not in agents_choices:
     logger.error(f"Invalid number of agents choice. Please choose from: {agents_choices}")
-    exit(1)
+    sys.exit(1)
 
 # if args.stage_solution == 2 and args.scenario == 'cooperative': 
 #     logger.error(f"Stage 2 is only available for individual scenarios.")
@@ -185,17 +187,16 @@ logger.debug(f"✅ Preprocessed Data Completed successfully")
 vor_map = map_generator.vor_map
 
 # Deallocate all the non necessary components
-deallocate_memory(map_generator)
-deallocate_memory(regions)
-deallocate_memory(centroids)
-deallocate_memory(user_points)
-
+# deallocate_memory(map_generator)
+# deallocate_memory(regions)
+# deallocate_memory(centroids)
+# deallocate_memory(user_points)
+#
 animation_directory = f"{PROJECT_ASSETS}/animations" 
 if not os.path.exists(animation_directory): 
     os.makedirs(animation_directory) 
 
 animation_filename = f"{animation_directory}/simulation_output_{uuid.uuid4()}.mp4"
-
 try: 
     # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
     ani = FuncAnimation(
@@ -223,10 +224,11 @@ try:
 except KeyboardInterrupt as kb:
     plt.close(mobility_sim.fig)
     logger.exception(f"KeyboardInterrupt: {kb}")
-    exit(1)
+
+    sys.exit(1)
 
 except Exception as e:
     plt.close(mobility_sim.fig)
     logger.exception(f"Exception: {e}")
-    exit(1)
+    sys.exit(1)
 
