@@ -6,6 +6,7 @@ from dummy_app.tools.logger import logger
 from dummy_app.designs.voronoi_map import MapGenerator 
 from dummy_app.models.energy_model import DroneEnergyModel
 from dummy_app.models.coverage import * 
+from dummy_app.models.RL import analyze_dataset, build_instance_specs, compare_baselines, generate_dataset, validate_action_catalog
 from dummy_app.tools.common import deallocate_memory
 
 import os 
@@ -13,6 +14,7 @@ import sys
 import uuid 
 import argparse
 import matplotlib.pyplot as plt
+import numpy as np
 
 from tqdm import tqdm 
 from matplotlib.animation import FuncAnimation
@@ -30,6 +32,14 @@ def frame_generator():
     for i in range(TRIALS):
         progress.update(1)
         yield i
+
+
+def parse_csv_ints(raw_value):
+    return [int(item.strip()) for item in raw_value.split(",") if item.strip()]
+
+
+def parse_csv_strings(raw_value):
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
 
 
 # Simulation Environment Configuration 
@@ -75,6 +85,20 @@ parser.add_argument("--stage_solution", type=int, default=1, help="What objectiv
 parser.add_argument("--priority", type=str, default="yes", help="Use prioritization")
 parser.add_argument("--validate", action="store_true", help="Validate the solution.")
 parser.add_argument("--trials", type=int, default=TRIALS, help="Number of trials to run.")
+parser.add_argument("--enable_learning", action="store_true", help="Enable contextual bandit configuration selection.")
+parser.add_argument("--learning_alpha", type=float, default=0.75, help="Exploration factor for the contextual bandit.")
+parser.add_argument("--workflow", type=str, default="simulate", help="simulate, validate_actions, dataset, analyze_dataset, compare_baselines")
+parser.add_argument("--dataset_output_dir", type=str, default=f"{PROJECT_ASSETS}/results/rl_dataset", help="Directory for dataset workflow artifacts.")
+parser.add_argument("--dataset_path", type=str, default="", help="Path to an existing dataset CSV for analysis/comparison.")
+parser.add_argument("--dataset_seed_count", type=int, default=2, help="Number of seeds per dataset instance configuration.")
+parser.add_argument("--dataset_area_values", type=str, default="12,21,30", help="Comma-separated area counts for dataset generation.")
+parser.add_argument("--dataset_user_values", type=str, default="1,2,4", help="Comma-separated user densities for dataset generation.")
+parser.add_argument("--dataset_agent_values", type=str, default="3,5,7", help="Comma-separated agent counts for dataset generation.")
+parser.add_argument("--dataset_env_values", type=str, default="urban,rural,forest", help="Comma-separated environment values for dataset generation.")
+parser.add_argument("--dataset_scenario_values", type=str, default="cooperative,individual", help="Comma-separated scenario values for dataset generation.")
+parser.add_argument("--dataset_spread_values", type=str, default="60,90,120", help="Comma-separated map spread values for dataset generation.")
+parser.add_argument("--dataset_battery_values", type=str, default="260,355,420", help="Comma-separated battery values for dataset generation.")
+parser.add_argument("--dataset_action_ids", type=str, default="all", help="Comma-separated action ids to evaluate, or all.")
 args = parser.parse_args()
 
 TRIALS = args.trials
@@ -124,8 +148,69 @@ config = {
     "NUMBER_OF_AGENTS":NUMBER_OF_AGENTS,
     "NUMBER_OF_USERS":NUMBER_OF_USERS,
     "NUMBER_OF_AREAS":NUMBER_OF_AREAS,
-    "altitude": ALTITUDE
+    "altitude": ALTITUDE,
+    "learning_enabled": args.enable_learning,
+    "learning_alpha": args.learning_alpha,
+    "learning_output_dir": f"{PROJECT_ASSETS}/results/rl",
 }
+
+if args.workflow != "simulate":
+    dataset_output_dir = args.dataset_output_dir
+    dataset_path = args.dataset_path if args.dataset_path else f"{dataset_output_dir}/solver_dataset.csv"
+
+    if args.workflow == "validate_actions":
+        validation = validate_action_catalog(config, TRIALS)
+        os.makedirs(dataset_output_dir, exist_ok=True)
+        validation_path = f"{dataset_output_dir}/action_validation.csv"
+        validation.to_csv(validation_path, index=False)
+        logger.info(f"Action validation saved to {validation_path}")
+        sys.exit(0)
+
+    if args.workflow == "dataset":
+        specs = build_instance_specs(
+            area_values=parse_csv_ints(args.dataset_area_values),
+            user_values=parse_csv_ints(args.dataset_user_values),
+            agent_values=parse_csv_ints(args.dataset_agent_values),
+            env_values=parse_csv_strings(args.dataset_env_values),
+            scenario_values=parse_csv_strings(args.dataset_scenario_values),
+            spread_values=parse_csv_ints(args.dataset_spread_values),
+            battery_values=parse_csv_ints(args.dataset_battery_values),
+            objective_function=args.objective,
+            seed_count=args.dataset_seed_count,
+        )
+        action_ids = None if args.dataset_action_ids == "all" else parse_csv_strings(args.dataset_action_ids)
+        created_path = generate_dataset(
+            base_config=config,
+            trials=TRIALS,
+            altitude=ALTITUDE,
+            lat=LATITUDE_ATHENS,
+            lon=LONGITUDE_ATHENS,
+            vertical_velocity=VERTICAL_VELOCITY,
+            horizontal_velocity=HORIZONTAL_VELOCITY,
+            coverage_time=MAX_COVERAGE_TIME,
+            output_dir=dataset_output_dir,
+            specs=specs,
+            action_ids=action_ids,
+        )
+        logger.info(f"Dataset saved to {created_path}")
+        sys.exit(0)
+
+    if args.workflow == "analyze_dataset":
+        outputs = analyze_dataset(dataset_path=dataset_path, output_dir=dataset_output_dir)
+        logger.info(f"Dataset analysis saved to {outputs}")
+        sys.exit(0)
+
+    if args.workflow == "compare_baselines":
+        comparison_path = compare_baselines(
+            dataset_path=dataset_path,
+            output_dir=dataset_output_dir,
+            alpha=args.learning_alpha,
+        )
+        logger.info(f"Baseline comparison saved to {comparison_path}")
+        sys.exit(0)
+
+    logger.error(f"Invalid workflow: {args.workflow}")
+    sys.exit(1)
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 
 problem = Builder(config, TRIALS)
@@ -173,7 +258,7 @@ mobility_sim.fig,mobility_sim.ax = ground_users.plot_users(map_generator.vor_map
 data = problem.preprocess_generated_data(
     distance_matrix=distance_matrix, 
     centroids=centroids,
-    depots=depots if not isinstance(depots,list) else np.ndarray(depots),
+    depots=depots if not isinstance(depots,list) else np.array(depots),
     num_of_agents=NUMBER_OF_AGENTS,
     v_hor=HORIZONTAL_VELOCITY, 
     v_ver=VERTICAL_VELOCITY,
@@ -231,4 +316,3 @@ except Exception as e:
     plt.close(mobility_sim.fig)
     logger.exception(f"Exception: {e}")
     sys.exit(1)
-

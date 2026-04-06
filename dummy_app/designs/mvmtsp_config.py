@@ -58,6 +58,20 @@ class MVMTSPConfig(ABC):
         self.priority = priority 
         self.validate = validate
         self.problem_data_path = ""
+        self.objective_weights: Dict[str, float] = {
+            "distance": 0.3,
+            "energy": 0.6,
+            "travel_time": 0.1,
+        }
+        self.clustering_feature_weights: Dict[str, float] = {
+            "distance": 1.0,
+            "energy": 1.0,
+            "travel_time": 1.0,
+        }
+        self.ga_generations: int = 100
+        self.solver_time_limit_seconds: Optional[int] = None
+        self.warm_start_mode: str = "ga_only"
+        self.estimated_cluster_capacity: int = 1
         
 
     @abstractmethod
@@ -298,6 +312,7 @@ class MVMTSPConfig(ABC):
             max_nodes = int((self.max_battery-reserve) / adjusted_energy) - 2
 
         logger.debug(f"Maximum nodes per cluster based on battery: {max_nodes}")
+        self.estimated_cluster_capacity = max(max_nodes, 1)
         # charge_points = int(np.floor(self.v/max_nodes))
 
         if hasattr(self, 'depots') and self.depots is not None:
@@ -305,11 +320,10 @@ class MVMTSPConfig(ABC):
         else: 
             non_depot_gdf = GDF.copy() 
 
-        features = pd.concat([
-            non_depot_gdf[self.distance_columns], 
-            non_depot_gdf[self.energy_columns],
-            non_depot_gdf[self.travel_time_columns]
-        ], axis=1)
+        distance_features = non_depot_gdf[self.distance_columns] * self.clustering_feature_weights["distance"]
+        energy_features = non_depot_gdf[self.energy_columns] * self.clustering_feature_weights["energy"]
+        time_features = non_depot_gdf[self.travel_time_columns] * self.clustering_feature_weights["travel_time"]
+        features = pd.concat([distance_features, energy_features, time_features], axis=1)
         
         # Determine total demand (total nodes to cover)
         total_nodes = len(GDF)

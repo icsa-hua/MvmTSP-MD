@@ -1,5 +1,5 @@
 from dummy_app.tools.logger import logger
-from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph, get_weights
+from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph
 from dummy_app.models.coverage import coverage_u2c, coverage_probability
 from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
 
@@ -43,6 +43,7 @@ class Cluster:
         self.NODES = list() 
         self.makespan_value:float = 0.0
         self.total_data_achievable:float = 0.0
+        self.builder_objective_weights:Dict[str, float] = {}
         
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -93,7 +94,7 @@ class Cluster:
 
         # NOTE: the GA is not enabled, no initial population of paths is generated.
         # This does not account for scenario or coverage mandatory time. 
-        if self.initial_population is None: 
+        if not self.initial_population: 
             
             G = create_model_graph(
                 cost=self.cost['travel_time'], 
@@ -144,6 +145,7 @@ class Cluster:
 
         # Get duration of each trip (arc) 
         self.tr_times = {(self.original_nodes_dict[i],self.original_nodes_dict[j]):self.get_travel_times(i, j, self.original_nodes_dict, builder) for i in V_nodes for j in V_nodes}
+        self.builder_objective_weights = getattr(builder, "objective_weights", {})
 
         # Set the decision variables 
         self.create_problem(scenario=scenario, objective_functions=objective_function) 
@@ -409,7 +411,7 @@ class Cluster:
 
 
     def set_hybrid_objective(self, distance, energy, time):
-        weights = get_weights()
+        weights = get_weights(self.builder_objective_weights or None)
         energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
@@ -424,7 +426,7 @@ class Cluster:
 
 
     def set_energy_objective(self, distance, energy, time): 
-        weights = get_weights() 
+        weights = get_weights(self.builder_objective_weights or None) 
 
         energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
@@ -465,7 +467,7 @@ class Cluster:
         # # Makespan
         alpha = 0.6 
         beta = 0.4
-        weights = get_weights() 
+        weights = get_weights(self.builder_objective_weights or None) 
         energy_cost = pl.lpSum(self.x[i,j,k] * energy[source][target] * weights['energy'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         spatial_cost = pl.lpSum(self.x[i,j,k] * distance[source][target] * weights['distance'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
         travel_time_cost = pl.lpSum(self.x[i,j,k] * time[source][target] * weights['travel_time'] for i,source in self.nodes_dict.items() for j,target in self.nodes_dict.items() if i != j and (source != self.depot_id and target != self.depot_id) for k in self.employed_agents)
@@ -575,8 +577,8 @@ class Cluster:
         
         logger.debug(f"Cluster Time Frame is {self.timeframe}") 
         if pl.LpStatus[self.problem.status] != 'Optimal': 
-            logger.info("❌ Problem is not optimal, returning None...")
-            sys.exit(1)
+            logger.info("❌ Problem is not optimal, aborting current run...")
+            raise RuntimeError(f"Cluster {self.id} ended with status {pl.LpStatus[self.problem.status]}")
         # Assuming 'model' is your solved PuLP problem and depot_ind is your depot's index
         
         V_nodes = self.V_nodes

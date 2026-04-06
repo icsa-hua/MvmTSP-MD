@@ -4,6 +4,7 @@ from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
 from dummy_app.designs.agents import TSPAgent 
 from dummy_app.designs.constraint import * 
+from dummy_app.models.RL.controller import RLController
 from dummy_app.tools.logger import logger 
 
 import os 
@@ -69,9 +70,29 @@ class Builder(MVMTSPConfig):
         self.plan_with_nodes =  defaultdict(dict)
         self.total_data_rate = 0.0 
         self.makespan = 0.0 
+        self.base_enable_ga = bool(config["genetic_algorithm"])
+        self.enable_ga = self.base_enable_ga
+        self.ga_generations = int(config.get("ga_generations", 100))
+        self.solver_time_limit_seconds = config.get("solver_time_limit_seconds")
+        self.objective_weights = config.get("objective_weights", self.objective_weights)
+        self.clustering_feature_weights = config.get("clustering_feature_weights", self.clustering_feature_weights)
+        self.warm_start_mode = config.get("warm_start_mode", "ga_only" if self.enable_ga else "none")
+        self.cluster_status_records: List[Dict[str, Any]] = []
+        self.solve_status_history: List[Dict[str, Any]] = []
+        self.latest_run_summary: Dict[str, Any] = {}
+        self.latest_learning_result: Dict[str, Any] = {}
+        self.learning_enabled = bool(config.get("learning_enabled", False))
+        self.learning_controller = None
+        if self.learning_enabled:
+            self.learning_controller = RLController(
+                base_dir=config.get("learning_output_dir", f"{os.getcwd()}/assets/results/rl"),
+                alpha=float(config.get("learning_alpha", 0.75)),
+            )
 
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
+        if generations is None:
+            generations = self.ga_generations
         return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
     
 
@@ -174,13 +195,23 @@ class Builder(MVMTSPConfig):
 
     @timeout_decorator.timeout(1800)
     def solve_problem(self, cluster:Any):
-        if self.objective_function == "energy":
-            cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
-        elif self.objective_function == "coverage":
-            cluster.problem.solve(pl.GLPK_CMD(timeLimit=500, msg=False, options=['--mipgap', '0.0','--seed', '42']))
-
-        elif self.objective_function == "pareto": 
-            cluster.problem.solve(pl.GLPK_CMD(msg=False, options=['--mipgap', '0.0','--seed', '42']))
+        default_limit = 500 if self.objective_function == "coverage" else None
+        time_limit = self.solver_time_limit_seconds if self.solver_time_limit_seconds is not None else default_limit
+        cluster.problem.solve(
+            pl.GLPK_CMD(
+                timeLimit=time_limit,
+                msg=False,
+                options=['--mipgap', '0.0','--seed', '42'],
+            )
+        )
+        self.solve_status_history.append(
+            {
+                "cluster_id": cluster.id,
+                "status_code": int(cluster.problem.status),
+                "status": pl.LpStatus.get(cluster.problem.status, "Unknown"),
+                "time_limit_seconds": time_limit,
+            }
+        )
 
 
 
@@ -210,6 +241,14 @@ class Builder(MVMTSPConfig):
      
 
     def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Any:
+        self._prepare_run_state()
+        if self.learning_enabled and self.learning_controller is not None:
+            self.learning_controller.start_episode(
+                builder=self,
+                distance_matrix=distance_matrix,
+                data=data,
+                cue_groups=cue_groups,
+            )
         self.user_points = cue_groups
         logger.debug("Running combinatorial problem constructor...")
         with tqdm (total=8, desc="Preparing Problem with clustering") as pbar: 
@@ -300,6 +339,7 @@ class Builder(MVMTSPConfig):
         
         # Phase 6: Agent Generation for simulation
         self.metrics.end_performance_timer() 
+        self.metrics.get_memory_usage()
         logger.info("Total Number of Constraints : {}".format(self.num_constraints))
         logger.info("Total Number of Variables : {}".format(self.variables_count))
 
@@ -331,8 +371,39 @@ class Builder(MVMTSPConfig):
         # print("--------------------------------artemis-------------------------------------------------", df)
         df.to_csv('./dummy_app/drone_centroids_path.csv', index=False)
 
+        self.latest_run_summary = self.build_run_summary()
+        if self.learning_enabled and self.learning_controller is not None:
+            self.learning_controller.finish_episode(self, self.latest_run_summary)
+
 
         return self.coordinated_plan     
+
+
+    def _prepare_run_state(self) -> None:
+        self.cluster_status_records = []
+        self.solve_status_history = []
+        self.latest_run_summary = {}
+        self.problem_results = defaultdict()
+        self.coordinated_plan = defaultdict(dict)
+        self.plan_with_nodes = defaultdict(dict)
+        self.total_data_rate = 0.0
+        self.makespan = 0.0
+        self.global_nodes_visited = 0
+        self.visits_per_nodes = {}
+        self.total_number_cluster = 0
+        self.num_constraints = 0
+        self.variables_count = 0
+        self.enable_ga = self.base_enable_ga
+
+
+    def apply_runtime_configuration(self, runtime_config: Dict[str, Any]) -> None:
+        self.stage_solution = int(runtime_config.get("stage_solution", self.stage_solution))
+        self.ga_generations = int(runtime_config.get("ga_generations", self.ga_generations))
+        self.solver_time_limit_seconds = runtime_config.get("time_limit_seconds", self.solver_time_limit_seconds)
+        self.warm_start_mode = str(runtime_config.get("warm_start_mode", self.warm_start_mode))
+        self.objective_weights = runtime_config.get("objective_weights", self.objective_weights)
+        self.clustering_feature_weights = runtime_config.get("clustering_feature_weights", self.clustering_feature_weights)
+        self.enable_ga = bool(runtime_config.get("enable_ga", self.base_enable_ga))
     
 
     def get_coordinates_for_path(self, path): 
@@ -450,6 +521,15 @@ class Builder(MVMTSPConfig):
             "Makespan": cluster_object.makespan,
             "Total_Data_Transfer": cluster_object.total_data_collected_main,
         }
+        self.cluster_status_records.append(
+            {
+                "cluster_id": cluster_object.id,
+                "status_code": int(cluster_object.problem.status),
+                "status": pl.LpStatus.get(cluster_object.problem.status, "Unknown"),
+                "agent_count": len(assignment),
+                "node_count": len(cluster_object.original_nodes_dict),
+            }
+        )
         
         field_names = ['scenario_name', 'objective_function', 'agent_results', 'Total Distance', 'Total Energy', 'Total Time', 'Average Throughput', 'Average SINR']
         filename = self.create_filename(cluster_object.id, field_names) 
@@ -836,6 +916,87 @@ class Builder(MVMTSPConfig):
         self.variables_count = 0
         self.total_number_cluster = 0
         self.coordinated_plan = defaultdict(dict)
+        
+
+    def build_run_summary(self) -> Dict[str, Any]:
+        depots_len = len(self.depots) if self.depots is not None else 0
+        total_nodes_visited = self.global_nodes_visited - (self.total_number_cluster - depots_len)
+        total_energy_consumption = 0.0
+        total_mission_time = 0.0
+        total_distance = 0.0
+
+        for cluster in self.problem_results.values():
+            total_energy_consumption += float(cluster["Total Energy"])
+            total_mission_time += float(cluster["Total Time"])
+            total_distance += float(cluster["Total Distance"])
+
+        statuses = [record["status"] for record in self.cluster_status_records]
+        feasible_flag = 1.0 if statuses and all(status in {"Optimal", "Feasible"} for status in statuses) else 0.0
+        optimal_flag = 1.0 if statuses and all(status == "Optimal" for status in statuses) else 0.0
+        timeout_flag = 1.0 if any(status in {"Not Solved", "Undefined"} for status in statuses) else 0.0
+        node_coverage_ratio = total_nodes_visited / self.v if self.v else 0.0
+
+        if self.objective_function == "coverage":
+            objective_value = float(-self.total_data_rate)
+        else:
+            objective_value = (
+                float(self.objective_weights["energy"]) * total_energy_consumption
+                + float(self.objective_weights["distance"]) * total_distance
+                + float(self.objective_weights["travel_time"]) * total_mission_time
+            )
+
+        return {
+            "solve_time_seconds": float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
+            "timeout_flag": timeout_flag,
+            "feasible_flag": feasible_flag,
+            "optimal_flag": optimal_flag,
+            "memory_usage_mb": float(self.metrics.memory_usage or 0.0),
+            "objective_value": objective_value,
+            "energy_cost": total_energy_consumption,
+            "distance": total_distance,
+            "mission_time_cost": total_mission_time,
+            "makespan": float(self.makespan),
+            "node_coverage_ratio": node_coverage_ratio,
+            "nodes_per_kwh": total_nodes_visited / max(total_energy_consumption, 1e-6),
+            "nodes_per_hour": total_nodes_visited / max(total_mission_time / 60.0, 1e-6),
+            "total_data_rate": float(self.total_data_rate),
+            "data_rate_per_hour": float(self.total_data_rate) / max(total_mission_time / 60.0, 1e-6),
+            "data_rate_per_kwh": float(self.total_data_rate) / max(total_energy_consumption, 1e-6),
+            "num_clusters": self.total_number_cluster,
+            "largest_cluster_size": max((record["node_count"] for record in self.cluster_status_records), default=0),
+            "num_constraints": self.num_constraints,
+            "num_variables": self.variables_count,
+            "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
+        }
+
+
+    def build_failed_run_summary(self, exc: Exception) -> Dict[str, Any]:
+        statuses = [record["status"] for record in self.solve_status_history]
+        timeout_flag = 1.0 if "timeout" in str(exc).lower() or any(status in {"Not Solved", "Undefined"} for status in statuses) else 0.0
+        return {
+            "solve_time_seconds": float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
+            "timeout_flag": timeout_flag,
+            "feasible_flag": 0.0,
+            "optimal_flag": 0.0,
+            "memory_usage_mb": float(getattr(self.metrics, "memory_usage", 0.0) or 0.0),
+            "objective_value": float("inf"),
+            "energy_cost": 0.0,
+            "distance": 0.0,
+            "mission_time_cost": 0.0,
+            "makespan": 0.0,
+            "node_coverage_ratio": 0.0,
+            "nodes_per_kwh": 0.0,
+            "nodes_per_hour": 0.0,
+            "total_data_rate": 0.0,
+            "data_rate_per_hour": 0.0,
+            "data_rate_per_kwh": 0.0,
+            "num_clusters": float(self.total_number_cluster),
+            "largest_cluster_size": max((record.get("node_count", 0) for record in self.cluster_status_records), default=0),
+            "num_constraints": float(self.num_constraints),
+            "num_variables": float(self.variables_count),
+            "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
+            "error_type": exc.__class__.__name__,
+        }
         
 
 

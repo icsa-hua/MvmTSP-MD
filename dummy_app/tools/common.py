@@ -13,7 +13,7 @@ import logging
 import matplotlib.pyplot as plt 
 
 from copy import deepcopy
-from typing import Any, List, Dict, Union, Tuple
+from typing import Any, List, Dict, Union, Tuple, Optional
 from collections import defaultdict
 
 
@@ -51,7 +51,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     graph = create_model_graph(
         cost=cost_bundle, 
         nodes=nodes_dict,
-        weights=get_weights() 
+        weights=get_weights(getattr(problem_builder, "objective_weights", None)) 
     )
 
     try:
@@ -113,7 +113,8 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
                 nodes_dict=ga_nodes, 
                 cost=cost_bundle, 
                 depot=depot, 
-                verbose=False   
+                verbose=False,
+                generations=getattr(problem_builder, "ga_generations", 100),
             )
             initial_population[agent] = (solution_path, solution_cost) 
     return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
@@ -147,7 +148,10 @@ def create_model_graph(cost:Any, nodes:Dict[int,int], weights):
     return graph 
 
         
-def get_weights(): 
+def get_weights(weights: Optional[Dict[str, float]] = None): 
+    if weights is not None:
+        return weights
+
     return {
         'distance': 0.3,
         'energy': 0.6,
