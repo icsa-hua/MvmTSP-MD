@@ -1,14 +1,14 @@
+from __future__ import annotations
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
-from dummy_app.tools.common import deallocate_memory, extract_per_agent_metrics, calculate_totals_from_paths, load_generated_data, calculate_recharge_steps
+from dummy_app.tools.common import *
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
-from dummy_app.designs.agents import TSPAgent 
 from dummy_app.designs.constraint import * 
 from dummy_app.models.RL.controller import RLController
 from dummy_app.tools.logger import logger 
 
 import os 
-import sys
+import gc
 import csv
 import math
 import copy 
@@ -18,13 +18,12 @@ import uuid
 import pulp as pl 
 import numpy as np 
 import pandas as pd
-import networkx as nx
 import timeout_decorator 
 from pyproj import Transformer
 
 from tqdm import tqdm 
 from collections import defaultdict
-from typing import Any, List, Dict, Union, Tuple, Mapping
+from typing import Any, List, Dict, Tuple, Mapping
 
 # Functions to transform coordinates from EPSG to UTM 
 transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
@@ -304,12 +303,13 @@ class Builder(MVMTSPConfig):
                         if flag: 
                             updated_clusters.append(self.add_depot_data_to_cluster(cluster, depots, contract[1])) 
                 pbar.update(1)
-                deallocate_memory(data)
-                deallocate_memory(gdf)
-                deallocate_memory(clusters)
-                deallocate_memory(cluster_with_depots)
-                deallocate_memory(same_depot_agents)
-                deallocate_memory(depots)
+                del data
+                del gdf
+                del clusters
+                del cluster_with_depots
+                del same_depot_agents
+                del depots
+                gc.collect()
                 logger.debug("✅ Final refinements added to clusters successfully...")
 
             except Exception as e:
@@ -474,7 +474,8 @@ class Builder(MVMTSPConfig):
         # Step 3.5 : Calculate the average throughput and SNR 
         self.get_cluster_coverage(cluster_object)
 
-        deallocate_memory(context)
+        del context
+        gc.collect()
 
         # Step 4: Create and configure the optimization problem 
         try: 

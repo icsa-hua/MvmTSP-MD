@@ -1,25 +1,25 @@
+from __future__ import annotations 
+from dummy_app.models.genetic_algorithm import GASolution, get_weights
+from dummy_app.models.simulation_builder import Builder 
 from dummy_app.models.central_hubs import CentralHub
 from dummy_app.tools.graphs import is_eulerian_digraph
 from dummy_app.models.energy_model import DroneEnergyModel
 
-import gc
 import os 
-import sys 
 import joblib
 import pandas as pd 
 import numpy as np 
 import networkx as nx 
-import logging 
 import matplotlib.pyplot as plt 
 
 from copy import deepcopy
-from typing import Any, List, Dict, Union, Tuple, Optional
+from typing import Any, List, Dict, Union, Tuple
 from collections import defaultdict
 
 
-def deallocate_memory(variable:Any)->None:
-    del variable 
-    gc.collect() 
+
+def call_builder(config, trials) -> Builder: 
+    return Builder(config, trials)
 
 
 def extract_context_for_cluster(cluster:pd.DataFrame, columns:List[List[str]], column_names:List[str]) -> Dict: 
@@ -48,7 +48,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
     
     cost_bundle = {'distance':cost_d, 'energy':cost_e,'travel_time':cost_t}
 
-    graph = create_model_graph(
+    graph = GASolution.create_model_graph(
         cost=cost_bundle, 
         nodes=nodes_dict,
         weights=get_weights(getattr(problem_builder, "objective_weights", None)) 
@@ -119,46 +119,7 @@ def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],
             initial_population[agent] = (solution_path, solution_cost) 
     return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
 
-
-def jupyter_logger(level=logging.INFO)->logging.StreamHandler: 
-    jupyter_handler = logging.StreamHandler(sys.stdout)
-    jupyter_handler.setLevel(level)
-
-    jupyter_formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    ) 
-    jupyter_handler.setFormatter(jupyter_formatter)
-
-    return jupyter_handler
-
-
-def create_model_graph(cost:Any, nodes:Dict[int,int], weights): 
-    graph = nx.DiGraph()
-    for source_node in nodes.values(): 
-        for target_node in nodes.values(): 
-            if source_node == target_node: continue 
-            composite_cost = 0.0 
-            # Calculate the composite cost for the edge
-            for cost_type in cost.keys(): 
-                    composite_cost += weights[cost_type] * cost[cost_type][source_node][target_node] 
-
-            graph.add_edge(source_node, target_node, cost=composite_cost)
-
-    return graph 
-
         
-def get_weights(weights: Optional[Dict[str, float]] = None): 
-    if weights is not None:
-        return weights
-
-    return {
-        'distance': 0.3,
-        'energy': 0.6,
-        'travel_time': 0.1
-    }
-
-
 def get_session_duration(paths): 
     agent_times = [] 
     for agent in paths.keys(): 

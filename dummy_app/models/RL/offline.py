@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass
@@ -8,12 +9,12 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+import dummy_app.tools.common as common
 from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.models.RL.action_catalog import SolverAction, build_action_catalog
 from dummy_app.models.RL.features import extract_state_features
 from dummy_app.models.RL.policies import DQNStylePolicy, OfflineLinearUCBPolicy, default_action_ids
 from dummy_app.models.RL.reward import compute_reward
-from dummy_app.models.simulation_builder import Builder
 from dummy_app.tools.logger import logger
 
 STATE_FEATURE_COLUMNS = [
@@ -113,7 +114,9 @@ def build_instance_specs(
 
 
 def validate_action_catalog(base_config: Dict[str, Any], trials: int) -> pd.DataFrame:
-    builder = Builder(dict(base_config), trials)
+        
+    builder = common.call_builder(dict(base_config), trials)
+
     rows = []
     seen_ids = set()
     for action in build_action_catalog():
@@ -159,21 +162,21 @@ def generate_dataset(
 
     for spec in specs:
         logger.info(f"Generating dataset rows for {spec.instance_id}")
-        builder = Builder(
-            {
-                **dict(base_config),
-                "env_type": spec.env_type,
-                "max_battery": spec.max_battery,
-                "scenario": spec.scenario,
-                "objective_function": spec.objective_function,
-                "NUMBER_OF_AGENTS": spec.num_agents,
-                "NUMBER_OF_USERS": spec.num_users,
-                "NUMBER_OF_AREAS": spec.num_areas,
-                "altitude": altitude,
-                "learning_enabled": False,
-            },
-            trials,
-        )
+        conf = {
+            **dict(base_config),
+            "env_type": spec.env_type,
+            "max_battery": spec.max_battery,
+            "scenario": spec.scenario,
+            "objective_function": spec.objective_function,
+            "NUMBER_OF_AGENTS": spec.num_agents,
+            "NUMBER_OF_USERS": spec.num_users,
+            "NUMBER_OF_AREAS": spec.num_areas,
+            "altitude": altitude,
+            "learning_enabled": False,
+
+        }
+        builder = common.call_builder(conf, trials)
+
         map_generator = MapGenerator(
             num_areas=spec.num_areas,
             users_per_area=spec.num_users,

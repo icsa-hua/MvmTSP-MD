@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from dummy_app.tools.logger import logger
-from dummy_app.tools.common import deallocate_memory
 from dummy_app.models.genetic_algorithm import GASolution
 from dummy_app.models.topsis import TOPSISPriority
 from dummy_app.models.energy_model import DroneEnergyModel

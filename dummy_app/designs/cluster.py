@@ -1,13 +1,12 @@
+from __future__ import annotations
 from dummy_app.tools.logger import logger
-from dummy_app.tools.common import get_weights, extract_context_for_cluster, process_extraction, create_model_graph
+from dummy_app.tools.common import *
 from dummy_app.models.coverage import coverage_u2c, coverage_probability
 from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
+from dummy_app.models.genetic_algorithm import GASolution, get_weights
 
 import os
-import sys
 import math 
-import uuid
-import random
 import pandas as pd 
 import numpy as np 
 import pulp as pl 
@@ -96,7 +95,7 @@ class Cluster:
         # This does not account for scenario or coverage mandatory time. 
         if not self.initial_population: 
             
-            G = create_model_graph(
+            G = GASolution.create_model_graph(
                 cost=self.cost['travel_time'], 
                 nodes=self.nodes_dict, 
                 weights={'travel_time':1}

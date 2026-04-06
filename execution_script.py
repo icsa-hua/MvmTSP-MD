@@ -1,4 +1,3 @@
-from dummy_app.models.simulation_builder import Builder 
 from dummy_app.designs.envsim import EnvSim
 from dummy_app.designs.mobility import GroundUserGroup
 from dummy_app.designs.voronoi_map import Map 
@@ -7,7 +6,7 @@ from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.models.energy_model import DroneEnergyModel
 from dummy_app.models.coverage import * 
 from dummy_app.models.RL import analyze_dataset, build_instance_specs, compare_baselines, generate_dataset, validate_action_catalog
-from dummy_app.tools.common import deallocate_memory
+from dummy_app.tools.common import call_builder
 
 import os 
 import sys
@@ -213,7 +212,8 @@ if args.workflow != "simulate":
     sys.exit(1)
 
 # Create Builder -> Holds variables and functions to create the combinatorial problem. 
-problem = Builder(config, TRIALS)
+# problem = Builder(config, TRIALS)
+problem = call_builder(config, TRIALS)
 
 # Create Simulation environment to simulate mobility for users and agents
 mobility_sim = EnvSim(trials=TRIALS) 
@@ -253,7 +253,7 @@ if map_generator.vor_map is None:
 all_user_points = [point for points in user_points.values() for point in points]
 
 mobility_sim.fig,mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
-# import pdb;pdb.set_trace()
+
 # Preprocess the data based on the map, the energy/coverage model and the ground users. 
 data = problem.preprocess_generated_data(
     distance_matrix=distance_matrix, 
@@ -276,7 +276,7 @@ vor_map = map_generator.vor_map
 # deallocate_memory(regions)
 # deallocate_memory(centroids)
 # deallocate_memory(user_points)
-#
+
 animation_directory = f"{PROJECT_ASSETS}/animations" 
 if not os.path.exists(animation_directory): 
     os.makedirs(animation_directory) 

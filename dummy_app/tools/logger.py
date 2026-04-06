@@ -1,7 +1,20 @@
+from __future__ import annotations
+import sys
 import logging 
 import datetime 
 import os 
-from dummy_app.tools.common import jupyter_logger
+
+
+def jupyter_logger(level=logging.INFO)-> logging.StreamHandler: 
+    jupyter_handler = logging.StreamHandler(sys.stdout)
+    jupyter_handler.setLevel(level)
+    jupyter_formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S") 
+    jupyter_handler.setFormatter(jupyter_formatter)
+
+    return jupyter_handler
+
 
 logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
 

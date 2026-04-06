@@ -1,13 +1,22 @@
 from dummy_app.tools.logger import logger
-from dummy_app.tools.common import create_model_graph, get_weights
 
 import numpy as np 
 import random
 import networkx as nx 
 
-from typing import Dict, List, Any, Tuple 
+from typing import Dict, List, Any, Tuple, Optional 
 from deap import base, creator, tools, algorithms
 
+
+def get_weights(weights: Optional[Dict[str, float]] = None): 
+    if weights is not None: 
+        return weights 
+
+    return {
+        'distance': 0.3, 
+        'energy': 0.6, 
+        'time': 0.1
+    }
 
 class GASolution:
     """
@@ -31,10 +40,29 @@ class GASolution:
 
         self.toolbox = base.Toolbox() 
 
+     
+
+    @staticmethod 
+    def create_model_graph(cost:Any, nodes:Dict[int, int], weights)->nx.DiGraph: 
+        graph = nx.DiGraph() 
+        for source_node in nodes.values(): 
+            for target_node in nodes.values(): 
+                if source_node == target_node: 
+                    continue 
+
+                composite_cost = 0.0 
+
+                for cost_type in cost.keys(): 
+                    composite_cost += weights[cost_type] * \
+                    cost[cost_type][source_node][target_node] 
+
+                    graph.add_edge(source_node, target_node, cost=composite_cost) 
+        return graph
+
 
     def create_graph(self, cost:Dict[str,Dict[int,np.ndarray]])->nx.Graph:
         weights = get_weights()
-        return create_model_graph(cost=cost, nodes=self.nodes, weights=weights)
+        return self.create_model_graph(cost=cost, nodes=self.nodes, weights=weights)
 
 
     def initialize_tour(self):
