@@ -93,7 +93,7 @@ class Metrics:
 
     def persist_run_report(self, report: Dict[str, Any]) -> Path:
         report_path = self.base_dir / f"{report['run_id']}.json"
-        serializable_report = {str(k): v for k, v in report.items()}
+        serializable_report = self._deep_stringify_keys(report)
         try: 
             with report_path.open("w", encoding="utf-8") as handle:
                 json.dump(serializable_report, handle, indent=2, default=self._json_default, sort_keys=True)
@@ -130,6 +130,17 @@ class Metrics:
             if not file_exists:
                 writer.writeheader()
             writer.writerow({key: self._stringify_value(value) for key, value in row.items()})
+
+
+    @staticmethod
+    def _deep_stringify_keys(data: Any) -> Any:
+        """Recursively converts dictionary keys to strings."""
+        if isinstance(data, dict):
+            return {str(k): Metrics._deep_stringify_keys(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [Metrics._deep_stringify_keys(i) for i in data]
+        else:
+            return data
 
 
     @staticmethod
