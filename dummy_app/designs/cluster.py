@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dummy_app.tools.logger import logger
-from dummy_app.tools.common import *
-from dummy_app.models.coverage import coverage_u2c, coverage_probability
+import dummy_app.tools.common as common
 from dummy_app.designs.constraint import cooperative_scenario_constraints, individual_scenario_constraints
 from dummy_app.models.genetic_algorithm import GASolution, get_weights
 
@@ -48,7 +47,7 @@ class Cluster:
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
 
         # Get the available data that are assoiated to the areas of the cluster
-        context = extract_context_for_cluster(
+        context = common.extract_context_for_cluster(
             cluster=self.cluster, 
             columns=[
                 distance, 
@@ -70,7 +69,7 @@ class Cluster:
         Time Window for the cluster to solve. 
         """
 
-        self.cost, self.virtual_nodes, self.bridge_nodes, self.nodes_dict, raw_population = process_extraction(
+        self.cost, self.virtual_nodes, self.bridge_nodes, self.nodes_dict,raw_population =common.process_extraction(
             problem_builder=builder, 
             extraction=context,
             depot=self.depot_id, 
@@ -497,17 +496,8 @@ class Cluster:
 
 
     def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural', filename='outuput.csv'):
-        
-        coverage_probability_filename = filename
-        # coverage_probability_filename = f'cov_out_prob_{file_id}.csv'
-        coverage_directory = f'{os.getcwd()}/assets/results/coverage_prob'
-        
-        self.check_results_file(
-            name=coverage_probability_filename,
-            directory='coverage_prob',
-            type='csv',
-        )
-        
+        from dummy_app.models.coverage import coverage_probability, coverage_u2c
+
         average_R = defaultdict(float)
         average_sinr = defaultdict(float)
         R = defaultdict(list) 
@@ -549,13 +539,25 @@ class Cluster:
             average_R[i] = float(np.mean(R[i])/1e6) # Convert to Mbps
             average_sinr[i] = float(np.mean(sinr[i]))
             logger.debug(f"R: {average_R[i] } Mbps, SINR: {average_sinr[i]} dB for area {area}")
-        
-        savefilename = f'{coverage_directory}/{coverage_probability_filename}'
-        
-        coverage_probability(self, num_users=user_per_area, savefile_name=savefilename, directory=coverage_directory, snr = average_sinr)
-        
+
+        coverage_summary = coverage_probability(
+            self,
+            num_users=dict(user_per_area),
+            savefile_name=filename,
+            directory=None,
+            snr=average_sinr,
+            save_artifacts=False,
+        )
+
         self.R = average_R
         self.sinr = average_sinr
+        return {
+            "cluster_id": self.id,
+            "avg_rate_mbps_by_node": dict(average_R),
+            "avg_sinr_db_by_node": dict(average_sinr),
+            "users_per_node": dict(user_per_area),
+            "coverage_probability": coverage_summary,
+        }
 
 
     def get_node_visits(self, builder:Any, node, dc):
@@ -767,7 +769,6 @@ class Cluster:
         results_file = os.path.join(results_dir, name + f'.{type}')
         if os.path.exists(results_file):
             os.remove(results_file)
-
 
  
     def validate_solution(self, objective_function, builder): 

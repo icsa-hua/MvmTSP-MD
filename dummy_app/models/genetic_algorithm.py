@@ -15,7 +15,7 @@ def get_weights(weights: Optional[Dict[str, float]] = None):
     return {
         'distance': 0.3, 
         'energy': 0.6, 
-        'time': 0.1
+        'travel_time': 0.1
     }
 
 class GASolution:
@@ -53,10 +53,13 @@ class GASolution:
                 composite_cost = 0.0 
 
                 for cost_type in cost.keys(): 
+            
+
                     composite_cost += weights[cost_type] * \
                     cost[cost_type][source_node][target_node] 
 
                     graph.add_edge(source_node, target_node, cost=composite_cost) 
+                    
         return graph
 
 

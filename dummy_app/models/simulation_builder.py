@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
-from dummy_app.tools.common import *
+import dummy_app.tools.common as common
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
 from dummy_app.designs.constraint import * 
@@ -9,12 +9,10 @@ from dummy_app.tools.logger import logger
 
 import os 
 import gc
-import csv
 import math
 import copy 
 import pdb
 import time
-import uuid
 import pulp as pl 
 import numpy as np 
 import pandas as pd
@@ -56,7 +54,7 @@ class Builder(MVMTSPConfig):
         self.agent_altitude = config["altitude"]
         self.Time = 0 
 
-        self.metrics = Metrics(verbose=True) 
+        self.metrics = Metrics(base_dir=f"{os.getcwd()}/assets/results/metrics", verbose=True) 
         self.recharge_time_window:int = 5 #descrete time steps
         self.num_constraints = 0 
         self.variables_count = 0
@@ -64,7 +62,6 @@ class Builder(MVMTSPConfig):
         self.global_nodes_visited:int = 0
         self.visits_per_nodes:Dict[int,int] = {}
         self.total_number_cluster: int = 0 
-        self.coverage_file_id = uuid.uuid4() 
         self.coordinated_plan = defaultdict(dict)
         self.plan_with_nodes =  defaultdict(dict)
         self.total_data_rate = 0.0 
@@ -80,6 +77,8 @@ class Builder(MVMTSPConfig):
         self.solve_status_history: List[Dict[str, Any]] = []
         self.latest_run_summary: Dict[str, Any] = {}
         self.latest_learning_result: Dict[str, Any] = {}
+        self.latest_run_report: Dict[str, Any] = {}
+        self.latest_run_report_path: str = ""
         self.learning_enabled = bool(config.get("learning_enabled", False))
         self.learning_controller = None
         if self.learning_enabled:
@@ -241,6 +240,18 @@ class Builder(MVMTSPConfig):
 
     def run_model(self, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]])->Any:
         self._prepare_run_state()
+        self.metrics.start_run(
+            run_context={
+                "scenario": self.scenario,
+                "objective_function": self.objective_function,
+                "environment_type": self.env_type,
+                "number_of_areas": self.NUMBER_OF_AREAS,
+                "number_of_agents": self.NUMBER_OF_AGENTS,
+                "number_of_users": self.NUMBER_OF_USERS,
+                "stage_solution": self.stage_solution,
+            },
+            run_id=f"{self.id}_{int(time.time() * 1000)}",
+        )
         if self.learning_enabled and self.learning_controller is not None:
             self.learning_controller.start_episode(
                 builder=self,
@@ -319,23 +330,25 @@ class Builder(MVMTSPConfig):
             pbar.update(1) 
 
         paths = {} 
-        self.metrics.start_performance_timer() 
-        self.total_number_cluster = len(clusters)
+        self.total_number_cluster = len(updated_clusters)
 
         logger.debug(f"Priority for Problem:{priority} ")
 
         # Phase 5: Problem Construction and Solution
-        with tqdm(total=len(clusters), desc="Solving problem ", unit="step") as pbar:
+        with tqdm(total=len(updated_clusters), desc="Solving problem ", unit="step") as pbar:
             for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
-                
-                paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
-                    cluster=cluster,
-                      cluster_id=cluster_tuple[0],
-                        assignment=agents,
-                          depot_id=cluster_tuple[1])
-                pbar.update(1)
-                time.sleep(2)
-                logger.debug(f"✅ Cluster {cluster_tuple[0]} solved successfully...")
+                try:  
+                    paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
+                        cluster=cluster,
+                          cluster_id=cluster_tuple[0],
+                            assignment=agents,
+                              depot_id=cluster_tuple[1])
+                    pbar.update(1)
+                    time.sleep(2)
+                    logger.debug(f"✅ Cluster {cluster_tuple[0]} solved successfully...")
+                except Exception as E: 
+                    print(E)
+                    pdb.set_trace()
         
         # Phase 6: Agent Generation for simulation
         self.metrics.end_performance_timer() 
@@ -383,6 +396,8 @@ class Builder(MVMTSPConfig):
         self.cluster_status_records = []
         self.solve_status_history = []
         self.latest_run_summary = {}
+        self.latest_run_report = {}
+        self.latest_run_report_path = ""
         self.problem_results = defaultdict()
         self.coordinated_plan = defaultdict(dict)
         self.plan_with_nodes = defaultdict(dict)
@@ -394,6 +409,7 @@ class Builder(MVMTSPConfig):
         self.num_constraints = 0
         self.variables_count = 0
         self.enable_ga = self.base_enable_ga
+        self.metrics.reset()
 
 
     def apply_runtime_configuration(self, runtime_config: Dict[str, Any]) -> None:
@@ -492,10 +508,9 @@ class Builder(MVMTSPConfig):
             raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
 
         # Step 5: Calculate the results for the cluster 
-        cost = load_generated_data(self.problem_data_path)
-        results = extract_per_agent_metrics(
+        results = common.extract_per_agent_metrics(
             paths=paths, 
-            costs=cost,
+            costs=self.problem_cost_data,
             coverage_energy=self.average_coverage_energy, 
             virtual_nodes=cluster_object.virtual_nodes,
             area_ids=cluster_object.original_nodes_dict.values(), 
@@ -503,7 +518,7 @@ class Builder(MVMTSPConfig):
         )
 
         # Total results for all agents inside the cluster. 
-        totalDistance, totalEnergy, totalTime = calculate_totals_from_paths(
+        totalDistance, totalEnergy, totalTime = common.calculate_totals_from_paths(
             results=results
         )
         
@@ -531,11 +546,21 @@ class Builder(MVMTSPConfig):
                 "node_count": len(cluster_object.original_nodes_dict),
             }
         )
-        
-        field_names = ['scenario_name', 'objective_function', 'agent_results', 'Total Distance', 'Total Energy', 'Total Time', 'Average Throughput', 'Average SINR']
-        filename = self.create_filename(cluster_object.id, field_names) 
-        df = pd.DataFrame([self.problem_results[f'Cluster_{cluster_object.id}']])
-        df.to_csv(filename, mode='a', index=False, header=False) 
+        self.metrics.record_cluster_result(
+            {
+                "cluster_id": cluster_object.id,
+                "status": pl.LpStatus.get(cluster_object.problem.status, "Unknown"),
+                "agent_count": len(assignment),
+                "node_count": len(cluster_object.original_nodes_dict),
+                "total_distance": totalDistance,
+                "total_energy": totalEnergy,
+                "total_time": totalTime,
+                "average_throughput": dict(cluster_object.R),
+                "average_sinr": dict(cluster_object.sinr),
+                "makespan": cluster_object.makespan_value,
+                "total_data_transfer": cluster_object.total_data_collected_main.value(),
+            }
+        )
 
         paths = self.synchronize_agent_paths(paths, cluster_object)
         paths = self.flatten_paths_on_time(self.coordinated_plan, paths)  
@@ -701,7 +726,7 @@ class Builder(MVMTSPConfig):
         agent_end_times = {}
 
         for agent in paths: 
-            recharge_times[agent] = calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy'])
+            recharge_times[agent] = common.calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy'])
             agent_end_times[agent] = paths[agent][-1][2] + recharge_times[agent] if paths[agent] else -1 
             self.problem_results[f'Cluster_{cluster.id}']['agent_results'][agent]['recharge_steps'] = recharge_times[agent]
 
@@ -770,145 +795,31 @@ class Builder(MVMTSPConfig):
                         
 
     def get_cluster_coverage(self, cluster:Any):
-        filename = 'coverage_results_{}.csv'.format(self.coverage_file_id)
         altitude = self.agent_altitude/1e3 
         user_height = 1.25/1e3 
         terrain_type = self.env_type 
-        cluster.get_average_coverage(
+        coverage_summary = cluster.get_average_coverage(
             user_points = self.user_points,
             altitude = altitude,
             user_height = user_height,
             terrain_type = terrain_type,
-            filename=filename
+            filename=f"coverage_cluster_{cluster.id}.csv",
         )
-
-
-    def create_filename(self, cluster_id:int, field_names:list): 
-        id = uuid.uuid4() 
-        filename = f'Cluster_{cluster_id}_numerical_results_{id}.csv'
-        directory = 'cluster_performance'
-        parent_dir = f'{os.getcwd()}/assets/results'
-        if not os.path.exists(os.path.join(parent_dir, directory)):
-            os.mkdir(os.path.join(parent_dir, directory))
-
-        filename = os.path.join(parent_dir, directory, filename) 
-
-        if not os.path.exists(filename):
-            with open(filename, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=field_names)
-                writer.writeheader()
-
-        return filename
+        self.metrics.record_coverage_result(coverage_summary)
             
 
     def gather_results(self): 
 
-        results = self.problem_results
-        depots_len = len(self.depots) if self.depots is not None else 0
-        self.global_nodes_visited = self.global_nodes_visited - (self.total_number_cluster - depots_len)
-        
-        average_visits_per_node = sum(self.visits_per_nodes.values()) / len(self.visits_per_nodes) if self.visits_per_nodes else 0
-        node_coverage_ration = self.global_nodes_visited / self.v 
+        if not self.latest_run_summary:
+            self.latest_run_summary = self.build_run_summary()
 
-        total_energy_consumption = 0 
-        total_mission_time = 0 
-        total_distance = 0
-        idle_times = 0 
-
-        for cluster in results: 
-            
-            total_energy_consumption += results[cluster]['Total Energy'] 
-            total_mission_time += results[cluster]['Total Time']
-            total_distance += results[cluster]['Total Distance']
-
-            # print("results[cluster]['agent_results']")
-            # print(results[cluster]['agent_results'])
-
-            for agent, agent_results in results[cluster]['agent_results'].items():
-                idle_times += agent_results.get('   ', 0) 
-
-        mission_efficiency_per_energy = self.global_nodes_visited / total_energy_consumption if total_energy_consumption > 0 else 0
-        scaled_mission_efficiency = 1000 * mission_efficiency_per_energy # (nodes per kWh) 
-        mission_efficiency_per_time = self.global_nodes_visited / total_mission_time if total_mission_time > 0 else 0
-        scaled_mission_efficiency_time = 60 * mission_efficiency_per_time # (nodes per hour)
-        
-        idle_ration = idle_times / total_mission_time if total_mission_time > 0 else 0
-        
-        average_data_per_cluster = self.total_data_rate / self.total_number_cluster
-        average_makespan_per_cluster = self.makespan / self.total_number_cluster
-
-        final_results = {
-            "Scenario": self.scenario, 
-            "Objective Function": self.objective_function,
-            "Number of Areas":self.NUMBER_OF_AREAS,
-            "Number of Agents":self.NUMBER_OF_AGENTS,
-            "Number of Users":self.NUMBER_OF_USERS,
-            "Environment Type":self.env_type,
-            "Total Number of Clusters": self.total_number_cluster,
-            "Total Nodes Visited": self.global_nodes_visited,
-            "Visits per Node": self.visits_per_nodes,
-            "Total Mission Time": total_mission_time,
-            "Total Energy Consumption": total_energy_consumption,
-            "Total Distance Covered": total_distance,
-            "Average Visits per Node": average_visits_per_node,
-            "Node Coverage Ratio": node_coverage_ration,
-            "Mission Efficiency per Energy": mission_efficiency_per_energy,
-            "Scaled Mission Efficiency per Energy (nodes per kWh)": scaled_mission_efficiency,
-            "Mission Efficiency per Time": mission_efficiency_per_time,
-            "Scaled Mission Efficiency per Time (nodes per hour)": scaled_mission_efficiency_time,
-            "Idle Ratio": idle_ration,
-            "Total Makespan": self.makespan,
-            "Total Achievable DR": self.total_data_rate,
-            "Average Data Rate per Cluster": average_data_per_cluster,
-            "Average Makespan per Cluster": average_makespan_per_cluster,
-            "Total Number of Constraints": self.num_constraints,
-            "Total Number of Variables": self.variables_count,
-            "Computational Time": self.metrics.elapsed_time if hasattr(self.metrics, 'elapsed_time') else None,
-            "Memory Usage": self.metrics.memory_usage if hasattr(self.metrics, 'memory_usage') else None
-        }
-        
-        field_names = [
-            "Scenario",
-            "Objective Function",
-            "Number of Areas",
-            "Number of Agents",
-            "Number of Users",
-            "Environment Type",
-            'Total Number of Clusters',
-            'Total Nodes Visited', 
-            'Visits per Node', 
-            'Total Mission Time', 
-            'Total Energy Consumption',
-            'Total Distance Covered',
-            'Average Visits per Node', 
-            'Node Coverage Ratio', 
-            'Mission Efficiency per Energy', 
-            'Scaled Mission Efficiency per Energy (nodes per kWh)',
-            'Mission Efficiency per Time', 
-            'Scaled Mission Efficiency per Time (nodes per hour)',
-            'Idle Ratio',
-            'Total Makespan',
-            'Total Achievable DR',
-            'Average Data Rate per Cluster',
-            'Average Makespan per Cluster',
-            'Total Number of Constraints',
-            'Total Number of Variables',
-            "Computational Time",
-            "Memory Usage"
-        ]
-
-        filename = f'{os.getcwd()}/assets/results/global_results_{self.coverage_file_id}.csv'
-        
-        df = pd.DataFrame.from_dict(final_results, orient='index').T
-
-        if not os.path.exists(filename):
-            with open(filename, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=field_names)
-                writer.writeheader()
-
-            df.to_csv(filename, mode='a', index=False, header=False)
-        else:
-            df.to_csv(filename, mode='a', index=False, header=False) 
+        self.latest_run_report = self.metrics.build_run_report(
+            summary=self.latest_run_summary,
+            cluster_results=dict(self.problem_results),
+            solve_status_history=self.solve_status_history,
+        )
+        report_path = self.metrics.persist_run_report(self.latest_run_report)
+        self.latest_run_report_path = str(report_path)
 
         self.global_nodes_visited = 0 
         self.visits_per_nodes = {}
@@ -917,6 +828,7 @@ class Builder(MVMTSPConfig):
         self.variables_count = 0
         self.total_number_cluster = 0
         self.coordinated_plan = defaultdict(dict)
+        return self.latest_run_report
         
 
     def build_run_summary(self) -> Dict[str, Any]:
@@ -925,17 +837,38 @@ class Builder(MVMTSPConfig):
         total_energy_consumption = 0.0
         total_mission_time = 0.0
         total_distance = 0.0
+        total_service_time = 0.0
+        total_travel_time = 0.0
 
         for cluster in self.problem_results.values():
             total_energy_consumption += float(cluster["Total Energy"])
             total_mission_time += float(cluster["Total Time"])
             total_distance += float(cluster["Total Distance"])
+            for agent_result in cluster["agent_results"].values():
+                total_service_time += float(agent_result.get("service_time", 0.0))
+                total_travel_time += float(agent_result.get("travel_time", 0.0))
 
         statuses = [record["status"] for record in self.cluster_status_records]
         feasible_flag = 1.0 if statuses and all(status in {"Optimal", "Feasible"} for status in statuses) else 0.0
         optimal_flag = 1.0 if statuses and all(status == "Optimal" for status in statuses) else 0.0
         timeout_flag = 1.0 if any(status in {"Not Solved", "Undefined"} for status in statuses) else 0.0
         node_coverage_ratio = total_nodes_visited / self.v if self.v else 0.0
+        average_visits_per_node = (
+            sum(self.visits_per_nodes.values()) / len(self.visits_per_nodes)
+            if self.visits_per_nodes
+            else 0.0
+        )
+        average_data_per_cluster = (
+            float(self.total_data_rate) / float(self.total_number_cluster)
+            if self.total_number_cluster
+            else 0.0
+        )
+        average_makespan_per_cluster = (
+            float(self.makespan) / float(self.total_number_cluster)
+            if self.total_number_cluster
+            else 0.0
+        )
+        idle_ratio = total_service_time / max(total_mission_time, 1e-6)
 
         if self.objective_function == "coverage":
             objective_value = float(-self.total_data_rate)
@@ -956,13 +889,21 @@ class Builder(MVMTSPConfig):
             "energy_cost": total_energy_consumption,
             "distance": total_distance,
             "mission_time_cost": total_mission_time,
+            "travel_time_cost": total_travel_time,
+            "service_time_cost": total_service_time,
             "makespan": float(self.makespan),
             "node_coverage_ratio": node_coverage_ratio,
+            "total_nodes_visited": float(total_nodes_visited),
+            "visits_per_node": dict(self.visits_per_nodes),
+            "average_visits_per_node": average_visits_per_node,
+            "idle_ratio": idle_ratio,
             "nodes_per_kwh": total_nodes_visited / max(total_energy_consumption, 1e-6),
             "nodes_per_hour": total_nodes_visited / max(total_mission_time / 60.0, 1e-6),
             "total_data_rate": float(self.total_data_rate),
             "data_rate_per_hour": float(self.total_data_rate) / max(total_mission_time / 60.0, 1e-6),
             "data_rate_per_kwh": float(self.total_data_rate) / max(total_energy_consumption, 1e-6),
+            "average_data_rate_per_cluster": average_data_per_cluster,
+            "average_makespan_per_cluster": average_makespan_per_cluster,
             "num_clusters": self.total_number_cluster,
             "largest_cluster_size": max((record["node_count"] for record in self.cluster_status_records), default=0),
             "num_constraints": self.num_constraints,

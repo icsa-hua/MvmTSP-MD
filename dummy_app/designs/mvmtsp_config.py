@@ -1,10 +1,19 @@
 from abc import ABC, abstractmethod
+import os
+
+_MPL_CONFIG_DIR = "/tmp/mvmtsp-mpl"
+_XDG_CACHE_HOME = "/tmp/mvmtsp-xdg-cache"
+os.makedirs(_MPL_CONFIG_DIR, exist_ok=True)
+os.makedirs(_XDG_CACHE_HOME, exist_ok=True)
+os.environ.setdefault("MPLBACKEND", "Agg")
+os.environ.setdefault("MPLCONFIGDIR", _MPL_CONFIG_DIR)
+os.environ.setdefault("XDG_CACHE_HOME", _XDG_CACHE_HOME)
+
 from dummy_app.tools.logger import logger
 from dummy_app.models.genetic_algorithm import GASolution
 from dummy_app.models.topsis import TOPSISPriority
 from dummy_app.models.energy_model import DroneEnergyModel
 
-import os
 import joblib
 import geopandas 
 import pandas as pd 
@@ -57,6 +66,10 @@ class MVMTSPConfig(ABC):
         self.priority = priority 
         self.validate = validate
         self.problem_data_path = ""
+        self.assets_dir = Path(os.getcwd()) / "assets"
+        self.results_dir = self.assets_dir / "results"
+        self.scalers_dir = self.assets_dir / "scalers"
+        self.problem_cost_data: Dict[str, np.ndarray] = {}
         self.objective_weights: Dict[str, float] = {
             "distance": 0.3,
             "energy": 0.6,
@@ -132,29 +145,15 @@ class MVMTSPConfig(ABC):
         
         def normalize_data(df:pd.DataFrame, name:str='')->pd.DataFrame:
             scaler = MinMaxScaler()
-            scalers_path = f"{os.getcwd()}/assets/scalers"
             scaler_file_name = f"scaler{self.id}_{name}.pkl"
-
-            if not os.path.exists(scalers_path):
-                os.mkdir(scalers_path)
-
-            scaler_file_path = os.path.join(scalers_path,scaler_file_name)
+            self.scalers_dir.mkdir(parents=True, exist_ok=True)
+            scaler_file_path = self.scalers_dir / scaler_file_name
             scaled_data = scaler.fit_transform(df.values)
             joblib.dump(scaler, scaler_file_path) 
             
             return pd.DataFrame(scaled_data, columns=df.columns, index=df.index)
 
-        data_path = f"{os.getcwd()}/assets/data"
-        data_problem_path = f"{data_path}/problem_{self.id}"
-
-        if not os.path.exists(data_path):
-            os.mkdir(data_path)
-
-        if not os.path.exists(data_problem_path):
-            os.mkdir(data_problem_path)
-
         distances = pd.DataFrame(distance_matrix, columns=[f'dist_{i}' for i in range(1, len(distance_matrix)+1)])
-        distances.to_csv(f"{data_problem_path}/distances.csv")
 
         energy_model = DroneEnergyModel(
             v_hor=v_hor, 
@@ -174,7 +173,6 @@ class MVMTSPConfig(ABC):
 
         # NOTE: To convert it to Wh 
         energies = energies / 3600.0
-        energies.to_csv(f"{data_problem_path}/energies.csv")
 
         self.coverage_time = coverage_time 
         self.move_energy = energies.values.astype(np.float32)
@@ -227,7 +225,11 @@ class MVMTSPConfig(ABC):
         travel_times = pd.DataFrame(travel_times, columns=[f'tt_{i}' for i in range(1, len(travel_times)+1)])
 
         self.travel_cost = travel_times.values
-        travel_times.to_csv(f'{data_problem_path}/times.csv')
+        self.problem_cost_data = {
+            "distance": distances.values.astype(np.float32),
+            "energy": energies.values.astype(np.float32),
+            "travel_time": travel_times.values.astype(np.float32),
+        }
 
         assert distances.shape == energies.shape == travel_times.shape, "Distances, energies, and travel times must have the same shape"
 
@@ -240,7 +242,7 @@ class MVMTSPConfig(ABC):
         self.travel_time_columns = travel_times.columns.tolist()
 
         self.depots = depots 
-        self.problem_data_path = data_problem_path
+        self.problem_data_path = ""
 
         data = pd.concat([distances, energies, travel_times, nodes], axis=1, join='inner')
         return data 

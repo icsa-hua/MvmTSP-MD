@@ -35,3 +35,4 @@ vps_env
 AGENTS.md 
 PLAN.md 
 DATASET_PLAN.md
+__pycache__

@@ -166,7 +166,16 @@ def plot_pathloss_vs_distance(pathloss_func, terrain_types, comm_type='U2C', h_u
     plt.show()
 
 
-def coverage_probability(cluster, num_users, savefile_name, directory, snr, lambda_var:float=1, seed:int=42):
+def coverage_probability(
+    cluster,
+    num_users,
+    savefile_name=None,
+    directory=None,
+    snr=None,
+    lambda_var:float=1,
+    seed:int=42,
+    save_artifacts: bool = False,
+):
 
     def rayleigh_pdf_ppp(x): 
         return 2 * lambda_var * np.pi * x * np.exp(-lambda_var * np.pi * x ** 2) 
@@ -186,38 +195,39 @@ def coverage_probability(cluster, num_users, savefile_name, directory, snr, lamb
 
     results = {
         'cluster_id':cluster.id, 
-        'theta_snr_db': theta_snr_db,
-        'coverage_PR': coverage_PR,
-        'outage_PR': outage,
+        'theta_snr_db': theta_snr_db.tolist(),
+        'coverage_PR': coverage_PR.tolist(),
+        'outage_PR': outage.tolist(),
         'num_areas': len(snr),
         'num_users_per_area': num_users
     }
 
-    df = pd.DataFrame([results])
-    filename = os.path.join(directory, savefile_name)
-    if not os.path.exists(filename): 
-        df.to_csv(filename, index=False)
+    if save_artifacts and savefile_name and directory:
+        df = pd.DataFrame([results])
+        filename = os.path.join(directory, savefile_name)
+        if not os.path.exists(filename): 
+            df.to_csv(filename, index=False)
+        else: 
+            df.to_csv(filename, mode='a', index=False, header=False)
 
-    else: 
-        df.to_csv(filename, mode='a', index=False, header=False)
+        mymap = np.random.rand(7, 3)
+        select = np.random.randint(0, 7)
 
-    # Plotting
-    mymap = np.random.rand(7, 3)
-    select = np.random.randint(0, 7)
+        image_dir = os.path.join(directory, 'coverage_images') 
+        if not os.path.exists(image_dir):
+            os.makedirs(image_dir)
 
-    image_dir = os.path.join(directory, 'coverage_images') 
-    if not os.path.exists(image_dir):
-        os.makedirs(image_dir)
+        image_id = uuid.uuid4()
+        plt.figure(figsize=(8, 5))
+        plt.plot(theta_snr_db, coverage_PR, '-s', color=mymap[select])
+        plt.plot(theta_snr_db, outage, '-s', color='black')
+        plt.title('Coverage/Outage Probability')
+        plt.xlabel('SINR Threshold (dB)')
+        plt.ylabel('Coverage Probability')
+        plt.legend(['CovPR (H=1250, BW=100MHz)', 'OutPR (H=1250, BW=100MHz)'])
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(f'{image_dir}/cov_out_probability_{image_id}.png')
+        plt.close()
 
-    image_id = uuid.uuid4()
-    plt.figure(figsize=(8, 5))
-    plt.plot(theta_snr_db, coverage_PR, '-s', color=mymap[select])
-    plt.plot(theta_snr_db, outage, '-s', color='black')
-    plt.title('Coverage/Outage Probability')
-    plt.xlabel('SINR Threshold (dB)')
-    plt.ylabel('Coverage Probability')
-    plt.legend(['CovPR (H=1250, BW=100MHz)', 'OutPR (H=1250, BW=100MHz)'])
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(f'{image_dir}/cov_out_probability_{image_id}.png')
-    plt.close()
+    return results

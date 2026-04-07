@@ -2,7 +2,6 @@ from dummy_app.tools.logger import logger
 
 import numpy as np
 import pandas as pd 
-import matplotlib.pyplot as plt
 
 from typing import Union, Dict 
 from pathlib import Path 
@@ -49,6 +48,7 @@ class Map:
 
     
     def plot_voronoi(self)->None: 
+        import matplotlib.pyplot as plt
         voronoi_plot_2d(self.vor_map) 
         plt.show() 
 

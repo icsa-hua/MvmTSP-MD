@@ -10,7 +10,6 @@ import joblib
 import pandas as pd 
 import numpy as np 
 import networkx as nx 
-import matplotlib.pyplot as plt 
 
 from copy import deepcopy
 from typing import Any, List, Dict, Union, Tuple
@@ -157,51 +156,93 @@ def extract_per_agent_metrics(
 
 ) -> Dict[str,Dict[str, float]]:
     """
-    Return individual distance, energy, and time for each agent's path.
+    Return individual metrics for each agent by compressing the solved path log
+    into contiguous travel and service segments.
     """
 
-    cost_bundle = {}
-    for cost_type in costs.keys():
-        new_type = ''
-        if cost_type.startswith('d'):
-            new_type = 'distance'
-        elif cost_type.startswith('e'):
-            new_type = 'energy'
-        elif cost_type.startswith('t'):
-            new_type = 'travel_time'
-        cost_bundle[new_type] = dict(zip(area_ids, costs[cost_type])) 
-            
-
+    canonical_costs = {
+        "distance": np.asarray(costs["distance"], dtype=np.float32),
+        "energy": np.asarray(costs["energy"], dtype=np.float32),
+        "travel_time": np.asarray(costs["travel_time"], dtype=np.float32),
+    }
+    cost_bundle = {
+        metric: dict(zip(area_ids, matrix))
+        for metric, matrix in canonical_costs.items()
+    }
     cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes, add_epsilon=False)
-    
+
     results = defaultdict(dict)
-    for agent in paths:
+    for agent, agent_path in paths.items():
+        if not agent_path:
+            results[agent] = {
+                'distance': 0.0,
+                'energy': 0.0,
+                'time': 0.0,
+                'travel_time': 0.0,
+                'modeled_travel_time': 0.0,
+                'service_time': 0.0,
+                'travel_segments': 0,
+                'service_segments': 0,
+                'visited_nodes': [],
+                'unique_nodes_visited': 0,
+            }
+            continue
+
+        dist = 0.0
+        energy = 0.0
+        duration = 0.0
+        travel_time = 0.0
+        modeled_travel_time = 0.0
+        service_time = 0.0
+        travel_segments = 0
+        service_segments = 0
         visited_nodes = []
-        dist = 0.0 
-        energy = 0.0 
-        duration = 0.0 
-        for i, j, _ in paths[agent]:
 
-            if (i,j) in visited_nodes:
-                duration += 1
-                continue 
-
-            if i == j : 
-                energy  += coverage_energy 
-                dist += 0 
-                duration += 1
-                visited_nodes.append((i,j))
+        segments = []
+        current_source, current_target, current_start = agent_path[0]
+        current_length = 1
+        for source, target, timestep in agent_path[1:]:
+            if (source, target) == (current_source, current_target):
+                current_length += 1
                 continue
-            try:
-                dist += cost_bundle['distance'][i][j]
-                energy += cost_bundle['energy'][i][j] 
-                duration += cost_bundle['travel_time'][i][j]
-            except Exception as e:
-                print(e)
-                import pdb;pdb.set_trace()
-            visited_nodes.append((i,j))
+            segments.append((current_source, current_target, current_start, current_length))
+            current_source, current_target, current_start = source, target, timestep
+            current_length = 1
+        segments.append((current_source, current_target, current_start, current_length))
 
-        results[agent] = {'distance': dist, 'energy': energy, 'time': duration}
+        for source, target, _, segment_length in segments:
+            visited_nodes.append(target)
+            if source == target:
+                service_segments += 1
+                service_time += float(segment_length)
+                duration += float(segment_length)
+                energy += float(coverage_energy) * float(segment_length)
+                continue
+
+            travel_segments += 1
+            arc_distance = float(cost_bundle['distance'][source][target])
+            arc_energy = float(cost_bundle['energy'][source][target])
+            modeled_arc_time = float(cost_bundle['travel_time'][source][target])
+
+            dist += arc_distance
+            energy += arc_energy
+            duration += float(segment_length)
+            travel_time += float(segment_length)
+            modeled_travel_time += modeled_arc_time
+
+        unique_nodes = sorted(set(visited_nodes))
+        results[agent] = {
+            'distance': dist,
+            'energy': energy,
+            'time': duration,
+            'travel_time': travel_time,
+            'modeled_travel_time': modeled_travel_time,
+            'service_time': service_time,
+            'travel_segments': travel_segments,
+            'service_segments': service_segments,
+            'visited_nodes': unique_nodes,
+            'unique_nodes_visited': len(unique_nodes),
+        }
 
     return results
 
@@ -260,6 +301,7 @@ def calculate_recharge_steps(max_battery:float, energy_spent:float):
 
 
 def draw_circular_graph(G:nx.DiGraph): 
+    import matplotlib.pyplot as plt
     colors_top_10=['tab:orange','tab:blue','tab:green','lightsteelblue']
     #Draw graph
     pos= nx.circular_layout(G)

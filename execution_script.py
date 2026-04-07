@@ -1,22 +1,23 @@
-from dummy_app.designs.envsim import EnvSim
-from dummy_app.designs.mobility import GroundUserGroup
-from dummy_app.designs.voronoi_map import Map 
+import os
+
+_MPL_CONFIG_DIR = "/tmp/mvmtsp-mpl"
+_XDG_CACHE_HOME = "/tmp/mvmtsp-xdg-cache"
+os.makedirs(_MPL_CONFIG_DIR, exist_ok=True)
+os.makedirs(_XDG_CACHE_HOME, exist_ok=True)
+os.environ.setdefault("MPLBACKEND", "Agg")
+os.environ.setdefault("MPLCONFIGDIR", _MPL_CONFIG_DIR)
+os.environ.setdefault("XDG_CACHE_HOME", _XDG_CACHE_HOME)
+
 from dummy_app.tools.logger import logger 
-from dummy_app.designs.voronoi_map import MapGenerator 
-from dummy_app.models.energy_model import DroneEnergyModel
-from dummy_app.models.coverage import * 
 from dummy_app.models.RL import analyze_dataset, build_instance_specs, compare_baselines, generate_dataset, validate_action_catalog
 from dummy_app.tools.common import call_builder
 
-import os 
 import sys
 import uuid 
 import argparse
-import matplotlib.pyplot as plt
 import numpy as np
 
 from tqdm import tqdm 
-from matplotlib.animation import FuncAnimation
 
 
 """
@@ -29,7 +30,8 @@ TODO:
 
 def frame_generator():
     for i in range(TRIALS):
-        progress.update(1)
+        if progress is not None:
+            progress.update(1)
         yield i
 
 
@@ -65,8 +67,7 @@ env_choices = ['urban', 'rural', 'forest', 'mountain']
 stage_options = [1,2,3]
 agents_choices = [3,4,5,6,7,8,9,10]
 
-# Progress bar 
-progress = tqdm(total=TRIALS, desc="Progress")
+progress = None
 
 # User arguments 
 parser = argparse.ArgumentParser()
@@ -89,14 +90,13 @@ parser.add_argument("--learning_alpha", type=float, default=0.75, help="Explorat
 parser.add_argument("--workflow", type=str, default="simulate", help="simulate, validate_actions, dataset, analyze_dataset, compare_baselines")
 parser.add_argument("--dataset_output_dir", type=str, default=f"{PROJECT_ASSETS}/results/rl_dataset", help="Directory for dataset workflow artifacts.")
 parser.add_argument("--dataset_path", type=str, default="", help="Path to an existing dataset CSV for analysis/comparison.")
-parser.add_argument("--dataset_seed_count", type=int, default=2, help="Number of seeds per dataset instance configuration.")
-parser.add_argument("--dataset_area_values", type=str, default="12,21,30", help="Comma-separated area counts for dataset generation.")
+parser.add_argument("--dataset_seed_count", type=int, default=42, help="Number of seeds per dataset instance configuration.")
+parser.add_argument("--dataset_area_values", type=str, default="21,30, 40", help="Comma-separated area counts for dataset generation.")
 parser.add_argument("--dataset_user_values", type=str, default="1,2,4", help="Comma-separated user densities for dataset generation.")
 parser.add_argument("--dataset_agent_values", type=str, default="3,5,7", help="Comma-separated agent counts for dataset generation.")
 parser.add_argument("--dataset_env_values", type=str, default="urban,rural,forest", help="Comma-separated environment values for dataset generation.")
 parser.add_argument("--dataset_scenario_values", type=str, default="cooperative,individual", help="Comma-separated scenario values for dataset generation.")
 parser.add_argument("--dataset_spread_values", type=str, default="60,90,120", help="Comma-separated map spread values for dataset generation.")
-parser.add_argument("--dataset_battery_values", type=str, default="260,355,420", help="Comma-separated battery values for dataset generation.")
 parser.add_argument("--dataset_action_ids", type=str, default="all", help="Comma-separated action ids to evaluate, or all.")
 args = parser.parse_args()
 
@@ -173,7 +173,7 @@ if args.workflow != "simulate":
             env_values=parse_csv_strings(args.dataset_env_values),
             scenario_values=parse_csv_strings(args.dataset_scenario_values),
             spread_values=parse_csv_ints(args.dataset_spread_values),
-            battery_values=parse_csv_ints(args.dataset_battery_values),
+            battery_values=[int(MAX_BATTERY)],
             objective_function=args.objective,
             seed_count=args.dataset_seed_count,
         )
@@ -211,108 +211,100 @@ if args.workflow != "simulate":
     logger.error(f"Invalid workflow: {args.workflow}")
     sys.exit(1)
 
-# Create Builder -> Holds variables and functions to create the combinatorial problem. 
-# problem = Builder(config, TRIALS)
+from dummy_app.designs.envsim import EnvSim
+from dummy_app.designs.mobility import GroundUserGroup
+from dummy_app.designs.voronoi_map import MapGenerator
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# Create Builder -> Holds variables and functions to create the combinatorial problem.
 problem = call_builder(config, TRIALS)
+mobility_sim = EnvSim(trials=TRIALS)
+progress = tqdm(total=TRIALS, desc="Progress")
 
-# Create Simulation environment to simulate mobility for users and agents
-mobility_sim = EnvSim(trials=TRIALS) 
-
-# Generate Map Generator Object 
 map_generator = MapGenerator(
-    num_areas = NUMBER_OF_AREAS,
-    users_per_area = NUMBER_OF_USERS, 
-    lon=LONGITUDE_ATHENS, 
+    num_areas=NUMBER_OF_AREAS,
+    users_per_area=NUMBER_OF_USERS,
+    lon=LONGITUDE_ATHENS,
     lat=LATITUDE_ATHENS,
-    low = LOW_BOUND,
-    high = HIGH_BOUND,
-    seed=42 
+    low=LOW_BOUND,
+    high=HIGH_BOUND,
+    seed=42,
 )
 
-logger.debug(f"✅ Map Generator Initialized")
+logger.debug("✅ Map Generator Initialized")
 
 regions, centroids, user_points, depots, distance_matrix, all_users = map_generator.create_environment(show_map=False, show_3d_map=False)
 
-# Generate the GroundUserGroup which handles the ground users collectively
 ground_users = GroundUserGroup(
-    mobility_env=mobility_sim, 
-    map_obj=map_generator, 
-    alpha=0.85, 
-    mean_velocity=10.0, 
-    sigma=0.5
+    mobility_env=mobility_sim,
+    map_obj=map_generator,
+    alpha=0.85,
+    mean_velocity=10.0,
+    sigma=0.5,
 )
-logger.debug(f"✅ Ground Users Group Initialized")
+logger.debug("✅ Ground Users Group Initialized")
 
-# Extract the Ground Users as separate entities with individual velocity and angle
 ground_users.get_generated_users(user_points=user_points)
-logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")    
+logger.debug(f"✅Ground Users Loaded: {len(ground_users.group)} users")
 
 if map_generator.vor_map is None:
     raise ValueError("Voronoi map is not initialized. Ensure `voronoi_tessellation` is called successfully.")
 
 all_user_points = [point for points in user_points.values() for point in points]
 
-mobility_sim.fig,mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
+mobility_sim.fig, mobility_sim.ax = ground_users.plot_users(map_generator.vor_map)
 
-# Preprocess the data based on the map, the energy/coverage model and the ground users. 
 data = problem.preprocess_generated_data(
-    distance_matrix=distance_matrix, 
+    distance_matrix=distance_matrix,
     centroids=centroids,
-    depots=depots if not isinstance(depots,list) else np.array(depots),
+    depots=depots if not isinstance(depots, list) else np.array(depots),
     num_of_agents=NUMBER_OF_AGENTS,
-    v_hor=HORIZONTAL_VELOCITY, 
+    v_hor=HORIZONTAL_VELOCITY,
     v_ver=VERTICAL_VELOCITY,
-    altitude=ALTITUDE, 
+    altitude=ALTITUDE,
     coverage_time=MAX_COVERAGE_TIME,
     user_points=user_points,
 )
 
-logger.debug(f"✅ Preprocessed Data Completed successfully")  
+logger.debug("✅ Preprocessed Data Completed successfully")
 
 vor_map = map_generator.vor_map
-
-# Deallocate all the non necessary components
-# deallocate_memory(map_generator)
-# deallocate_memory(regions)
-# deallocate_memory(centroids)
-# deallocate_memory(user_points)
-
-animation_directory = f"{PROJECT_ASSETS}/animations" 
-if not os.path.exists(animation_directory): 
-    os.makedirs(animation_directory) 
+animation_directory = f"{PROJECT_ASSETS}/animations"
+if not os.path.exists(animation_directory):
+    os.makedirs(animation_directory)
 
 animation_filename = f"{animation_directory}/simulation_output_{uuid.uuid4()}.mp4"
-try: 
-    # From here the simulation initiates and solves the combinatorial problem and then displays the solution. 
+try:
     ani = FuncAnimation(
         mobility_sim.fig,
         mobility_sim.simulations,
         frames=frame_generator(),
-        fargs=(problem,
-               ground_users, 
-               vor_map, 
-               distance_matrix, 
-               data, 
-               regions,
-               centroids,
-               user_points,
-               ALTITUDE,
-               TRIALS),
-
+        fargs=(
+            problem,
+            ground_users,
+            vor_map,
+            distance_matrix,
+            data,
+            regions,
+            centroids,
+            user_points,
+            ALTITUDE,
+            TRIALS,
+        ),
         interval=100,
-        blit=False, 
-        cache_frame_data=False)
-    
-    # Save as MP4 (requires ffmpeg)
+        blit=False,
+        cache_frame_data=False,
+    )
     ani.save(animation_filename, writer='ffmpeg', fps=10)
-
 except KeyboardInterrupt as kb:
     plt.close(mobility_sim.fig)
     logger.exception(f"KeyboardInterrupt: {kb}")
-
     sys.exit(1)
-
 except Exception as e:
     plt.close(mobility_sim.fig)
     logger.exception(f"Exception: {e}")
     sys.exit(1)
+finally:
+    if progress is not None:
+        progress.close()
