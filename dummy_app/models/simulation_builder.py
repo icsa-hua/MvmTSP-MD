@@ -498,7 +498,9 @@ class Builder(MVMTSPConfig):
                         x_pos = float(current["from_x"])
                         y_pos = float(current["from_y"])
                     else:
-                        progress = float(offset + 1) / float(max(duration, 1))
+                        # Convert transition rows into state samples by placing the
+                        # first rendered sample at the segment origin.
+                        progress = float(offset) / float(max(duration, 1))
                         x_pos = float(current["from_x"]) + (float(current["to_x"]) - float(current["from_x"])) * progress
                         y_pos = float(current["from_y"]) + (float(current["to_y"]) - float(current["from_y"])) * progress
 

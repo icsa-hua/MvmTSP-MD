@@ -11,7 +11,7 @@ CENTROIDS_PATH = f"{PROJECT_DIR}/dummy_app/drone_centroids_path.csv"
 
 
 # --- Simulation Config --- # 
-TRIALS = 2
+TRIALS = 1
 
 NUMBER_OF_AGENTS = 3 # Number of UAVs 
 NUMBER_OF_AREAS = 21 # Areas used for Voronoi map genertion

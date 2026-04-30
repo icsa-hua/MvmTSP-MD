@@ -52,8 +52,7 @@ class DroneEnergyModel:
 
 
     def __profile_power(self): 
-        return (self.lambda_coef * self.p * self.alpha * self.horizontal_velocity
-                ** 3)/8
+        return (self.lambda_coef * self.p * self.total_rotor_area* self.horizontal_velocity ** 3)/8
 
 
     def __horizontal_energy(self, distance_m): 
@@ -90,8 +89,6 @@ class DroneEnergyModel:
         # Horizontal Travel in seconds hence the distance should be in meters. 
         hor_distance = self.horizontal_distance(current_node,next_node,distance_matrix)
 
-        dt_hor = hor_distance / self.horizontal_velocity 
-        
         # --- Dorling Style --- # 
         # Hover Power (W) -> Convert to energy 
         # P_hov = np.sqrt((T)/2*self.p*self.alpha)
@@ -107,9 +104,9 @@ class DroneEnergyModel:
         E_hor = self.__horizontal_energy(hor_distance)
 
         # Profile drag
-        E_r = (self.lambda_coef * self.p * self.alpha * (self.horizontal_velocity**3) * dt_hor) / 8  # J
+        # E_r = (self.lambda_coef * self.p * self.alpha * (self.horizontal_velocity**3) * dt_hor) / 8  # J
         
-        E_asc = E_hor + E_u + E_r + E_hover_during_vertical # This is in Joules
+        E_asc = E_hor + E_u + E_hover_during_vertical # This is in Joules
 
         return E_asc
         
@@ -145,7 +142,6 @@ class DroneEnergyModel:
         
         # Horizontal Travel in seconds hence the distance should be in meters. 
         horizontal_distance = self.horizontal_distance(current_node,next_node, distance_matrix)  
-        dt_hor = horizontal_distance/self.horizontal_velocity 
 
         # --- Dorling Style --- # 
         # Hover Power (W) -> Convert to energy 
@@ -163,9 +159,7 @@ class DroneEnergyModel:
         E_hor = self.__horizontal_energy(horizontal_distance)
         
         # Profile drag
-        E_r = (self.lambda_coef * self.p * self.alpha * (self.horizontal_velocity**3) * dt_hor) / 8  # J
-
-        E_desc = E_u + E_r + E_hor + E_hover_during_vertical # This is in Joules
+        E_desc = E_u + E_hor + E_hover_during_vertical # This is in Joules
         
         return  E_desc
 
@@ -174,7 +168,6 @@ class DroneEnergyModel:
         
         # Horizontal Travel in seconds hence the distance should be in meters. 
         hor_distance = self.horizontal_distance(current_node, next_node,distance_matrix)
-        dt_hor = hor_distance / self.horizontal_velocity
         
         # --- Dorling Style --- #
         # T = self.mass * self.g
@@ -192,9 +185,7 @@ class DroneEnergyModel:
         E_hor = self.__horizontal_energy(hor_distance)
 
         # Profile drag
-        E_r = (self.lambda_coef * self.p * self.alpha * (self.horizontal_velocity**3) * dt_hor) / 8  # J
-
-        E_move = E_r + E_hor
+        E_move = E_hor
 
         return E_move
 
