@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dummy_app.core.exceptions import ValidationOptimalityConfirmed
 from dummy_app.tools.logger import logger
 import dummy_app.tools.common as common
 from dummy_app.models.genetic_algorithm import GASolution
@@ -544,7 +545,7 @@ class Cluster:
             builder.solve_problem(self)
 
             if self.problem.status != pl.LpStatusOptimal:
-                raise Exception("Solution is Truly Optimal")
+                raise ValidationOptimalityConfirmed("Solution is Truly Optimal")
 
         elif objective_function == "coverage":
             total_data_collected = self.total_data_collected_main.value()
@@ -553,4 +554,4 @@ class Cluster:
             builder.solve_problem(self)
 
             if self.problem.status != pl.LpStatusOptimal:
-                raise Exception("Solution is Truly Optimal")
+                raise ValidationOptimalityConfirmed("Solution is Truly Optimal")

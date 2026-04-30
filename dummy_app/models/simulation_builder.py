@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import asdict
 
+from dummy_app.core.exceptions import ValidationOptimalityConfirmed
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
 import dummy_app.tools.common as common
 from dummy_app.core.schemas.request import ModelRunRequest
@@ -500,6 +501,8 @@ class Builder(MVMTSPConfig):
                 stage_solution=self.stage_solution,
             )
             logger.debug(f"✅ Problem created for cluster {cluster_input.cluster_id} successfully...")
+        except ValidationOptimalityConfirmed:
+            raise
         except Exception as exc:
             logger.exception(f"❌ Error creating problem for cluster {cluster_input.cluster_id}: {exc}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_input.cluster_id}") from exc

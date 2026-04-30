@@ -1,4 +1,5 @@
 from dummy_app.tools.logger import logger 
+from dummy_app.core.exceptions import ValidationOptimalityConfirmed
 from dummy_app.models.RL import analyze_dataset, build_instance_specs, compare_baselines, generate_dataset, validate_action_catalog
 from dummy_app.designs.envsim import EnvSim
 from dummy_app.designs.mobility import GroundUserGroup
@@ -307,6 +308,11 @@ def main():
         plt.close(mobility_sim.fig)
         logger.exception(f"KeyboardInterrupt: {kb}")
         sys.exit(1)
+
+    except ValidationOptimalityConfirmed as exc:
+        plt.close(mobility_sim.fig)
+        logger.info(str(exc))
+        sys.exit(0)
 
     except Exception as e:
         plt.close(mobility_sim.fig)
