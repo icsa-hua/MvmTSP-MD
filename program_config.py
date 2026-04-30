@@ -27,6 +27,7 @@ HIGH_BOUND = 120 # Considered in meters
 # --- UAV Config --- # 
 MAX_BATTERY = 355.2 #Wh 
 MAX_COVERAGE_TIME = 3
+MASS = 6.4 # In kg with payload for coverage
 
 HORIZONTAL_VELOCITY = 15.56 # m/s 
 VERTICAL_VELOCITY = 2.78 # m/s 
@@ -38,6 +39,8 @@ OBJECTIVE_OPTIONS = ['energy', 'coverage', 'sum_of_times', 'pareto' ]
 ENVIRONMENT_OPTIONS = ['urban', 'rural', 'forest']
 STAGE_OPTIONS = [1, 2, 3] 
 AGENTS_OPTIONS = [3, 4, 5, 6, 7] 
+FAIRNESS_TOLERANCE = [0, 1, 2, 3, 5]
+TIME_STEP_SEC = [30, 60, 120, 300, 600]
 
 # --- Performance Admissions --- # 
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
@@ -63,5 +66,23 @@ ENV_VALUES = "urban, rural, forest"
 SCENARIO_VALUES = "cooperative, individual"
 SPREAD_VALUES = "60, 90, 120" 
 ACTION_IDS = "all"
+
+# --- Energy configuration --- # 
+ROTOR_AREA = 0.2 # Rotor disk area in m 
+LAMBDA_COEF = 0.08 # Coeff for the drag profile depending on the type of UAV 
+ASCENT_FACTOR = 1.0 
+DESCENT_FACTOR = [0.2, 0.4, 0.6, 0.8]
+G = 9.81 # Acceleration of gravity in m/s^2 
+P = 1.225 # Air density of gravity in kg/m^3 
+MIN_HOVER = 30 # Least power required to minimally hover over the grouind
+NUMBER_OF_ROTORS = 4 
+P_CHARGE = 350 # WATTS 
+P_BS = 200 # In W is the power to operate the drone as a low level base station
+
+MOTOR_SPEED_MULTIPLIER = 10.5
+
+BANK_ANGLE_DEG = 0.0 
+
+
 
 
