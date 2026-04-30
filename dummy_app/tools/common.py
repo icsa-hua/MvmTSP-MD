@@ -1,8 +1,4 @@
 from __future__ import annotations 
-from dummy_app.models.genetic_algorithm import GASolution, get_weights
-from dummy_app.models.simulation_builder import Builder 
-from dummy_app.models.central_hubs import CentralHub
-from dummy_app.tools.graphs import is_eulerian_digraph
 from dummy_app.models.energy_model import DroneEnergyModel
 
 import os 
@@ -16,9 +12,10 @@ from typing import Any, List, Dict, Union, Tuple
 from collections import defaultdict
 
 
+def call_builder(config, trials): 
+    from dummy_app.core.registry import create_runtime
 
-def call_builder(config, trials) -> Builder: 
-    return Builder(config, trials)
+    return create_runtime(config, trials)
 
 
 def extract_context_for_cluster(cluster:pd.DataFrame, columns:List[List[str]], column_names:List[str]) -> Dict: 
@@ -27,96 +24,14 @@ def extract_context_for_cluster(cluster:pd.DataFrame, columns:List[List[str]], c
 
 
 def process_extraction(problem_builder:Any, extraction:Dict[str,Union[List[str],np.ndarray]], depot:int, employed_agents:List[int]): 
+    from dummy_app.models.milp.warm_start import prepare_cluster_cost_bundle
 
-    try: 
-        area_ids = np.array(extraction['area_ids']).squeeze()
-        dists = extraction['dists']
-        ees = extraction['ees']
-        travel_times = extraction['travel_times']
-    except KeyError as ke: 
-        raise ValueError(f"KeyError: {ke}")
-
-
-    cost_d = dict(zip(area_ids, dists))
-    cost_e = dict(zip(area_ids, ees))
-    cost_t = dict(zip(area_ids, travel_times))
-
-    # Initialize structures 
-    initial_population = {} 
-    nodes_dict = {i: int(node) for i, node in enumerate(area_ids)}
-    
-    cost_bundle = {'distance':cost_d, 'energy':cost_e,'travel_time':cost_t}
-
-    graph = GASolution.create_model_graph(
-        cost=cost_bundle, 
-        nodes=nodes_dict,
-        weights=get_weights(getattr(problem_builder, "objective_weights", None)) 
+    return prepare_cluster_cost_bundle(
+        problem_builder=problem_builder,
+        extraction=extraction,
+        depot=depot,
+        employed_agents=employed_agents,
     )
-
-    try:
-        is_eulerian_digraph(graph)
-        if not is_eulerian_digraph(graph): 
-            graph = nx.eulerian_circuit(graph)
-    except:
-        raise ValueError("Graph is not eulerian")
-
-    hub = CentralHub()
-    bridge_nodes = hub.get_bridge_nodes(
-        graph=graph, 
-        cluster_nodes = list(nodes_dict.keys()), 
-        cost_dist=cost_bundle['distance'],
-        nodes_dict=nodes_dict,
-        n_agents=len(employed_agents)
-    )
-    
-    bridge_nodes = [nodes_dict[bridge_nodes[i]] for i in range(len(bridge_nodes))]
-    R_points = [] 
-    bridge_nodes_idx = []
-    for i in nodes_dict: 
-        if nodes_dict[i] in bridge_nodes: 
-            allowed_visits = hub.number_allowed_visits[i]
-            bridge_nodes_idx.append(1)
-        else: 
-            allowed_visits = 1 
-        R_points.append(allowed_visits)
-
-    reverse_nodes = {v: k for k, v in nodes_dict.items()} 
-    virtual_nodes = defaultdict(int)
-
-    if not all(rp==1 for rp in R_points) or len(bridge_nodes) > 1:
-        # Create virtual nodes inside the current dictionary 
-        for node in bridge_nodes: 
-            number_of_virtual_nodes = R_points[reverse_nodes[node]] 
-            constant_length = len(cost_bundle['distance'][node])
-            
-            for kk in range(number_of_virtual_nodes):
-                virtual_nodes[kk + (constant_length)] = node 
-
-        count = len(nodes_dict)
-        cost_bundle = add_virtual_nodes(cost_bundle=cost_bundle, clones=virtual_nodes, add_epsilon=True)
-                
-        for i in virtual_nodes:
-            nodes_dict[count] = i      
-            count += 1    
-
-    ga_nodes = nodes_dict.copy() 
-    for rem in bridge_nodes: 
-        ga_nodes.pop(reverse_nodes[rem])
-
-    assert len(cost_d) == len(cost_e) == len(cost_t) == len(R_points), \
-    "Mismatch between distance, energy, travel_time and R_points dictionary length"
-    
-    if hasattr(problem_builder, 'enable_ga') and problem_builder.enable_ga: 
-        for agent in employed_agents: 
-            solution_path, solution_cost = problem_builder.call_genetic_algorithm(
-                nodes_dict=ga_nodes, 
-                cost=cost_bundle, 
-                depot=depot, 
-                verbose=False,
-                generations=getattr(problem_builder, "ga_generations", 100),
-            )
-            initial_population[agent] = (solution_path, solution_cost) 
-    return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
 
         
 def get_session_duration(paths): 

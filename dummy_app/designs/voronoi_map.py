@@ -145,7 +145,7 @@ class MapGenerator(Map):
             all_user_points = [point for points in user_points.values() for point in points]
         
         except Exception as E: 
-            logger.exception("Raised exception {E}.")
+            logger.exception(f"Raised exception {E}.")
 
         transformer = Transformer.from_crs("epsg:32633", "epsg:4326", always_xy=True)
         # x0, y0 = transformer.transform(centroids[0][0], centroids[0][1])
@@ -258,6 +258,7 @@ class MapGenerator(Map):
         ax.set_ylabel("Latitude")
         ax.legend()
         
+
 
     def get_central_depots(self, sites, number_of_areas=2): 
 

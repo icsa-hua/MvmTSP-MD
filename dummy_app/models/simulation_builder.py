@@ -1,18 +1,27 @@
 from __future__ import annotations
+from dataclasses import asdict
+
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
 import dummy_app.tools.common as common
+from dummy_app.core.schemas.request import ModelRunRequest
+from dummy_app.core.schemas.result import ClusterSolveResult, ModelRunResult
+from dummy_app.core.statuses import compute_absolute_gap, compute_relative_gap, infer_termination_reason, normalize_solver_status
+from dummy_app.pipeline.artifacts import persist_run_artifacts
+from dummy_app.pipeline.instance_builder import build_problem_instance
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
-from dummy_app.designs.constraint import * 
+from dummy_app.models.milp.model import MILPOptimizationModel
+from dummy_app.models.milp.solver_adapter import solve_cluster_problem
 from dummy_app.models.RL.controller import RLController
 from dummy_app.tools.logger import logger 
 
 import os 
 import gc
+import pdb
 import math
 import copy 
-import pdb
 import time
+from program_config import CENTROIDS_PATH
 import pulp as pl 
 import numpy as np 
 import pandas as pd
@@ -53,6 +62,11 @@ class Builder(MVMTSPConfig):
         self.NUMBER_OF_AREAS = config["NUMBER_OF_AREAS"]
         self.agent_altitude = config["altitude"]
         self.Time = 0 
+        self.model_name = str(config.get("model_name", "milp"))
+        self.solver_backend = str(config.get("solver_backend", "glpk"))
+        self.subtour_strategy = str(config.get("subtour_strategy", "mtz"))
+        self.objective_strategy = str(config.get("objective_strategy", "legacy_stage"))
+        self.scenario_constraint_set = str(config.get("scenario_constraint_set", "default"))
 
         self.metrics = Metrics(base_dir=f"{os.getcwd()}/assets/results/metrics", verbose=True) 
         self.recharge_time_window:int = 5 #descrete time steps
@@ -79,6 +93,11 @@ class Builder(MVMTSPConfig):
         self.latest_learning_result: Dict[str, Any] = {}
         self.latest_run_report: Dict[str, Any] = {}
         self.latest_run_report_path: str = ""
+        self.latest_artifact_dir: str = ""
+        self.current_problem_instance = None
+        self.run_request: ModelRunRequest | None = None
+        self.latest_model_run_result: ModelRunResult | None = None
+        self.optimization_model = MILPOptimizationModel(self)
         self.learning_enabled = bool(config.get("learning_enabled", False))
         self.learning_controller = None
         if self.learning_enabled:
@@ -195,21 +214,13 @@ class Builder(MVMTSPConfig):
     def solve_problem(self, cluster:Any):
         default_limit = 500 if self.objective_function == "coverage" else None
         time_limit = self.solver_time_limit_seconds if self.solver_time_limit_seconds is not None else default_limit
-        cluster.problem.solve(
-            pl.GLPK_CMD(
-                timeLimit=time_limit,
-                msg=False,
-                options=['--mipgap', '0.0','--seed', '42'],
-            )
+        solve_metadata = solve_cluster_problem(
+            cluster=cluster,
+            time_limit_seconds=time_limit,
+            solver_backend=self.solver_backend,
         )
-        self.solve_status_history.append(
-            {
-                "cluster_id": cluster.id,
-                "status_code": int(cluster.problem.status),
-                "status": pl.LpStatus.get(cluster.problem.status, "Unknown"),
-                "time_limit_seconds": time_limit,
-            }
-        )
+        cluster.solve_metadata = solve_metadata
+        self.solve_status_history.append({"cluster_id": cluster.id, **solve_metadata})
 
 
 
@@ -242,6 +253,7 @@ class Builder(MVMTSPConfig):
         self._prepare_run_state()
         self.metrics.start_run(
             run_context={
+                "model_name": self.model_name,
                 "scenario": self.scenario,
                 "objective_function": self.objective_function,
                 "environment_type": self.env_type,
@@ -249,9 +261,12 @@ class Builder(MVMTSPConfig):
                 "number_of_agents": self.NUMBER_OF_AGENTS,
                 "number_of_users": self.NUMBER_OF_USERS,
                 "stage_solution": self.stage_solution,
+                "subtour_strategy": self.subtour_strategy,
+                "solver_backend": self.solver_backend,
             },
             run_id=f"{self.id}_{int(time.time() * 1000)}",
         )
+
         if self.learning_enabled and self.learning_controller is not None:
             self.learning_controller.start_episode(
                 builder=self,
@@ -260,113 +275,35 @@ class Builder(MVMTSPConfig):
                 cue_groups=cue_groups,
             )
         self.user_points = cue_groups
-        logger.debug("Running combinatorial problem constructor...")
-        with tqdm (total=8, desc="Preparing Problem with clustering") as pbar: 
 
-           # Phase 1: Preprocessing and regionalization (geospatial clustering)
-            try: 
-                data, depots = self.separate_depots_from_clusters(data)
+        logger.debug("Running modular optimization pipeline...")
+
+        self.run_request = self.build_run_request()
+        self.current_problem_instance = build_problem_instance(self, distance_matrix, data, cue_groups)
+        self.total_number_cluster = len(self.current_problem_instance.prepared_clusters)
+
+        cluster_results: List[ClusterSolveResult] = []
+        with tqdm(total=len(self.current_problem_instance.prepared_clusters), desc="Solving problem ", unit="cluster") as pbar:
+            for prepared_cluster in self.current_problem_instance.prepared_clusters:
+                cluster_result = self.optimization_model.solve_cluster(
+                    self.current_problem_instance,
+                    prepared_cluster,
+                    self.run_request,
+                )
+                cluster_results.append(cluster_result)
                 pbar.update(1)
-                logger.debug("✅ Depots separated from clusters successfully...")
-                gdf = self.createGeoDataset(data)
-                pbar.update(1)
-                logger.debug("✅ GeoDataset created successfully...")
-                clusters = self.regionalization(gdf)
-                pbar.update(1)
-                logger.debug("✅ Clusters created successfully...")
-                
-            except Exception as e:
-                logger.exception(f"❌ Error occurred during regionalization: {e}")
-                raise ValueError("Error occurred during regionalization.")
-            
-
-            # Phase 2: Clustering and Prioritization 
-            try: 
-                priority = self.cluster_prioritization(clusters, cue_groups, distance_matrix)
-                pbar.update(1)
-                logger.debug("✅ Clusters prioritized successfully...")
-            except Exception as e:
-                logger.exception(f"❌ Error occurred during clustering: {e}")
-                raise ValueError("Error occurred during clustering.")
-            
-            if self.priority != "yes":
-                priority['Rank'] = priority['Rank'].apply(lambda x: 1)
-                
-
-            # Phase 3: Agent Assignment for all clusters 
-            try: 
-                cluster_with_depots, same_depot_agents = self.assign_depot_to_cluster(clusters, depots, distance_matrix=distance_matrix)
-                pbar.update(1)
-                logger.debug("✅ Depots assigned to clusters successfully...")
-                assignments = self.allocate_agents_to_clusters(cluster_with_depots, priority, same_depot_agents)
-                pbar.update(1)
-
-            except Exception as e:
-                logger.exception(f"❌ Error occurred during agent assignment: {e}")
-                raise ValueError("Error occurred during agent assignment.") 
-
-            # Phase 4: Final clusters refinement and memory deallocation 
-            try: 
-                updated_clusters = [] 
-                for contract in assignments.keys(): 
-                    for cluster in clusters: 
-                        flag = cluster[0] == contract[0]
-                        if flag: 
-                            updated_clusters.append(self.add_depot_data_to_cluster(cluster, depots, contract[1])) 
-                pbar.update(1)
-                del data
-                del gdf
-                del clusters
-                del cluster_with_depots
-                del same_depot_agents
-                del depots
-                gc.collect()
-                logger.debug("✅ Final refinements added to clusters successfully...")
-
-            except Exception as e:
-                logger.exception(f"❌ Error occurred during final cluster refinement: {e}")
-                raise ValueError("Error occurred during final cluster refinement.")
-
-            pbar.update(1) 
-
-        paths = {} 
-        self.total_number_cluster = len(updated_clusters)
-
-        logger.debug(f"Priority for Problem:{priority} ")
-
-        # Phase 5: Problem Construction and Solution
-        with tqdm(total=len(updated_clusters), desc="Solving problem ", unit="step") as pbar:
-            for (cluster_tuple, agents), cluster in zip(assignments.items(), updated_clusters):
-                try:  
-                    paths[f"Cluster_{cluster_tuple[0]}"] = self.clustering(
-                        cluster=cluster,
-                          cluster_id=cluster_tuple[0],
-                            assignment=agents,
-                              depot_id=cluster_tuple[1])
-                    pbar.update(1)
-                    time.sleep(2)
-                    logger.debug(f"✅ Cluster {cluster_tuple[0]} solved successfully...")
-                except Exception as E: 
-                    print(E)
-                    pdb.set_trace()
+                logger.debug(f"✅ Cluster {prepared_cluster.cluster_id} solved successfully...")
         
-        # Phase 6: Agent Generation for simulation
         self.metrics.end_performance_timer() 
         self.metrics.get_memory_usage()
+
         logger.info("Total Number of Constraints : {}".format(self.num_constraints))
         logger.info("Total Number of Variables : {}".format(self.variables_count))
 
-        # Phase 7: Flatten all the paths to form a single path for each agent        
         self.plan_with_nodes = copy.deepcopy(self.coordinated_plan)
-
-        # Phase 8: Transform positions to coordinates
         for agent, plan in self.coordinated_plan.items():
             self.coordinated_plan[agent] = self.get_coordinates_for_path(plan)
             
-        # Phase 9: Add interpolation steps for the paths (visualizatino) 
-        # self.coordinated_plan = self.post_process(self.coordinated_plan)
-        transformer = Transformer.from_crs("epsg:32633", "epsg:4326", always_xy=True)
-
         rows = []
         for agent, path in self.coordinated_plan.items():
             for (x0, y0), (x1, y1), t in path:
@@ -381,13 +318,58 @@ class Builder(MVMTSPConfig):
                     'time_step':  t
                 })
         df = pd.DataFrame(rows)
-        # print("--------------------------------artemis-------------------------------------------------", df)
-        df.to_csv('./dummy_app/drone_centroids_path.csv', index=False)
+        df.to_csv(CENTROIDS_PATH, index=False)
 
         self.latest_run_summary = self.build_run_summary()
+        overall_statuses = [result.normalized_status for result in cluster_results]
+
+        # Here the path has been solved for each cluster. 
+        if overall_statuses and all(status == "optimal" for status in overall_statuses):
+            normalized_status = "optimal"
+            raw_status = "Optimal"
+
+        elif overall_statuses and all(status in {"optimal", "feasible", "feasible_time_limit"} for status in overall_statuses):
+            normalized_status = "feasible"
+            raw_status = "Feasible"
+
+        else:
+            normalized_status = "error"
+            raw_status = "Error"
+
+        objective_value = self.latest_run_summary.get("objective_value")
+        time_limit = self.run_request.solver_time_limit_seconds if self.run_request is not None else self.solver_time_limit_seconds
+
+        self.latest_model_run_result = ModelRunResult(
+            run_id=self.metrics.run_id,
+            instance_id=self.current_problem_instance.instance_id,
+            model_name=self.model_name,
+            raw_status=raw_status,
+            normalized_status=normalized_status,
+            objective_value=float(objective_value) if objective_value is not None else None,
+            incumbent_value=float(objective_value) if objective_value is not None else None,
+            best_bound=float(objective_value) if normalized_status == "optimal" and objective_value is not None else None,
+            absolute_gap=compute_absolute_gap(
+                float(objective_value) if objective_value is not None else None,
+                float(objective_value) if normalized_status == "optimal" and objective_value is not None else None,
+            ),
+            relative_gap=compute_relative_gap(
+                float(objective_value) if objective_value is not None else None,
+                float(objective_value) if normalized_status == "optimal" and objective_value is not None else None,
+            ),
+            elapsed_time_seconds=float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
+            time_limit_seconds=float(time_limit) if time_limit is not None else None,
+            termination_reason=infer_termination_reason(raw_status, time_limit),
+            summary=dict(self.latest_run_summary),
+            cluster_results=cluster_results,
+            diagnostics={
+                "solve_status_history": list(self.solve_status_history),
+                "cluster_status_records": list(self.cluster_status_records),
+                "coordinated_plan_agents": sorted(self.coordinated_plan.keys()),
+            },
+        )
+
         if self.learning_enabled and self.learning_controller is not None:
             self.learning_controller.finish_episode(self, self.latest_run_summary)
-
 
         return self.coordinated_plan     
 
@@ -398,6 +380,10 @@ class Builder(MVMTSPConfig):
         self.latest_run_summary = {}
         self.latest_run_report = {}
         self.latest_run_report_path = ""
+        self.latest_artifact_dir = ""
+        self.latest_model_run_result = None
+        self.current_problem_instance = None
+        self.run_request = None
         self.problem_results = defaultdict()
         self.coordinated_plan = defaultdict(dict)
         self.plan_with_nodes = defaultdict(dict)
@@ -415,11 +401,38 @@ class Builder(MVMTSPConfig):
     def apply_runtime_configuration(self, runtime_config: Dict[str, Any]) -> None:
         self.stage_solution = int(runtime_config.get("stage_solution", self.stage_solution))
         self.ga_generations = int(runtime_config.get("ga_generations", self.ga_generations))
-        self.solver_time_limit_seconds = runtime_config.get("time_limit_seconds", self.solver_time_limit_seconds)
+        self.solver_time_limit_seconds = runtime_config.get(
+            "solver_time_limit_seconds",
+            runtime_config.get("time_limit_seconds", self.solver_time_limit_seconds),
+        )
         self.warm_start_mode = str(runtime_config.get("warm_start_mode", self.warm_start_mode))
         self.objective_weights = runtime_config.get("objective_weights", self.objective_weights)
         self.clustering_feature_weights = runtime_config.get("clustering_feature_weights", self.clustering_feature_weights)
         self.enable_ga = bool(runtime_config.get("enable_ga", self.base_enable_ga))
+        self.model_name = str(runtime_config.get("model_name", self.model_name))
+        self.subtour_strategy = str(runtime_config.get("subtour_strategy", self.subtour_strategy))
+        self.solver_backend = str(runtime_config.get("solver_backend", self.solver_backend))
+        self.objective_strategy = str(runtime_config.get("objective_strategy", self.objective_strategy))
+        self.scenario_constraint_set = str(runtime_config.get("scenario_constraint_set", self.scenario_constraint_set))
+
+
+    def build_run_request(self) -> ModelRunRequest:
+        return ModelRunRequest(
+            model_name=self.model_name,
+            solver_backend=self.solver_backend,
+            subtour_strategy=self.subtour_strategy,
+            scenario_constraint_set=self.scenario_constraint_set,
+            objective_strategy=self.objective_strategy,
+            warm_start_strategy=self.warm_start_mode,
+            solver_time_limit_seconds=self.solver_time_limit_seconds,
+            objective_weights=dict(self.objective_weights),
+            clustering_feature_weights=dict(self.clustering_feature_weights),
+            options={
+                "stage_solution": self.stage_solution,
+                "enable_ga": self.enable_ga,
+                "ga_generations": self.ga_generations,
+            },
+        )
     
 
     def get_coordinates_for_path(self, path): 
@@ -447,125 +460,165 @@ class Builder(MVMTSPConfig):
         return super().cluster_prioritization(clusters, cue_groups, distance_matrix)
     
 
-    def clustering(self, cluster, cluster_id, assignment, depot_id)->Dict:
-
-        SCENARIO = self.scenario 
-        OBJECTIVE = self.objective_function
-        STAGE_SOLUTION = self.stage_solution
-
-        # Step 1: Create the cluster object to accomodate the problem.  
+    def solve_cluster_instance(self, instance, cluster_input, request: ModelRunRequest) -> ClusterSolveResult:
         cluster_object = Cluster(
-            cluster=cluster, 
-            id=cluster_id, 
-            assignment=assignment, 
-            depot_id=depot_id, 
-            max_battery=self.max_battery
+            cluster=cluster_input.cluster_frame,
+            id=cluster_input.cluster_id,
+            assignment=cluster_input.assigned_agents,
+            depot_id=cluster_input.depot_id,
+            max_battery=self.max_battery,
         )
 
         context = cluster_object.get_cluster_content(
             distance=self.distance_columns,
             energy=self.energy_columns,
             time=self.travel_time_columns,
-            column_names= ["dists", "ees", "travel_times", "area_ids"]
+            column_names=["dists", "ees", "travel_times", "area_ids"],
         )
-  
-        logger.debug(f"Clustering with {cluster_id} and agents assigned to it: {assignment}")
-        
-        # Step 2: Process inpute context 
-        try: 
-            cluster_object.prepare_context(
-                context=context, 
-                builder=self 
-            )
-            logger.debug(f"✅ Context prepared for cluster {cluster_id} successfully...")
-        except Exception as e: 
-            logger.exception(f"❌ Error processing cluster {cluster_id}: {e}")
-            raise ValueError(f"Error processing cluster {cluster_id}: {e}")
+
+        logger.debug(f"Clustering with {cluster_input.cluster_id} and agents assigned to it: {cluster_input.assigned_agents}")
+
+        try:
+            cluster_object.prepare_context(context=context, builder=self)
+            logger.debug(f"✅ Context prepared for cluster {cluster_input.cluster_id} successfully...")
+        except Exception as exc:
+            logger.exception(f"❌ Error processing cluster {cluster_input.cluster_id}: {exc}")
+            raise ValueError(f"Error processing cluster {cluster_input.cluster_id}: {exc}") from exc
 
         cluster_object.set_up_virtual_nodes_properties()
-        
-        # Step 3: Estimate the timeframe from the initial paths 
         cluster_object.get_estimated_time_frame(self)
-
-        # Step 3.5 : Calculate the average throughput and SNR 
         self.get_cluster_coverage(cluster_object)
 
         del context
         gc.collect()
 
-        # Step 4: Create and configure the optimization problem 
-        try: 
+        try:
             paths = cluster_object.problem_formulation(
-                builder=self, 
-                scenario=SCENARIO, 
-                objective_function=OBJECTIVE,
-                 stage_solution=STAGE_SOLUTION)
-            
-            logger.debug(f"✅ Problem created for cluster {cluster_id} successfully...")
+                builder=self,
+                scenario=self.scenario,
+                objective_function=self.objective_function,
+                stage_solution=self.stage_solution,
+            )
+            logger.debug(f"✅ Problem created for cluster {cluster_input.cluster_id} successfully...")
+        except Exception as exc:
+            logger.exception(f"❌ Error creating problem for cluster {cluster_input.cluster_id}: {exc}")
+            raise ValueError(f"Error in creating the problem for Cluster {cluster_input.cluster_id}") from exc
 
-        except Exception as e:
-            logger.exception(f"❌ Error creating problem for cluster {cluster_id}: {e}")
-            raise ValueError(f"Error in creating the problem for Cluster {cluster_id}")
-
-        # Step 5: Calculate the results for the cluster 
         results = common.extract_per_agent_metrics(
-            paths=paths, 
+            paths=paths,
             costs=self.problem_cost_data,
-            coverage_energy=self.average_coverage_energy, 
+            coverage_energy=self.average_coverage_energy,
             virtual_nodes=cluster_object.virtual_nodes,
-            area_ids=cluster_object.original_nodes_dict.values(), 
-            file_id=self.id  
+            area_ids=cluster_object.original_nodes_dict.values(),
+            file_id=self.id,
         )
 
-        # Total results for all agents inside the cluster. 
-        totalDistance, totalEnergy, totalTime = common.calculate_totals_from_paths(
-            results=results
-        )
-        
+        total_distance, total_energy, total_time = common.calculate_totals_from_paths(results=results)
         self.total_data_rate += cluster_object.total_data_achievable
         self.makespan += cluster_object.makespan_value
 
-        self.problem_results[f'Cluster_{cluster_object.id}'] = {
-            "scenario_name":SCENARIO,
-            "objective_function":OBJECTIVE,
-            "agent_results":results, 
-            "Total Distance": totalDistance, 
-            "Total Energy":totalEnergy, 
-            "Total Time": totalTime, 
-            "Average Throughput": cluster_object.R, 
-            "Average SINR" : cluster_object.sinr,
+        self.problem_results[f"Cluster_{cluster_object.id}"] = {
+            "scenario_name": self.scenario,
+            "objective_function": self.objective_function,
+            "agent_results": results,
+            "Total Distance": total_distance,
+            "Total Energy": total_energy,
+            "Total Time": total_time,
+            "Average Throughput": cluster_object.R,
+            "Average SINR": cluster_object.sinr,
             "Makespan": cluster_object.makespan,
             "Total_Data_Transfer": cluster_object.total_data_collected_main,
         }
-        self.cluster_status_records.append(
-            {
-                "cluster_id": cluster_object.id,
-                "status_code": int(cluster_object.problem.status),
-                "status": pl.LpStatus.get(cluster_object.problem.status, "Unknown"),
-                "agent_count": len(assignment),
-                "node_count": len(cluster_object.original_nodes_dict),
-            }
-        )
+
+        raw_status = pl.LpStatus.get(cluster_object.problem.status, "Unknown")
+        solve_metadata = dict(getattr(cluster_object, "solve_metadata", {}))
+        cluster_status_record = {
+            "cluster_id": cluster_object.id,
+            "status_code": int(cluster_object.problem.status),
+            "status": raw_status,
+            "agent_count": len(cluster_input.assigned_agents),
+            "node_count": len(cluster_object.original_nodes_dict),
+            "subtour_strategy": request.subtour_strategy,
+            "solver_backend": request.solver_backend,
+        }
+        self.cluster_status_records.append(cluster_status_record)
         self.metrics.record_cluster_result(
             {
                 "cluster_id": cluster_object.id,
-                "status": pl.LpStatus.get(cluster_object.problem.status, "Unknown"),
-                "agent_count": len(assignment),
+                "status": raw_status,
+                "agent_count": len(cluster_input.assigned_agents),
                 "node_count": len(cluster_object.original_nodes_dict),
-                "total_distance": totalDistance,
-                "total_energy": totalEnergy,
-                "total_time": totalTime,
+                "total_distance": total_distance,
+                "total_energy": total_energy,
+                "total_time": total_time,
                 "average_throughput": dict(cluster_object.R),
                 "average_sinr": dict(cluster_object.sinr),
                 "makespan": cluster_object.makespan_value,
                 "total_data_transfer": cluster_object.total_data_collected_main.value(),
+                "subtour_strategy": request.subtour_strategy,
+                "solver_backend": request.solver_backend,
             }
         )
 
-        paths = self.synchronize_agent_paths(paths, cluster_object)
-        paths = self.flatten_paths_on_time(self.coordinated_plan, paths)  
+        synced_paths = self.synchronize_agent_paths(paths, cluster_object)
+        self.flatten_paths_on_time(self.coordinated_plan, synced_paths)
 
-        return paths 
+        cluster_metrics = {
+            "agent_count": len(cluster_input.assigned_agents),
+            "node_count": len(cluster_object.original_nodes_dict),
+            "priority_rank": cluster_input.priority_rank,
+            "total_distance": total_distance,
+            "total_energy": total_energy,
+            "total_time": total_time,
+            "makespan": cluster_object.makespan_value,
+            "total_data_transfer": cluster_object.total_data_collected_main.value(),
+        }
+        return ClusterSolveResult(
+            cluster_id=cluster_object.id,
+            raw_status=raw_status,
+            normalized_status=normalize_solver_status(raw_status),
+            status_code=int(cluster_object.problem.status),
+            objective_value=solve_metadata.get("objective_value"),
+            incumbent_value=solve_metadata.get("incumbent_value"),
+            best_bound=solve_metadata.get("best_bound"),
+            absolute_gap=solve_metadata.get("absolute_gap"),
+            relative_gap=solve_metadata.get("relative_gap"),
+            elapsed_time_seconds=0.0,
+            time_limit_seconds=solve_metadata.get("time_limit_seconds"),
+            termination_reason=solve_metadata.get(
+                "termination_reason",
+                infer_termination_reason(raw_status, solve_metadata.get("time_limit_seconds")),
+            ),
+            agent_paths=synced_paths,
+            agent_metrics={str(agent_id): metrics for agent_id, metrics in results.items()},
+            cluster_metrics=cluster_metrics,
+            diagnostics={
+                "priority_rank": cluster_input.priority_rank,
+                "bridge_nodes": list(cluster_object.bridge_nodes),
+                "virtual_nodes": dict(cluster_object.virtual_nodes),
+                "request": asdict(request),
+            },
+        )
+
+
+    def clustering(self, cluster, cluster_id, assignment, depot_id)->Dict:
+        legacy_request = self.run_request or self.build_run_request()
+        cluster_result = self.solve_cluster_instance(
+            instance=self.current_problem_instance,
+            cluster_input=type(
+                "LegacyClusterInput",
+                (),
+                {
+                    "cluster_frame": cluster,
+                    "cluster_id": cluster_id,
+                    "assigned_agents": assignment,
+                    "depot_id": depot_id,
+                    "priority_rank": None,
+                },
+            )(),
+            request=legacy_request,
+        )
+        return cluster_result.agent_paths
 
 
     def get_depot_index(self, ordered_nodes, k): 
@@ -818,6 +871,16 @@ class Builder(MVMTSPConfig):
             cluster_results=dict(self.problem_results),
             solve_status_history=self.solve_status_history,
         )
+        if self.current_problem_instance is not None and self.run_request is not None and self.latest_model_run_result is not None:
+            artifact_dir = persist_run_artifacts(
+                base_dir=self.metrics.base_dir,
+                instance=self.current_problem_instance,
+                request=self.run_request,
+                result=self.latest_model_run_result,
+            )
+            self.latest_artifact_dir = str(artifact_dir)
+            self.latest_run_report["artifact_dir"] = self.latest_artifact_dir
+            self.latest_run_report["model_run_result"] = asdict(self.latest_model_run_result)
         report_path = self.metrics.persist_run_report(self.latest_run_report)
         self.latest_run_report_path = str(report_path)
 
@@ -880,6 +943,10 @@ class Builder(MVMTSPConfig):
             )
 
         return {
+            "model_name": self.model_name,
+            "solver_backend": self.solver_backend,
+            "subtour_strategy": self.subtour_strategy,
+            "objective_strategy": self.objective_strategy,
             "solve_time_seconds": float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
             "timeout_flag": timeout_flag,
             "feasible_flag": feasible_flag,
@@ -913,9 +980,12 @@ class Builder(MVMTSPConfig):
 
 
     def build_failed_run_summary(self, exc: Exception) -> Dict[str, Any]:
-        statuses = [record["status"] for record in self.solve_status_history]
+        statuses = [record.get("raw_status", record.get("status", "Unknown")) for record in self.solve_status_history]
         timeout_flag = 1.0 if "timeout" in str(exc).lower() or any(status in {"Not Solved", "Undefined"} for status in statuses) else 0.0
         return {
+            "model_name": self.model_name,
+            "solver_backend": self.solver_backend,
+            "subtour_strategy": self.subtour_strategy,
             "solve_time_seconds": float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
             "timeout_flag": timeout_flag,
             "feasible_flag": 0.0,

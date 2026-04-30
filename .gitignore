@@ -34,5 +34,6 @@ dummy_app/normalized_trajectory_astar.csv
 vps_env
 AGENTS.md 
 PLAN.md 
+REFACTOR.md
 DATASET_PLAN.md
 __pycache__

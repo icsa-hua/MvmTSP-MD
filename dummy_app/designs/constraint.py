@@ -1,4 +1,5 @@
 from dummy_app.tools.logger import logger 
+from dummy_app.models.milp.subtour.strategies import apply_subtour_constraints
 
 import pulp as pl 
 import numpy as np 
@@ -24,7 +25,7 @@ def get_depot_node(depot_id, nodes_dict):
     return reverse[depot_id]
 
 
-def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, list_of_agents:dict): 
+def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, list_of_agents:dict, subtour_strategy: str = "mtz"): 
     """
     This function sets all the constraints (Spatial flow, Energy constraints, Time progression, synchronization and path completion) 
     NOTE: No objective function is enforced here. Constraints are mathematical inequalities and are linear. This scenario 
@@ -64,17 +65,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
-    # MTZ subtour elimination constraints 
-    n = len(NODES)
-    for k in agents:
-        for i in NODES: 
-            for j in NODES: 
-                if i == j: continue 
-                model += cluster.p[i,k] - cluster.p[j,k] + n*cluster.x[i,j,k] <= n - 1
-
-    # MTZ positional exclusion of depot
-    for k in agents: 
-        model += cluster.p[depot_ind,k] == 0
+    apply_subtour_constraints(cluster, agents, NODES, depot_ind, subtour_strategy)
     
     M = TF[-1]
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
@@ -182,7 +173,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
 
 
     
-def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict):
+def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict, subtour_strategy: str = "mtz"):
     """
     This function sets all the constraints (Spatial flow, Energy constraints, Time progression, synchronization and path completion) 
     NOTE: No objective function is enforced here. Constraints are mathematical inequalities and are linear. This scenario 
@@ -227,17 +218,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
-    # MTZ subtour elimination 
-    n = len(NODES)
-    for k in agents:
-        for i in NODES: 
-            for j in NODES: 
-                if i == j: continue 
-                model += cluster.p[i,k] - cluster.p[j,k] + n*cluster.x[i,j,k] <= n - 1
-
-    # Depot exclusion from the MTZ elimination 
-    for k in agents: 
-        model += cluster.p[depot_ind,k] == 0
+    apply_subtour_constraints(cluster, agents, NODES, depot_ind, subtour_strategy)
    
     # Collision avoidance defined by precedence (to visit a node, an agent must ensure that the other agent has entered, serviced and left the next node) 
     M = TF[-1]

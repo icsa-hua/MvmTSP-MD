@@ -94,11 +94,10 @@ class Metrics:
     def persist_run_report(self, report: Dict[str, Any]) -> Path:
         report_path = self.base_dir / f"{report['run_id']}.json"
         serializable_report = self._deep_stringify_keys(report)
-        try: 
-            with report_path.open("w", encoding="utf-8") as handle:
-                json.dump(serializable_report, handle, indent=2, default=self._json_default, sort_keys=True)
-        except Exception as e: 
-            import pdb;pdb.set_trace()
+        tmp_path = report_path.with_suffix(f"{report_path.suffix}.tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(serializable_report, handle, indent=2, default=self._json_default, sort_keys=True)
+        tmp_path.replace(report_path)
 
         self._append_summary_row(report)
         return report_path
