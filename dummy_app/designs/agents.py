@@ -64,7 +64,7 @@ class TSPAgent:
 
 class TSPAgents: 
 
-    def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False, altitude:int=1250):
+    def __init__(self, mobility_env:Any, agent_paths:dict, empty:bool=False, altitude:int=1250, render: bool = True):
         
         # Placeholder for the group of agents when initializing the map
         if empty: 
@@ -76,6 +76,7 @@ class TSPAgents:
             self.path_colors = []
             self.scatter:Any = None 
             self.altitude = altitude
+            self.render = render
 
 
         else: 
@@ -84,21 +85,24 @@ class TSPAgents:
             self.ax = self.mobility_env.ax
             agent_paths = agent_paths or {}
             self.altitude = altitude
+            self.render = render
             self.agents = [TSPAgent(id, path, self.altitude) for (id), path in agent_paths.items()]
             
             self.path_lines = []  # To store line objects for each agent
             n_agents = len(self.agents)
             self.agent_colors, self.path_colors = generate_agent_colormap(n_agents)
-           
-            for i, agent in enumerate(self.agents):
-                # Initially empty line plot for each agent
-                line, = self.ax.plot([], [], color=self.path_colors[i],linestyle='--', linewidth=2.5 , zorder=5)
-                self.path_lines.append(line)
 
-            self.scatter = self.ax.scatter([], [], s=200,  marker='^', label='Agents',  edgecolors='black', alpha=1 )
-            
-            for i, agent in enumerate(self.agents):
-                self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
+            if self.render and self.ax is not None:
+                for i, agent in enumerate(self.agents):
+                    line, = self.ax.plot([], [], color=self.path_colors[i],linestyle='--', linewidth=2.5 , zorder=5)
+                    self.path_lines.append(line)
+
+                self.scatter = self.ax.scatter([], [], s=200,  marker='^', label='Agents',  edgecolors='black', alpha=1 )
+                
+                for i, agent in enumerate(self.agents):
+                    self.ax.plot([], [], color=self.agent_colors[i], label=f'Agent {agent.agent_id}')
+            else:
+                self.scatter = None
 
             # This is necessary for the visualization of the agents. Otherwise nothing shows on the same plot 
             self.process = self.mobility_env.env.process(self.simulate())
@@ -140,7 +144,7 @@ class TSPAgents:
                 agent.update_position(timestep)
                 agent.append_history(timestep)
                 path = agent.plan  # Assume path is a list of (x, y) coordinates
-                if path:
+                if path and self.render and i < len(self.path_lines):
                     # Update paths with each simulation iteration (not the best)
                     history = agent.history
                     x_hist, y_hist,t  = zip(*history)

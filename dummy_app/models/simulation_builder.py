@@ -7,7 +7,7 @@ import dummy_app.tools.common as common
 from dummy_app.core.schemas.request import ModelRunRequest
 from dummy_app.core.schemas.result import ClusterSolveResult, ModelRunResult
 from dummy_app.core.statuses import compute_absolute_gap, compute_relative_gap, infer_termination_reason, normalize_solver_status
-from dummy_app.pipeline.artifacts import persist_run_artifacts
+from dummy_app.pipeline.artifacts import persist_playback_artifacts, persist_run_artifacts
 from dummy_app.pipeline.instance_builder import build_problem_instance
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
@@ -95,6 +95,8 @@ class Builder(MVMTSPConfig):
         self.latest_run_report: Dict[str, Any] = {}
         self.latest_run_report_path: str = ""
         self.latest_artifact_dir: str = ""
+        self.latest_playback_rows: List[Dict[str, Any]] = []
+        self.latest_playback_metadata: Dict[str, Any] = {}
         self.current_problem_instance = None
         self.run_request: ModelRunRequest | None = None
         self.latest_model_run_result: ModelRunResult | None = None
@@ -320,6 +322,7 @@ class Builder(MVMTSPConfig):
                 })
         df = pd.DataFrame(rows)
         df.to_csv(CENTROIDS_PATH, index=False)
+        self.latest_playback_rows, self.latest_playback_metadata = self.build_playback_timeline(rows)
 
         self.latest_run_summary = self.build_run_summary()
         overall_statuses = [result.normalized_status for result in cluster_results]
@@ -382,6 +385,8 @@ class Builder(MVMTSPConfig):
         self.latest_run_report = {}
         self.latest_run_report_path = ""
         self.latest_artifact_dir = ""
+        self.latest_playback_rows = []
+        self.latest_playback_metadata = {}
         self.latest_model_run_result = None
         self.current_problem_instance = None
         self.run_request = None
@@ -451,6 +456,84 @@ class Builder(MVMTSPConfig):
                 continue
 
         return coordinates
+
+
+    def build_playback_timeline(self, coordinate_rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        if not coordinate_rows:
+            return [], {"max_time_step": 0, "num_agents": 0}
+
+        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in coordinate_rows:
+            grouped[str(row["agent"])].append(dict(row))
+
+        playback_rows: List[Dict[str, Any]] = []
+        for agent_id, agent_rows in grouped.items():
+            agent_rows.sort(key=lambda item: int(item["time_step"]))
+            index = 0
+            while index < len(agent_rows):
+                current = agent_rows[index]
+                segment_rows = [current]
+                next_index = index + 1
+                while next_index < len(agent_rows):
+                    candidate = agent_rows[next_index]
+                    if int(candidate["time_step"]) != int(segment_rows[-1]["time_step"]) + 1:
+                        break
+                    if (
+                        float(candidate["from_x"]) != float(current["from_x"])
+                        or float(candidate["from_y"]) != float(current["from_y"])
+                        or float(candidate["to_x"]) != float(current["to_x"])
+                        or float(candidate["to_y"]) != float(current["to_y"])
+                    ):
+                        break
+                    segment_rows.append(candidate)
+                    next_index += 1
+
+                duration = len(segment_rows)
+                is_wait_segment = (
+                    float(current["from_x"]) == float(current["to_x"])
+                    and float(current["from_y"]) == float(current["to_y"])
+                )
+                for offset, segment_row in enumerate(segment_rows):
+                    if is_wait_segment:
+                        x_pos = float(current["from_x"])
+                        y_pos = float(current["from_y"])
+                    else:
+                        progress = float(offset + 1) / float(max(duration, 1))
+                        x_pos = float(current["from_x"]) + (float(current["to_x"]) - float(current["from_x"])) * progress
+                        y_pos = float(current["from_y"]) + (float(current["to_y"]) - float(current["from_y"])) * progress
+
+                    playback_rows.append(
+                        {
+                            "agent": agent_id,
+                            "time_step": int(segment_row["time_step"]),
+                            "x": x_pos,
+                            "y": y_pos,
+                            "segment_type": "wait" if is_wait_segment else "move",
+                            "from_x": float(current["from_x"]),
+                            "from_y": float(current["from_y"]),
+                            "to_x": float(current["to_x"]),
+                            "to_y": float(current["to_y"]),
+                        }
+                    )
+
+                index = next_index
+
+        playback_df = pd.DataFrame(playback_rows)
+        if not playback_df.empty:
+            playback_df = (
+                playback_df.sort_values(["agent", "time_step"])
+                .drop_duplicates(subset=["agent", "time_step"], keep="last")
+                .reset_index(drop=True)
+            )
+        metadata = {
+            "max_time_step": int(playback_df["time_step"].max()) if not playback_df.empty else 0,
+            "min_x": float(playback_df["x"].min()) if not playback_df.empty else 0.0,
+            "max_x": float(playback_df["x"].max()) if not playback_df.empty else 0.0,
+            "min_y": float(playback_df["y"].min()) if not playback_df.empty else 0.0,
+            "max_y": float(playback_df["y"].max()) if not playback_df.empty else 0.0,
+            "num_agents": int(playback_df["agent"].nunique()) if not playback_df.empty else 0,
+        }
+        return playback_df.to_dict(orient="records"), metadata
 
 
     def regionalization(self, GDF):
@@ -882,6 +965,12 @@ class Builder(MVMTSPConfig):
                 result=self.latest_model_run_result,
             )
             self.latest_artifact_dir = str(artifact_dir)
+            if self.latest_playback_rows:
+                persist_playback_artifacts(
+                    artifact_dir=artifact_dir,
+                    playback_rows=self.latest_playback_rows,
+                    playback_metadata=self.latest_playback_metadata,
+                )
             self.latest_run_report["artifact_dir"] = self.latest_artifact_dir
             self.latest_run_report["model_run_result"] = asdict(self.latest_model_run_result)
         report_path = self.metrics.persist_run_report(self.latest_run_report)

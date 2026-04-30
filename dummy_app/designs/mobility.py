@@ -170,7 +170,8 @@ class GroundUserGroup:
                                   self.alpha3 * np.random.normal(0.0))
 
             self.update_plot() 
-            plt.draw()  
+            if getattr(self.mobility_env, "render", True):
+                plt.draw()  
             # if hasattr(self.mobility_env, "timestep"):
             #     self.mobility_env.timestep += 1 
             yield self.mobility_env.env.timeout(1)

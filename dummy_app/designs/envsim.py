@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
+from collections import defaultdict
 from typing import Any, List, Dict, Optional
 
 # import pyvista as pv # This was initially tested for 3D animation 
@@ -20,20 +21,24 @@ class EnvSim:
     every time it is needed (a.k.a. at the start and when the agents finish their
     mission. 
     """
-    def __init__(self, trials)->None: 
+    def __init__(self, trials, render: bool = True)->None: 
 
         self.env = simpy.Environment()
         self.ready_event = self.env.event()
         self.TimeWindow = list(range(0,trials,1)) # discrete time window for simulation 
         self.timestep:int = self.TimeWindow[0] 
         self.session_duration = 0 
+        self.trials = trials
+        self.render = render
+        self.completed_sessions = 0
+        self.combined_paths = defaultdict(list)
         
         self.optimization_guard_flag:bool = False
         self.processes_initialized:bool = False 
         
-        self.fig, self.ax = self.__init_plot()    
+        self.fig, self.ax = self.__init_plot() if self.render else (None, None)
         
-        self.agent_group:Optional[TSPAgents] = TSPAgents(self.env,{}, empty=True)
+        self.agent_group:Optional[TSPAgents] = TSPAgents(self,{}, empty=True, render=self.render)
         
         #--- PYVISTA Setup --- self.plotter = pv.Plotter(window_size=[1200,800]) self.user_actors = {} self.agent_actors = {} self.path_actors = {} 
 
@@ -41,17 +46,16 @@ class EnvSim:
     def optimization_process(self, constructor:Any, distance_matrix:np.ndarray, data:pd.DataFrame, cue_groups:Dict[int,List[Any]], altitude:int):
         logger.debug("Running optimization process...")
         
-        detailed_log = constructor.run_model(distance_matrix, data, cue_groups)
+        raw_detailed_log = constructor.run_model(distance_matrix, data, cue_groups)
         constructor.gather_results() 
+        local_duration = get_session_duration(raw_detailed_log) if raw_detailed_log else 0
+        detailed_log = add_session_time(raw_detailed_log, self.session_duration) if self.session_duration > 0 else raw_detailed_log
+        self._append_combined_paths(detailed_log)
+        self.agent_group = TSPAgents(self, detailed_log, altitude=altitude, render=self.render)
+        self.session_duration += local_duration
+        self.completed_sessions += 1
 
-        self.agent_group = TSPAgents(self, detailed_log, altitude=altitude)
-
-        if self.session_duration > 0 :
-           detailed_log = add_session_time(detailed_log, self.session_duration)
-
-        self.session_duration += get_session_duration(detailed_log)
-
-        constructor.Time += self.session_duration 
+        constructor.Time = self.session_duration 
         self.ready_event.succeed()
         self.optimization_guard_flag = False 
 
@@ -105,6 +109,41 @@ class EnvSim:
         self.ax.legend()
         self.env.step()
         return cues, self.agent_group
+
+
+    def run_headless(
+        self,
+        constructor: Any,
+        cues: Any,
+        distance_matrix: np.ndarray,
+        data: pd.DataFrame,
+        altitude: int,
+        trials: int,
+    ) -> Any:
+        self.completed_sessions = 0
+        self.session_duration = 0
+        self.combined_paths = defaultdict(list)
+        self.optimization_process(constructor, distance_matrix, data, cues.group, altitude=altitude)
+
+        while self.completed_sessions < trials:
+            if constructor.Time == self.timestep and not self.optimization_guard_flag:
+                self.optimization_guard_flag = True
+                self.ready_event = self.env.event()
+                logger.info(f"Re-optimizing at simulator time {self.env.now}")
+                self.optimization_process(constructor, distance_matrix, data, cues.group, altitude=altitude)
+                continue
+
+            try:
+                self.env.step()
+            except simpy.core.EmptySchedule:
+                break
+
+        return constructor
+
+
+    def _append_combined_paths(self, shifted_paths: Dict[Any, List[Any]]) -> None:
+        for agent_id, agent_path in shifted_paths.items():
+            self.combined_paths[agent_id].extend(agent_path)
     
 
     def __init_plot(self) -> tuple[Figure, Axes]:

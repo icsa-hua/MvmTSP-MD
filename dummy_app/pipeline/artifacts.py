@@ -108,3 +108,13 @@ def persist_run_artifacts(
     pd.DataFrame(cluster_metric_rows).to_csv(artifact_dir / "cluster_metrics.csv", index=False)
 
     return artifact_dir
+
+
+def persist_playback_artifacts(
+    artifact_dir: str | Path,
+    playback_rows: list[dict[str, Any]],
+    playback_metadata: dict[str, Any],
+) -> None:
+    artifact_path = Path(artifact_dir)
+    pd.DataFrame(playback_rows).to_csv(artifact_path / "playback_frames.csv", index=False)
+    _write_json(artifact_path / "playback_metadata.json", playback_metadata)
