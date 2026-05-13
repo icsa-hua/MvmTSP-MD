@@ -37,6 +37,7 @@ def extract_cluster_solution(cluster, builder: Any):
 
     for k in cluster.employed_agents:
         start_node = -1
+        start_offset = float(getattr(cluster.start_step[k], "varValue", 0.0) or 0.0)
         for j in NODES:
             if cluster.x[depot_ind, j, k].varValue > 0.5:
                 start_node = j
@@ -46,7 +47,7 @@ def extract_cluster_solution(cluster, builder: Any):
             continue
 
         real_start_node = cluster.virtual_nodes.get(dc[start_node], dc[start_node])
-        arrival_at_start_node = cluster.t[start_node, k].varValue
+        arrival_at_start_node = float(cluster.t[start_node, k].varValue) - start_offset
         for t_step in range(round(0.0), round(arrival_at_start_node)):
             detailed_log[k].append((dc[depot_ind], real_start_node, t_step))
 
@@ -68,7 +69,7 @@ def extract_cluster_solution(cluster, builder: Any):
                 break
 
             real_next_node = cluster.virtual_nodes.get(dc[next_node_in_path], dc[next_node_in_path])
-            arrival_at_current = cluster.t[current_node, k].varValue
+            arrival_at_current = float(cluster.t[current_node, k].varValue) - start_offset
             departure_from_current = arrival_at_current + builder.coverage_time
 
             for t_step in range(round(arrival_at_current), round(departure_from_current)):
@@ -76,9 +77,9 @@ def extract_cluster_solution(cluster, builder: Any):
 
             start_t_move = round(departure_from_current)
             if next_node_in_path == depot_ind:
-                arrival_at_next = cluster.return_step[k].varValue
+                arrival_at_next = float(cluster.return_step[k].varValue) - start_offset
             else:
-                arrival_at_next = cluster.t[next_node_in_path, k].varValue
+                arrival_at_next = float(cluster.t[next_node_in_path, k].varValue) - start_offset
 
             end_t_move = round(arrival_at_next)
             if start_t_move >= end_t_move and arrival_at_next >= departure_from_current:

@@ -8,16 +8,42 @@ from dummy_app.core.statuses import compute_absolute_gap, compute_relative_gap, 
 
 
 def solve_cluster_problem(cluster: Any, time_limit_seconds=None, solver_backend: str = "glpk") -> Dict[str, Any]:
-    if solver_backend != "glpk":
-        raise ValueError(f"Unsupported solver backend '{solver_backend}'. Only 'glpk' is currently implemented.")
 
-    cluster.problem.solve(
-        pl.GLPK_CMD(
-            timeLimit=time_limit_seconds,
-            msg=False,
-            options=["--mipgap", "0.0", "--seed", "42"],
+    if  solver_backend != 'gurobi' and solver_backend != "glpk" and solver_backend!='cbc' and solver_backend!='cplex' :
+        raise ValueError(f"Unsupported solver backend '{solver_backend}'. Only 'glpk' is currently implemented.")
+    
+    if solver_backend == 'glpk': 
+        cluster.problem.solve(
+            pl.GLPK_CMD(
+                timeLimit=time_limit_seconds,
+                msg=False,
+                options=["--mipgap", "0.0", "--seed", "42"],
+            )
         )
-    )
+    elif solver_backend == 'gurobi': 
+        cluster.problem.solve(
+            pl.GUROBI(
+                timeLimit=time_limit_seconds, 
+                msg=False, 
+            )
+        )
+
+    elif solver_backend == 'cbc': 
+        cluster.problem.solve(
+            pl.PULP_CBC_CMD(
+                timeLimit=time_limit_seconds, 
+                msg=False
+            )
+        )
+    elif solver_backend == 'cplex': 
+        cluster.problem.solve(
+            pl.CPLEX_CMD(
+                path="/Users/jimborg/Applications/CPLEX_Studio2212/cplex/bin/arm64_osx/cplex",
+                timeLimit=time_limit_seconds, 
+                msg=False
+            )
+        )
+
     raw_status = pl.LpStatus.get(cluster.problem.status, "Unknown")
     objective_value = None
     try:

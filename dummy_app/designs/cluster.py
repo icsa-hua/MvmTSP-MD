@@ -54,6 +54,8 @@ class Cluster:
         self.total_data_achievable:float = 0.0
         self.builder_objective_weights:Dict[str, float] = {}
         self.solve_metadata:Dict[str, Any] = {}
+        self.agent_start_times:Dict[int, float] = {}
+        self.absolute_makespan_value:float = 0.0
         
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -262,7 +264,8 @@ class Cluster:
             if builder.validate: 
                 self.validate_solution(objective_function=objective_function, builder=builder)
 
-            self.makespan_value = self.makespan.varValue
+            self.absolute_makespan_value = float(self.makespan.varValue or 0.0)
+            self.makespan_value = self.get_local_makespan_value()
             self.total_data_achievable = self.total_data_collected_main.value() 
 
             logger.info(f"{objective_function} optimization returned makespan: {self.makespan_value} and total data collected: {self.total_data_achievable}")
@@ -324,7 +327,8 @@ class Cluster:
                 )
                 builder.solve_problem(self)
 
-            self.makespan_value = self.makespan.varValue
+            self.absolute_makespan_value = float(self.makespan.varValue or 0.0)
+            self.makespan_value = self.get_local_makespan_value()
             self.total_data_achievable = self.total_data_collected_main.value() 
 
             logger.info(f"{objective_function} optimization returned makespan: {self.makespan_value} and total data collected: {self.total_data_achievable}")
@@ -514,6 +518,17 @@ class Cluster:
             target = self.virtual_nodes[nodes[j]]
 
         return math.ceil(builder.travel_cost[source, target])
+
+
+    def get_local_makespan_value(self) -> float:
+        local_return_steps = []
+        for agent_id in self.employed_agents:
+            return_value = getattr(self.return_step[agent_id], "varValue", None)
+            if return_value is None:
+                continue
+            start_value = float(self.agent_start_times.get(agent_id, 0.0))
+            local_return_steps.append(max(float(return_value) - start_value, 0.0))
+        return max(local_return_steps, default=0.0)
              
 
     def check_results_file(self, name, directory, type): 

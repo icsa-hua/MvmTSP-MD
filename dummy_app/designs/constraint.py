@@ -71,13 +71,18 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
     dept = cluster.original_nodes_dict[original_depot_ind]
 
+    # Depot-side operational release time for the current cluster solve.
+    for k in agents:
+        agent_release_time = float(getattr(cluster, "agent_start_times", {}).get(k, 0.0))
+        model += cluster.start_step[k] >= agent_release_time, f"depot_release_lb_{cluster.id}_{k}"
+        model += cluster.start_step[k] <= agent_release_time, f"depot_release_ub_{cluster.id}_{k}"
+
     # Time progression specific to match the depot case (No coverage time added) 
     for k in agents:
         for j in NODES:
             target = cluster.original_nodes_dict[j]
-            # Arrival at first node >= (Time at Depot + Wait at Depot) + Travel Time
-            # Assuming no wait time at the depot itself before starting the tour.
-            model += cluster.t[j, k] >= (0 + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
+            # Arrival at first node >= mission start at depot + travel time.
+            model += cluster.t[j, k] >= (cluster.start_step[k] + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
     
     # Time progression for the rest of the nodes in the cluster set (service time is dynamically allocated to find the optimal value) 
     for k in agents:
@@ -241,11 +246,15 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
     dept = cluster.original_nodes_dict[original_depot_ind]
     for k in agents:
+        agent_release_time = float(getattr(cluster, "agent_start_times", {}).get(k, 0.0))
+        model += cluster.start_step[k] >= agent_release_time, f"depot_release_lb_{cluster.id}_{k}"
+        model += cluster.start_step[k] <= agent_release_time, f"depot_release_ub_{cluster.id}_{k}"
+
+    for k in agents:
         for j in NODES:
             target = cluster.original_nodes_dict[j]
-            # Arrival at first node >= (Time at Depot + Wait at Depot) + Travel Time
-            # Assuming no wait time at the depot itself before starting the tour.
-            model += cluster.t[j, k] >= (0 + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
+            # Arrival at first node >= mission start at depot + travel time.
+            model += cluster.t[j, k] >= (cluster.start_step[k] + D[(dept, target)]) - M * (1 - cluster.x[depot_ind, j, k])
 
     # Time progression for the rest of the nodes inside the cluster set
     for k in agents:

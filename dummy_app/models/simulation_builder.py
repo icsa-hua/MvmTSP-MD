@@ -100,6 +100,7 @@ class Builder(MVMTSPConfig):
         self.current_problem_instance = None
         self.run_request: ModelRunRequest | None = None
         self.latest_model_run_result: ModelRunResult | None = None
+        self.agent_next_available_time: Dict[int, float] = {}
         self.optimization_model = MILPOptimizationModel(self)
         self.learning_enabled = bool(config.get("learning_enabled", False))
         self.learning_controller = None
@@ -400,6 +401,7 @@ class Builder(MVMTSPConfig):
         self.total_number_cluster = 0
         self.num_constraints = 0
         self.variables_count = 0
+        self.agent_next_available_time = {}
         self.enable_ga = self.base_enable_ga
         self.metrics.reset()
 
@@ -554,6 +556,10 @@ class Builder(MVMTSPConfig):
             depot_id=cluster_input.depot_id,
             max_battery=self.max_battery,
         )
+        cluster_object.agent_start_times = {
+            agent_id: float(self.agent_next_available_time.get(agent_id, 0.0))
+            for agent_id in cluster_input.assigned_agents
+        }
 
         context = cluster_object.get_cluster_content(
             distance=self.distance_columns,
@@ -602,6 +608,22 @@ class Builder(MVMTSPConfig):
         )
 
         total_distance, total_energy, total_time = common.calculate_totals_from_paths(results=results)
+        agent_finish_times = {}
+        agent_next_available_times = {}
+        for agent_id in cluster_input.assigned_agents:
+            energy_spent = float(results.get(agent_id, {}).get("energy", 0.0))
+            recharge_steps = float(common.calculate_recharge_steps(self.max_battery, energy_spent=energy_spent))
+            finish_time = float(getattr(cluster_object.return_step[agent_id], "varValue", 0.0) or 0.0)
+            next_available_time = finish_time + recharge_steps
+            agent_finish_times[agent_id] = finish_time
+            agent_next_available_times[agent_id] = next_available_time
+            self.agent_next_available_time[agent_id] = next_available_time
+            results.setdefault(agent_id, {})
+            results[agent_id]["scheduled_start_time"] = float(cluster_object.agent_start_times.get(agent_id, 0.0))
+            results[agent_id]["scheduled_finish_time"] = finish_time
+            results[agent_id]["next_available_time"] = next_available_time
+            results[agent_id]["recharge_steps"] = recharge_steps
+
         self.total_data_rate += cluster_object.total_data_achievable
         self.makespan += cluster_object.makespan_value
 
@@ -616,6 +638,9 @@ class Builder(MVMTSPConfig):
             "Average SINR": cluster_object.sinr,
             "Makespan": cluster_object.makespan,
             "Total_Data_Transfer": cluster_object.total_data_collected_main,
+            "agent_start_times": dict(cluster_object.agent_start_times),
+            "agent_finish_times": dict(agent_finish_times),
+            "agent_next_available_times": dict(agent_next_available_times),
         }
 
         raw_status = pl.LpStatus.get(cluster_object.problem.status, "Unknown")
@@ -659,6 +684,7 @@ class Builder(MVMTSPConfig):
             "total_energy": total_energy,
             "total_time": total_time,
             "makespan": cluster_object.makespan_value,
+            "absolute_makespan": cluster_object.absolute_makespan_value,
             "total_data_transfer": cluster_object.total_data_collected_main.value(),
         }
         return ClusterSolveResult(
@@ -684,6 +710,9 @@ class Builder(MVMTSPConfig):
                 "priority_rank": cluster_input.priority_rank,
                 "bridge_nodes": list(cluster_object.bridge_nodes),
                 "virtual_nodes": dict(cluster_object.virtual_nodes),
+                "agent_start_times": dict(cluster_object.agent_start_times),
+                "agent_finish_times": dict(agent_finish_times),
+                "agent_next_available_times": dict(agent_next_available_times),
                 "request": asdict(request),
             },
         )
@@ -867,7 +896,12 @@ class Builder(MVMTSPConfig):
         agent_end_times = {}
 
         for agent in paths: 
-            recharge_times[agent] = common.calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy'])
+            recharge_times[agent] = float(
+                problem_results[agent].get(
+                    'recharge_steps',
+                    common.calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy']),
+                )
+            )
             agent_end_times[agent] = paths[agent][-1][2] + recharge_times[agent] if paths[agent] else -1 
             self.problem_results[f'Cluster_{cluster.id}']['agent_results'][agent]['recharge_steps'] = recharge_times[agent]
 

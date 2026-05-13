@@ -8,6 +8,7 @@ def create_problem_variables(cluster, scenario: str = "cooperative") -> None:
     NODES = cluster.NODES
 
     cluster.x = pl.LpVariable.dicts("x", ((i, j, v) for i in V for j in V for v in cluster.employed_agents), cat="Binary")
+    cluster.start_step = pl.LpVariable.dicts("start_step", (v for v in cluster.employed_agents), lowBound=0, cat="Continuous")
     cluster.t = pl.LpVariable.dicts("t", ((i, v) for i in V for v in cluster.employed_agents), lowBound=0, cat="Continuous")
     cluster.visit = pl.LpVariable.dicts("v", ((j, v) for j in NODES for v in cluster.employed_agents), lowBound=0, upBound=1, cat="Binary")
     cluster.p = pl.LpVariable.dicts("p", ((j, v) for j in V for v in cluster.employed_agents), lowBound=0, upBound=len(V) - 1, cat="Integer")
