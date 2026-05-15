@@ -435,13 +435,14 @@ class Cluster:
 
 
     def get_average_coverage(self, user_points, altitude, user_height, terrain_type='rural', filename='outuput.csv'):
-        from dummy_app.models.coverage import coverage_probability, coverage_u2c
+        from dummy_app.models.coverage import average_coverage_diagnostics, coverage_probability, coverage_u2c
 
         average_R = defaultdict(float)
         average_sinr = defaultdict(float)
         R = defaultdict(list) 
         sinr = defaultdict(list) 
         user_per_area = defaultdict(int) 
+        coverage_diagnostics = []
         
         for i in self.nodes_dict.keys():
             
@@ -459,19 +460,17 @@ class Cluster:
                 horizontal_distance = np.linalg.norm(np.array(coords) - np.array(user_coords))
                 horizontal_distance = horizontal_distance / 1e3 # Convert to km
 
-                height_difference = altitude - user_height
-                dist = np.sqrt(horizontal_distance**2 + height_difference**2)
-
-                r_value, sinr_value = coverage_u2c(
-                    agent_to_user_dist=dist, 
-                    agent_altitude=altitude, 
-                    user_altitude=user_height, 
-                    agent_pos=coords, 
-                    terrain_type=terrain_type
+                r_value, sinr_value, diagnostics = coverage_u2c(
+                    agent_to_user_dist_km=horizontal_distance, 
+                    agent_altitude_km=altitude, 
+                    user_altitude_km=user_height, 
+                    terrain_type=terrain_type,
+                    return_details=True,
                 )
                 
                 R[i].append(r_value)
                 sinr[i].append(sinr_value)
+                coverage_diagnostics.append(diagnostics)
                 user_per_area[i] += 1
 
             # Convert to numpy arrays for easier calculations
@@ -484,17 +483,19 @@ class Cluster:
             num_users=dict(user_per_area),
             savefile_name=filename,
             directory=None,
-            snr=average_sinr,
+            snr=list(average_sinr.values()),
             save_artifacts=False,
         )
 
         self.R = average_R
         self.sinr = average_sinr
+        average_diagnostics = average_coverage_diagnostics(coverage_diagnostics)
         return {
             "cluster_id": self.id,
             "avg_rate_mbps_by_node": dict(average_R),
             "avg_sinr_db_by_node": dict(average_sinr),
             "users_per_node": dict(user_per_area),
+            "pathloss_diagnostics": average_diagnostics.to_dict() if average_diagnostics else {},
             "coverage_probability": coverage_summary,
         }
 

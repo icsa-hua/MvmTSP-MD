@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd 
 import matplotlib.pyplot as plt
 
+from dataclasses import asdict, dataclass
 from scipy.stats import norm 
 from scipy.integrate import quad
 from scipy.stats import gamma, lognorm, weibull_min 
@@ -23,37 +24,125 @@ Altitudes of agent and Target also in km
 coordinates in meters 
 '''
 
-def coverage_u2c(agent_to_user_dist, agent_altitude, user_altitude, agent_pos, terrain_type='rural'):
 
-    BW = 0.1e9 # Bandwidth in Hz (100MHz)
-    NF = 6 # Noise Figure in dB 
+@dataclass
+class CoverageDiagnostics:
+    terrain_type: str
+    bandwidth_hz: float
+    frequency_hz: float
+    shadowing_db: float
+    interference_w: float
+    agent_altitude_km: float
+    user_altitude_km: float
+    horizontal_distance_km: float
+    height_difference_km: float
+    theta_deg: float
+    fspl_db: float
+    p_los: float
+    p_nlos: float
+    los_loss_db: float
+    nlos_loss_db: float
+    final_pathloss_db: float
+    sample_count: int = 1
 
-    PU_dbm = 30 #agent transmit power # NOTE: 33 dBm or ~2W is a bit high for a medium-range UAV. Drop to 30 dBm or 1W for more realistic scenarios.
-    PU_W = 10 ** ((PU_dbm - 30)/10) # Watts 
+    def to_dict(self):
+        return asdict(self)
 
-    sigma_2_dBm = -174 + NF + 10 * np.log10(BW)
-    sigma_2_W = 10 ** ((sigma_2_dBm - 30) / 10) #convert from dBm (decibels referenced to 1 milliwatt) to Watts 
-    
-    pathloss_dB = pathloss_generation(
-        agent_height=agent_altitude, 
-        user_altitude=user_altitude,
-        agent_user_dist=agent_to_user_dist,
+
+def average_coverage_diagnostics(records):
+    records = list(records)
+    if not records:
+        return None
+
+    terrain_values = {record.terrain_type for record in records}
+    terrain_type = records[0].terrain_type if len(terrain_values) == 1 else "mixed"
+
+    def avg(field_name):
+        return float(np.mean([getattr(record, field_name) for record in records]))
+
+    return CoverageDiagnostics(
         terrain_type=terrain_type,
-        agent_pos=agent_pos
+        bandwidth_hz=avg("bandwidth_hz"),
+        frequency_hz=avg("frequency_hz"),
+        shadowing_db=avg("shadowing_db"),
+        interference_w=avg("interference_w"),
+        agent_altitude_km=avg("agent_altitude_km"),
+        user_altitude_km=avg("user_altitude_km"),
+        horizontal_distance_km=avg("horizontal_distance_km"),
+        height_difference_km=avg("height_difference_km"),
+        theta_deg=avg("theta_deg"),
+        fspl_db=avg("fspl_db"),
+        p_los=avg("p_los"),
+        p_nlos=avg("p_nlos"),
+        los_loss_db=avg("los_loss_db"),
+        nlos_loss_db=avg("nlos_loss_db"),
+        final_pathloss_db=avg("final_pathloss_db"),
+        sample_count=sum(int(record.sample_count) for record in records),
     )
+
+def coverage_u2c(
+        agent_to_user_dist_km,
+        agent_altitude_km,
+        user_altitude_km,
+        terrain_type='rural', 
+        bandwidth_hz=100e6, # Bandwidth in Hz (100MHz)
+        noise_figure_db=6, 
+        tx_power_dbm=30, 
+        interference_W=0.0,
+        carrier_frequency_hz=2.4e9,
+        shadowing_db=None,
+        return_details=False,
+    ):
+    # NOTE: 33 dBm or ~2W is a bit high for a medium-range UAV. Drop to 30 dBm or 1W for more realistic scenarios.
+    tx_power_W = 10 ** ((tx_power_dbm - 30)/10) # Watts 
+
+    noise_power_dbm = -174 + noise_figure_db + 10 * np.log10(bandwidth_hz)
+
+    noise_power_W = 10 ** ((noise_power_dbm - 30) / 10) #convert from dBm (decibels referenced to 1 milliwatt) to Watts 
     
-    logger.debug(f"Pathloss = {pathloss_dB}")
+    pathloss_result = pathloss_generation(
+        agent_height_km=agent_altitude_km, 
+        user_altitude_km=user_altitude_km,
+        agent_user_dist_km=agent_to_user_dist_km,
+        terrain_type=terrain_type,
+        fc=carrier_frequency_hz,
+        shadowing_db=shadowing_db,
+        bandwidth_hz=bandwidth_hz,
+        interference_W=interference_W,
+        return_details=return_details,
+    )
 
-    g = 10 ** (-pathloss_dB / 10) 
-    p = PU_W * g 
-    sinr = p / sigma_2_W 
-    R = BW * np.log2(1+sinr)
+    if return_details:
+        pathloss_dB, diagnostics = pathloss_result
+    else:
+        pathloss_dB = pathloss_result
+        diagnostics = None
+    
+    channel_gain = 10 ** (-pathloss_dB / 10) 
+    received_power_W = tx_power_W * channel_gain 
+    sinr = received_power_W / max(noise_power_W + interference_W, 1e-12)
+    rate_bps = bandwidth_hz * np.log2(1+sinr)
 
-    return R, sinr
+    if return_details:
+        return rate_bps, sinr, diagnostics
+    return rate_bps, sinr
 
 
 
-def pathloss_generation(nlos:int=1, nNlos:int=20, fc:float=2.4e9, c:float=(3e8/1e3), agent_height:int=1250, user_altitude:float=1.5, agent_user_dist:float=0.0, terrain_type='rural', agent_pos:tuple= ()): 
+def pathloss_generation(
+        eta_los_db:int=1,
+        eta_nlos_db:int=20,
+        fc:float=2.4e9,
+        c:float=3e8,
+        agent_height_km:float=1.25,
+        user_altitude_km:float=0.0015,
+        agent_user_dist_km:float=0.001,
+        terrain_type: str ='rural', 
+        shadowing_db = None,
+        bandwidth_hz: float = 100e6,
+        interference_W: float = 0.0,
+        return_details: bool = False,
+    ): 
 
     """
     Computes the path loss (in dB) for different communication types: U2C.
@@ -69,38 +158,65 @@ def pathloss_generation(nlos:int=1, nNlos:int=20, fc:float=2.4e9, c:float=(3e8/1
     c = speed of light in km/s 
     """
 
-    fc_term = 20 * np.log10(fc) + 20 * np.log10(4 * np.pi / c)
-
-    height_difference = agent_height - user_altitude
-    elevation_angle = height_difference / agent_user_dist 
-    theta = np.degrees(np.arcsin(elevation_angle))
-
-    P_los = los_probability(theta, terrain_type)
-    P_nlos = 1 - P_los 
-
-    r = agent_user_dist # In the case that agent position is in lat/lon coordinates, we assume agent_user_dist is already in km.
     
-    fading_los = gamma_pdf(r=r,
-                           agent_altitude=agent_height, 
+    d_km = max(agent_user_dist_km, 1e-6)
+    h_diff_km = agent_height_km - user_altitude_km
+
+    d_3d_m = np.sqrt((d_km * 1000) ** 2 + (h_diff_km * 1000) **2)
+
+    theta = np.degrees(np.arctan2(h_diff_km,d_km))
+
+    prob_los = los_probability(theta, terrain_type)
+    prob_nlos = 1 - prob_los 
+
+    # In the case that agent position is in lat/lon coordinates, we assume agent_user_dist is already in km.
+    
+    fading_los = gamma_pdf(r=agent_user_dist_km,
+                           agent_altitude=agent_height_km, 
                            fading_type='LoS',
                            terrain_type=terrain_type)
     
-    fading_nlos = gamma_pdf(r=r, 
-                            agent_altitude=agent_height, 
+    fading_nlos = gamma_pdf(r=agent_user_dist_km, 
+                            agent_altitude=agent_height_km, 
                             fading_type='NLoS', 
                             terrain_type=terrain_type)
     
-    dist_term = 20 * np.log10(agent_user_dist)
-    PL_los = fc_term + dist_term + nlos + fading_los 
-    PL_nlos = fc_term + dist_term + nNlos + fading_nlos
+    fspl_db = 20 * np.log10(4 * np.pi *fc * d_3d_m / c)
+    
+    loss_los_db = fspl_db + eta_los_db + fading_los 
+    loss_nlos_db = fspl_db + eta_nlos_db + fading_nlos
 
-    shadowing = gamma_pdf(r=r, 
-                          agent_altitude=agent_height, 
-                          fading_type='Shadowing_U2C', 
-                          terrain_type=terrain_type)
+    if shadowing_db is None:
+        shadowing_db = gamma_pdf(
+            r=agent_user_dist_km,
+            agent_altitude=agent_height_km,
+            fading_type='Shadowing_U2C',
+            terrain_type=terrain_type,
+        )
 
-    pathloss = P_los * PL_los + P_nlos * PL_nlos + shadowing
+    pathloss = prob_los * loss_los_db + prob_nlos * loss_nlos_db + shadowing_db
 
+    diagnostics = CoverageDiagnostics(
+        terrain_type=terrain_type,
+        bandwidth_hz=float(bandwidth_hz),
+        frequency_hz=float(fc),
+        shadowing_db=float(shadowing_db),
+        interference_w=float(interference_W),
+        agent_altitude_km=float(agent_height_km),
+        user_altitude_km=float(user_altitude_km),
+        horizontal_distance_km=float(d_km),
+        height_difference_km=float(h_diff_km),
+        theta_deg=float(theta),
+        fspl_db=float(fspl_db),
+        p_los=float(prob_los),
+        p_nlos=float(prob_nlos),
+        los_loss_db=float(loss_los_db),
+        nlos_loss_db=float(loss_nlos_db),
+        final_pathloss_db=float(pathloss),
+    )
+
+    if return_details:
+        return pathloss, diagnostics
     return pathloss 
 
 
@@ -122,7 +238,7 @@ def gamma_pdf(r, agent_altitude:float=0.0,fading_type="LoS", terrain_type='rural
     elif fading_type == 'NLoS': 
         return weibull_min.pdf(r, c=1.5 if terrain_type == "forest" else 1.2)
     
-    elif fading_type == 'Shadowing_U2I': 
+    elif fading_type in {'Shadowing_U2I', 'Shadowing_U2C'}: 
 
         if agent_altitude == 0:
             raise ValueError("Agent has no altitude to be used for shadowing") 

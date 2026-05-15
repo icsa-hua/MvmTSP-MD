@@ -988,6 +988,10 @@ class Builder(MVMTSPConfig):
         if not self.latest_run_summary:
             self.latest_run_summary = self.build_run_summary()
 
+        coverage_diagnostics = self.latest_run_summary.get("coverage_diagnostics", {})
+        if coverage_diagnostics:
+            logger.info(f"Average coverage diagnostics: {coverage_diagnostics}")
+
         self.latest_run_report = self.metrics.build_run_report(
             summary=self.latest_run_summary,
             cluster_results=dict(self.problem_results),
@@ -1020,6 +1024,19 @@ class Builder(MVMTSPConfig):
         self.total_number_cluster = 0
         self.coordinated_plan = defaultdict(dict)
         return self.latest_run_report
+        
+
+    def build_average_coverage_diagnostics(self) -> Dict[str, Any]:
+        from dummy_app.models.coverage import CoverageDiagnostics, average_coverage_diagnostics
+
+        records = []
+        for coverage_record in self.metrics.coverage_records:
+            diagnostics = coverage_record.get("pathloss_diagnostics", {})
+            if diagnostics:
+                records.append(CoverageDiagnostics(**diagnostics))
+
+        average_diagnostics = average_coverage_diagnostics(records)
+        return average_diagnostics.to_dict() if average_diagnostics else {}
         
 
     def build_run_summary(self) -> Dict[str, Any]:
@@ -1060,6 +1077,7 @@ class Builder(MVMTSPConfig):
             else 0.0
         )
         idle_ratio = total_service_time / max(total_mission_time, 1e-6)
+        coverage_diagnostics = self.build_average_coverage_diagnostics()
 
         if self.objective_function == "coverage":
             objective_value = float(-self.total_data_rate)
@@ -1099,6 +1117,7 @@ class Builder(MVMTSPConfig):
             "data_rate_per_kwh": float(self.total_data_rate) / max(total_energy_consumption, 1e-6),
             "average_data_rate_per_cluster": average_data_per_cluster,
             "average_makespan_per_cluster": average_makespan_per_cluster,
+            "coverage_diagnostics": coverage_diagnostics,
             "num_clusters": self.total_number_cluster,
             "largest_cluster_size": max((record["node_count"] for record in self.cluster_status_records), default=0),
             "num_constraints": self.num_constraints,

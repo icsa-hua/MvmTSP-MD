@@ -19,7 +19,7 @@ NUMBER_OF_USERS = 1 # Users to cover per Area
 
 LATITUDE_COORDS = 37.961322948559
 LONGITUDE_COORDS = 23.708232317542667
-ALTITUDE = 1250 # Optimal Coverage Altitude 
+ALTITUDE = 300 # Optimal Coverage Altitude 
 
 LOW_BOUND = 75 # Considered in meters 
 HIGH_BOUND = 120 # Considered in meters 
