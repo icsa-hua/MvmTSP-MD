@@ -11,6 +11,8 @@ from dummy_app.pipeline.artifacts import persist_playback_artifacts, persist_run
 from dummy_app.pipeline.instance_builder import build_problem_instance
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
+from dummy_app.models.heuristics.global_greedy_nn import GlobalGreedyNNOptimizationModel
+from dummy_app.models.heuristics.static_partition_greedy_nn import StaticPartitionGreedyNNOptimizationModel
 from dummy_app.models.milp.model import MILPOptimizationModel
 from dummy_app.models.milp.solver_adapter import solve_cluster_problem
 from dummy_app.models.RL.controller import RLController
@@ -31,7 +33,7 @@ from pyproj import Transformer
 
 from tqdm import tqdm 
 from collections import defaultdict
-from typing import Any, List, Dict, Tuple, Mapping
+from typing import Any, Callable, List, Dict, Tuple, Mapping
 
 # Functions to transform coordinates from EPSG to UTM 
 transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
@@ -101,7 +103,7 @@ class Builder(MVMTSPConfig):
         self.run_request: ModelRunRequest | None = None
         self.latest_model_run_result: ModelRunResult | None = None
         self.agent_next_available_time: Dict[int, float] = {}
-        self.optimization_model = MILPOptimizationModel(self)
+        self.optimization_model = self._create_optimization_model(self.model_name)
         self.learning_enabled = bool(config.get("learning_enabled", False))
         self.learning_controller = None
         if self.learning_enabled:
@@ -109,6 +111,17 @@ class Builder(MVMTSPConfig):
                 base_dir=config.get("learning_output_dir", f"{os.getcwd()}/assets/results/rl"),
                 alpha=float(config.get("learning_alpha", 0.75)),
             )
+
+
+    def _create_optimization_model(self, model_name: str):
+        normalized_model_name = str(model_name or "milp").strip().lower()
+        if normalized_model_name in {"milp"}:
+            return MILPOptimizationModel(self)
+        if normalized_model_name in {"greedy_nn", "gnn_ntw"}:
+            return GlobalGreedyNNOptimizationModel(self)
+        if normalized_model_name in {"greedy_partition_nn", "static_partition_greedy_nn"}:
+            return StaticPartitionGreedyNNOptimizationModel(self)
+        raise ValueError(f"Unsupported model_name '{model_name}'")
 
 
     def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
@@ -422,6 +435,7 @@ class Builder(MVMTSPConfig):
         self.solver_backend = str(runtime_config.get("solver_backend", self.solver_backend))
         self.objective_strategy = str(runtime_config.get("objective_strategy", self.objective_strategy))
         self.scenario_constraint_set = str(runtime_config.get("scenario_constraint_set", self.scenario_constraint_set))
+        self.optimization_model = self._create_optimization_model(self.model_name)
 
 
     def build_run_request(self) -> ModelRunRequest:
@@ -548,7 +562,7 @@ class Builder(MVMTSPConfig):
         return super().cluster_prioritization(clusters, cue_groups, distance_matrix)
     
 
-    def solve_cluster_instance(self, instance, cluster_input, request: ModelRunRequest) -> ClusterSolveResult:
+    def _prepare_cluster_object(self, cluster_input) -> Cluster:
         cluster_object = Cluster(
             cluster=cluster_input.cluster_frame,
             id=cluster_input.cluster_id,
@@ -583,20 +597,124 @@ class Builder(MVMTSPConfig):
 
         del context
         gc.collect()
+        return cluster_object
 
-        try:
-            paths = cluster_object.problem_formulation(
-                builder=self,
-                scenario=self.scenario,
-                objective_function=self.objective_function,
-                stage_solution=self.stage_solution,
-            )
-            logger.debug(f"✅ Problem created for cluster {cluster_input.cluster_id} successfully...")
-        except ValidationOptimalityConfirmed:
-            raise
-        except Exception as exc:
-            logger.exception(f"❌ Error creating problem for cluster {cluster_input.cluster_id}: {exc}")
-            raise ValueError(f"Error in creating the problem for Cluster {cluster_input.cluster_id}") from exc
+
+    def _build_cluster_comparison_metrics(
+        self,
+        cluster_object: Cluster,
+        cluster_input,
+        results: Dict[int, Dict[str, Any]],
+        uncovered_nodes: List[int] | None = None,
+    ) -> Dict[str, Any]:
+        target_nodes = sorted(
+            {
+                int(node_id)
+                for node_id in cluster_input.cluster_frame["Area_id"].tolist()
+                if int(node_id) != int(cluster_input.depot_id)
+            }
+        )
+        covered_nodes = set()
+        nodes_per_uav: Dict[str, int] = {}
+        route_distance_per_uav: Dict[str, float] = {}
+
+        for agent_id in cluster_input.assigned_agents:
+            visited_nodes = results.get(agent_id, {}).get("visited_nodes", [])
+            served_nodes = {int(node_id) for node_id in visited_nodes if int(node_id) != int(cluster_input.depot_id)}
+            covered_nodes.update(served_nodes)
+            nodes_per_uav[str(agent_id)] = len(served_nodes)
+            route_distance_per_uav[str(agent_id)] = float(results.get(agent_id, {}).get("distance", 0.0))
+
+        if uncovered_nodes:
+            uncovered_physical_nodes = sorted({int(node_id) for node_id in uncovered_nodes if int(node_id) != int(cluster_input.depot_id)})
+        else:
+            uncovered_physical_nodes = sorted(set(target_nodes) - covered_nodes)
+
+        node_counts = list(nodes_per_uav.values())
+        return {
+            "covered_nodes": len(covered_nodes),
+            "coverage_ratio": float(len(covered_nodes)) / float(len(target_nodes)) if target_nodes else 0.0,
+            "num_uavs_used": sum(1 for node_count in node_counts if node_count > 0),
+            "max_route_distance_per_uav": max(route_distance_per_uav.values(), default=0.0),
+            "workload_imbalance": (max(node_counts) - min(node_counts)) if node_counts else 0,
+            "nodes_per_uav": nodes_per_uav,
+            "route_distance_per_uav": route_distance_per_uav,
+            "uncovered_nodes": uncovered_physical_nodes,
+            "target_node_count": len(target_nodes),
+        }
+
+
+    def _record_heuristic_path_visits(
+        self,
+        cluster_object: Cluster,
+        paths: Dict[int, List[Tuple[int, int, int]]],
+        task_sequences: Dict[int, List[int]] | None = None,
+    ) -> None:
+        unique_nodes_among_paths = set()
+        for agent_path in paths.values():
+            if not agent_path:
+                continue
+
+            for source, target, _ in agent_path:
+                unique_nodes_among_paths.add(int(source))
+                unique_nodes_among_paths.add(int(target))
+
+        if task_sequences is not None:
+            for route_nodes in task_sequences.values():
+                if not route_nodes:
+                    continue
+                for node_id in route_nodes:
+                    node_key = int(cluster_object.virtual_nodes.get(int(node_id), int(node_id)))
+                    self.visits_per_nodes[node_key] = self.visits_per_nodes.get(node_key, 0) + 1
+                depot_key = int(cluster_object.depot_id)
+                self.visits_per_nodes[depot_key] = self.visits_per_nodes.get(depot_key, 0) + 1
+        else:
+            segments = []
+            for agent_path in paths.values():
+                if not agent_path:
+                    continue
+                current_source, current_target, _ = agent_path[0]
+                for source, target, _ in agent_path[1:]:
+                    if (source, target) == (current_source, current_target):
+                        continue
+                    segments.append((current_source, current_target))
+                    current_source, current_target = source, target
+                segments.append((current_source, current_target))
+
+            for source, target in segments:
+                if source == target and int(target) != int(cluster_object.depot_id):
+                    self.visits_per_nodes[int(target)] = self.visits_per_nodes.get(int(target), 0) + 1
+                elif int(target) == int(cluster_object.depot_id):
+                    self.visits_per_nodes[int(target)] = self.visits_per_nodes.get(int(target), 0) + 1
+
+        self.global_nodes_visited += len(unique_nodes_among_paths)
+        self.validate_paths(paths=paths, nodes_dict=cluster_object.nodes_dict, cluster=cluster_object)
+
+
+    def _finalize_cluster_solution(
+        self,
+        cluster_object: Cluster,
+        cluster_input,
+        request: ModelRunRequest,
+        paths: Dict[int, List[Tuple[int, int, int]]],
+        raw_status: str,
+        status_code: int,
+        objective_value: float | None = None,
+        incumbent_value: float | None = None,
+        best_bound: float | None = None,
+        absolute_gap: float | None = None,
+        relative_gap: float | None = None,
+        elapsed_time_seconds: float = 0.0,
+        time_limit_seconds: float | None = None,
+        termination_reason: str | None = None,
+        diagnostics: Dict[str, Any] | None = None,
+        agent_finish_times: Dict[int, float] | None = None,
+        record_visits: bool = False,
+        uncovered_nodes: List[int] | None = None,
+        task_sequences: Dict[int, List[int]] | None = None,
+    ) -> ClusterSolveResult:
+        if record_visits:
+            self._record_heuristic_path_visits(cluster_object, paths, task_sequences=task_sequences)
 
         results = common.extract_per_agent_metrics(
             paths=paths,
@@ -608,14 +726,18 @@ class Builder(MVMTSPConfig):
         )
 
         total_distance, total_energy, total_time = common.calculate_totals_from_paths(results=results)
-        agent_finish_times = {}
+        if agent_finish_times is None:
+            agent_finish_times = {
+                int(agent_id): float(agent_path[-1][2] + 1) if agent_path else 0.0
+                for agent_id, agent_path in paths.items()
+            }
+
         agent_next_available_times = {}
         for agent_id in cluster_input.assigned_agents:
             energy_spent = float(results.get(agent_id, {}).get("energy", 0.0))
             recharge_steps = float(common.calculate_recharge_steps(self.max_battery, energy_spent=energy_spent))
-            finish_time = float(getattr(cluster_object.return_step[agent_id], "varValue", 0.0) or 0.0)
+            finish_time = float(agent_finish_times.get(agent_id, 0.0))
             next_available_time = finish_time + recharge_steps
-            agent_finish_times[agent_id] = finish_time
             agent_next_available_times[agent_id] = next_available_time
             self.agent_next_available_time[agent_id] = next_available_time
             results.setdefault(agent_id, {})
@@ -624,8 +746,12 @@ class Builder(MVMTSPConfig):
             results[agent_id]["next_available_time"] = next_available_time
             results[agent_id]["recharge_steps"] = recharge_steps
 
-        self.total_data_rate += cluster_object.total_data_achievable
-        self.makespan += cluster_object.makespan_value
+        cluster_total_data_transfer = float(getattr(cluster_object, "total_data_achievable", 0.0) or 0.0)
+        cluster_makespan = float(getattr(cluster_object, "makespan_value", 0.0) or 0.0)
+        cluster_absolute_makespan = float(getattr(cluster_object, "absolute_makespan_value", cluster_makespan) or cluster_makespan)
+
+        self.total_data_rate += cluster_total_data_transfer
+        self.makespan += cluster_makespan
 
         self.problem_results[f"Cluster_{cluster_object.id}"] = {
             "scenario_name": self.scenario,
@@ -636,18 +762,16 @@ class Builder(MVMTSPConfig):
             "Total Time": total_time,
             "Average Throughput": cluster_object.R,
             "Average SINR": cluster_object.sinr,
-            "Makespan": cluster_object.makespan,
-            "Total_Data_Transfer": cluster_object.total_data_collected_main,
+            "Makespan": cluster_makespan,
+            "Total_Data_Transfer": cluster_total_data_transfer,
             "agent_start_times": dict(cluster_object.agent_start_times),
             "agent_finish_times": dict(agent_finish_times),
             "agent_next_available_times": dict(agent_next_available_times),
         }
 
-        raw_status = pl.LpStatus.get(cluster_object.problem.status, "Unknown")
-        solve_metadata = dict(getattr(cluster_object, "solve_metadata", {}))
         cluster_status_record = {
             "cluster_id": cluster_object.id,
-            "status_code": int(cluster_object.problem.status),
+            "status_code": int(status_code),
             "status": raw_status,
             "agent_count": len(cluster_input.assigned_agents),
             "node_count": len(cluster_object.original_nodes_dict),
@@ -666,8 +790,8 @@ class Builder(MVMTSPConfig):
                 "total_time": total_time,
                 "average_throughput": dict(cluster_object.R),
                 "average_sinr": dict(cluster_object.sinr),
-                "makespan": cluster_object.makespan_value,
-                "total_data_transfer": cluster_object.total_data_collected_main.value(),
+                "makespan": cluster_makespan,
+                "total_data_transfer": cluster_total_data_transfer,
                 "subtour_strategy": request.subtour_strategy,
                 "solver_backend": request.solver_backend,
             }
@@ -676,6 +800,13 @@ class Builder(MVMTSPConfig):
         synced_paths = self.synchronize_agent_paths(paths, cluster_object)
         self.flatten_paths_on_time(self.coordinated_plan, synced_paths)
 
+        comparison_metrics = self._build_cluster_comparison_metrics(
+            cluster_object=cluster_object,
+            cluster_input=cluster_input,
+            results=results,
+            uncovered_nodes=uncovered_nodes,
+        )
+        self.problem_results[f"Cluster_{cluster_object.id}"].update(comparison_metrics)
         cluster_metrics = {
             "agent_count": len(cluster_input.assigned_agents),
             "node_count": len(cluster_object.original_nodes_dict),
@@ -683,14 +814,86 @@ class Builder(MVMTSPConfig):
             "total_distance": total_distance,
             "total_energy": total_energy,
             "total_time": total_time,
-            "makespan": cluster_object.makespan_value,
-            "absolute_makespan": cluster_object.absolute_makespan_value,
-            "total_data_transfer": cluster_object.total_data_collected_main.value(),
+            "makespan": cluster_makespan,
+            "absolute_makespan": cluster_absolute_makespan,
+            "total_data_transfer": cluster_total_data_transfer,
+            **comparison_metrics,
         }
+
+        if objective_value is None:
+            if self.objective_function == "coverage":
+                objective_value = float(-cluster_total_data_transfer)
+            else:
+                objective_value = (
+                    float(self.objective_weights["energy"]) * float(total_energy)
+                    + float(self.objective_weights["distance"]) * float(total_distance)
+                    + float(self.objective_weights["travel_time"]) * float(total_time)
+                )
+        if incumbent_value is None:
+            incumbent_value = objective_value
+
+        base_diagnostics = {
+            "priority_rank": cluster_input.priority_rank,
+            "bridge_nodes": list(cluster_object.bridge_nodes),
+            "virtual_nodes": dict(cluster_object.virtual_nodes),
+            "agent_start_times": dict(cluster_object.agent_start_times),
+            "agent_finish_times": dict(agent_finish_times),
+            "agent_next_available_times": dict(agent_next_available_times),
+            "request": asdict(request),
+        }
+        if diagnostics:
+            base_diagnostics.update(diagnostics)
+
         return ClusterSolveResult(
             cluster_id=cluster_object.id,
             raw_status=raw_status,
             normalized_status=normalize_solver_status(raw_status),
+            status_code=int(status_code),
+            objective_value=objective_value,
+            incumbent_value=incumbent_value,
+            best_bound=best_bound,
+            absolute_gap=absolute_gap,
+            relative_gap=relative_gap,
+            elapsed_time_seconds=float(elapsed_time_seconds),
+            time_limit_seconds=time_limit_seconds,
+            termination_reason=termination_reason
+            or infer_termination_reason(raw_status, time_limit_seconds),
+            agent_paths=synced_paths,
+            agent_metrics={str(agent_id): metrics for agent_id, metrics in results.items()},
+            cluster_metrics=cluster_metrics,
+            diagnostics=base_diagnostics,
+        )
+
+
+    def solve_cluster_instance(self, instance, cluster_input, request: ModelRunRequest) -> ClusterSolveResult:
+        cluster_object = self._prepare_cluster_object(cluster_input)
+
+        try:
+            paths = cluster_object.problem_formulation(
+                builder=self,
+                scenario=self.scenario,
+                objective_function=self.objective_function,
+                stage_solution=self.stage_solution,
+            )
+            logger.debug(f"✅ Problem created for cluster {cluster_input.cluster_id} successfully...")
+        except ValidationOptimalityConfirmed:
+            raise
+        except Exception as exc:
+            logger.exception(f"❌ Error creating problem for cluster {cluster_input.cluster_id}: {exc}")
+            raise ValueError(f"Error in creating the problem for Cluster {cluster_input.cluster_id}") from exc
+
+        raw_status = pl.LpStatus.get(cluster_object.problem.status, "Unknown")
+        solve_metadata = dict(getattr(cluster_object, "solve_metadata", {}))
+        agent_finish_times = {
+            int(agent_id): float(getattr(cluster_object.return_step[agent_id], "varValue", 0.0) or 0.0)
+            for agent_id in cluster_input.assigned_agents
+        }
+        return self._finalize_cluster_solution(
+            cluster_object=cluster_object,
+            cluster_input=cluster_input,
+            request=request,
+            paths=paths,
+            raw_status=raw_status,
             status_code=int(cluster_object.problem.status),
             objective_value=solve_metadata.get("objective_value"),
             incumbent_value=solve_metadata.get("incumbent_value"),
@@ -699,22 +902,42 @@ class Builder(MVMTSPConfig):
             relative_gap=solve_metadata.get("relative_gap"),
             elapsed_time_seconds=0.0,
             time_limit_seconds=solve_metadata.get("time_limit_seconds"),
-            termination_reason=solve_metadata.get(
-                "termination_reason",
-                infer_termination_reason(raw_status, solve_metadata.get("time_limit_seconds")),
-            ),
-            agent_paths=synced_paths,
-            agent_metrics={str(agent_id): metrics for agent_id, metrics in results.items()},
-            cluster_metrics=cluster_metrics,
-            diagnostics={
-                "priority_rank": cluster_input.priority_rank,
-                "bridge_nodes": list(cluster_object.bridge_nodes),
-                "virtual_nodes": dict(cluster_object.virtual_nodes),
-                "agent_start_times": dict(cluster_object.agent_start_times),
-                "agent_finish_times": dict(agent_finish_times),
-                "agent_next_available_times": dict(agent_next_available_times),
-                "request": asdict(request),
-            },
+            termination_reason=solve_metadata.get("termination_reason"),
+            agent_finish_times=agent_finish_times,
+        )
+
+
+    def solve_cluster_instance_heuristic(
+        self,
+        instance,
+        cluster_input,
+        request: ModelRunRequest,
+        heuristic_solver: Callable[[Any, Any], Any],
+        heuristic_name: str,
+    ) -> ClusterSolveResult:
+        cluster_object = self._prepare_cluster_object(cluster_input)
+        solve_started_at = time.perf_counter()
+        heuristic_solution = heuristic_solver(cluster_object, self)
+        elapsed_time_seconds = time.perf_counter() - solve_started_at
+
+        cluster_object.total_data_achievable = float(heuristic_solution.total_data_transfer)
+        cluster_object.makespan_value = float(heuristic_solution.makespan)
+        cluster_object.absolute_makespan_value = float(heuristic_solution.makespan)
+
+        return self._finalize_cluster_solution(
+            cluster_object=cluster_object,
+            cluster_input=cluster_input,
+            request=request,
+            paths=heuristic_solution.agent_paths,
+            raw_status=heuristic_solution.raw_status,
+            status_code=int(heuristic_solution.status_code),
+            elapsed_time_seconds=float(elapsed_time_seconds),
+            termination_reason="heuristic_completed",
+            diagnostics={"heuristic_name": heuristic_name, **dict(heuristic_solution.diagnostics)},
+            agent_finish_times=heuristic_solution.agent_finish_times,
+            record_visits=True,
+            uncovered_nodes=heuristic_solution.diagnostics.get("uncovered_physical_nodes", []),
+            task_sequences=heuristic_solution.task_sequences,
         )
 
 
@@ -1047,14 +1270,28 @@ class Builder(MVMTSPConfig):
         total_distance = 0.0
         total_service_time = 0.0
         total_travel_time = 0.0
+        total_target_nodes = 0
+        total_covered_nodes = 0
+        nodes_per_uav = {str(agent_id): 0 for agent_id in self.agents}
+        route_distance_per_uav = {str(agent_id): 0.0 for agent_id in self.agents}
 
         for cluster in self.problem_results.values():
             total_energy_consumption += float(cluster["Total Energy"])
             total_mission_time += float(cluster["Total Time"])
             total_distance += float(cluster["Total Distance"])
+            total_target_nodes += int(cluster.get("target_node_count", 0))
+            total_covered_nodes += int(cluster.get("covered_nodes", 0))
             for agent_result in cluster["agent_results"].values():
                 total_service_time += float(agent_result.get("service_time", 0.0))
                 total_travel_time += float(agent_result.get("travel_time", 0.0))
+
+            cluster_nodes_per_uav = cluster.get("nodes_per_uav", {})
+            for agent_id, node_count in cluster_nodes_per_uav.items():
+                nodes_per_uav[str(agent_id)] = nodes_per_uav.get(str(agent_id), 0) + int(node_count)
+
+            cluster_route_distances = cluster.get("route_distance_per_uav", {})
+            for agent_id, agent_distance in cluster_route_distances.items():
+                route_distance_per_uav[str(agent_id)] = route_distance_per_uav.get(str(agent_id), 0.0) + float(agent_distance)
 
         statuses = [record["status"] for record in self.cluster_status_records]
         feasible_flag = 1.0 if statuses and all(status in {"Optimal", "Feasible"} for status in statuses) else 0.0
@@ -1078,6 +1315,8 @@ class Builder(MVMTSPConfig):
         )
         idle_ratio = total_service_time / max(total_mission_time, 1e-6)
         coverage_diagnostics = self.build_average_coverage_diagnostics()
+        node_counts = list(nodes_per_uav.values())
+        plan_coverage_ratio = float(total_covered_nodes) / float(total_target_nodes) if total_target_nodes else 0.0
 
         if self.objective_function == "coverage":
             objective_value = float(-self.total_data_rate)
@@ -1117,6 +1356,13 @@ class Builder(MVMTSPConfig):
             "data_rate_per_kwh": float(self.total_data_rate) / max(total_energy_consumption, 1e-6),
             "average_data_rate_per_cluster": average_data_per_cluster,
             "average_makespan_per_cluster": average_makespan_per_cluster,
+            "covered_nodes": total_covered_nodes,
+            "coverage_ratio": plan_coverage_ratio,
+            "num_uavs_used": sum(1 for node_count in node_counts if node_count > 0),
+            "max_route_distance_per_uav": max(route_distance_per_uav.values(), default=0.0),
+            "workload_imbalance": (max(node_counts) - min(node_counts)) if node_counts else 0,
+            "nodes_per_uav": nodes_per_uav,
+            "route_distance_per_uav": route_distance_per_uav,
             "coverage_diagnostics": coverage_diagnostics,
             "num_clusters": self.total_number_cluster,
             "largest_cluster_size": max((record["node_count"] for record in self.cluster_status_records), default=0),
@@ -1149,6 +1395,13 @@ class Builder(MVMTSPConfig):
             "total_data_rate": 0.0,
             "data_rate_per_hour": 0.0,
             "data_rate_per_kwh": 0.0,
+            "covered_nodes": 0,
+            "coverage_ratio": 0.0,
+            "num_uavs_used": 0,
+            "max_route_distance_per_uav": 0.0,
+            "workload_imbalance": 0,
+            "nodes_per_uav": {str(agent_id): 0 for agent_id in self.agents},
+            "route_distance_per_uav": {str(agent_id): 0.0 for agent_id in self.agents},
             "num_clusters": float(self.total_number_cluster),
             "largest_cluster_size": max((record.get("node_count", 0) for record in self.cluster_status_records), default=0),
             "num_constraints": float(self.num_constraints),
