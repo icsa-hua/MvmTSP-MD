@@ -11,6 +11,8 @@ from dummy_app.pipeline.artifacts import persist_playback_artifacts, persist_run
 from dummy_app.pipeline.instance_builder import build_problem_instance
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
+from dummy_app.models.heuristics.alns_solver import ALNSOptimizationModel, solve_alns_baseline
+from dummy_app.models.heuristics.genetic_algorithm_solver import GeneticAlgorithmOptimizationModel
 from dummy_app.models.heuristics.global_greedy_nn import GlobalGreedyNNOptimizationModel
 from dummy_app.models.heuristics.static_partition_greedy_nn import StaticPartitionGreedyNNOptimizationModel
 from dummy_app.models.milp.model import MILPOptimizationModel
@@ -24,6 +26,7 @@ import pdb
 import math
 import copy 
 import time
+import random
 from program_config import CENTROIDS_PATH
 import pulp as pl 
 import numpy as np 
@@ -34,6 +37,8 @@ from pyproj import Transformer
 from tqdm import tqdm 
 from collections import defaultdict
 from typing import Any, Callable, List, Dict, Tuple, Mapping
+
+from dummy_app.models.milp.warm_start import normalize_warm_start_mode
 
 # Functions to transform coordinates from EPSG to UTM 
 transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
@@ -89,7 +94,11 @@ class Builder(MVMTSPConfig):
         self.solver_time_limit_seconds = config.get("solver_time_limit_seconds")
         self.objective_weights = config.get("objective_weights", self.objective_weights)
         self.clustering_feature_weights = config.get("clustering_feature_weights", self.clustering_feature_weights)
-        self.warm_start_mode = config.get("warm_start_mode", "ga_only" if self.enable_ga else "none")
+        self.random_seed = int(config.get("random_seed", config.get("seed", getattr(self, "random_seed", 42))))
+        self.solver_seed = int(config.get("solver_seed", self.random_seed))
+        self.warm_start_mode = normalize_warm_start_mode(
+            config.get("warm_start_mode", "ga" if self.enable_ga else "none")
+        )
         self.cluster_status_records: List[Dict[str, Any]] = []
         self.solve_status_history: List[Dict[str, Any]] = []
         self.latest_run_summary: Dict[str, Any] = {}
@@ -111,12 +120,22 @@ class Builder(MVMTSPConfig):
                 base_dir=config.get("learning_output_dir", f"{os.getcwd()}/assets/results/rl"),
                 alpha=float(config.get("learning_alpha", 0.75)),
             )
+        self._seed_random_generators()
+
+
+    def _seed_random_generators(self) -> None:
+        random.seed(int(self.random_seed))
+        np.random.seed(int(self.random_seed))
 
 
     def _create_optimization_model(self, model_name: str):
         normalized_model_name = str(model_name or "milp").strip().lower()
         if normalized_model_name in {"milp"}:
             return MILPOptimizationModel(self)
+        if normalized_model_name in {"ga", "genetic_algorithm"}:
+            return GeneticAlgorithmOptimizationModel(self)
+        if normalized_model_name in {"alns"}:
+            return ALNSOptimizationModel(self)
         if normalized_model_name in {"greedy_nn", "gnn_ntw"}:
             return GlobalGreedyNNOptimizationModel(self)
         if normalized_model_name in {"greedy_partition_nn", "static_partition_greedy_nn"}:
@@ -124,10 +143,96 @@ class Builder(MVMTSPConfig):
         raise ValueError(f"Unsupported model_name '{model_name}'")
 
 
-    def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]:
+    def call_genetic_algorithm(
+        self,
+        nodes_dict:Dict[int,int],
+        cost:Dict[str,float],
+        depot:int,
+        verbose:bool=False,
+        population_size:int=200,
+        generations:int=100,
+        seed: int | None = None,
+    )->Tuple[List[int],Any]:
         if generations is None:
             generations = self.ga_generations
-        return super().call_genetic_algorithm(nodes_dict, cost, depot, verbose, population_size, generations) 
+        return super().call_genetic_algorithm(
+            nodes_dict,
+            cost,
+            depot,
+            verbose,
+            population_size,
+            generations,
+            seed=seed,
+        ) 
+
+
+    def build_cluster_initializer(self, cluster: Cluster) -> None:
+        cluster.initial_population = {}
+        cluster.initializer_timeframe_estimate = None
+        cluster.warm_start_summary = {
+            "strategy": self.warm_start_mode,
+            "objective_value": None,
+            "makespan": None,
+            "timeframe_estimate": None,
+        }
+
+        if self.warm_start_mode == "none":
+            return
+
+        if self.warm_start_mode == "ga":
+            reverse_nodes = {v: k for k, v in cluster.nodes_dict.items()}
+            ga_nodes = cluster.nodes_dict.copy()
+            for bridge_node in cluster.bridge_nodes:
+                bridge_index = reverse_nodes.get(int(bridge_node))
+                if bridge_index is not None:
+                    ga_nodes.pop(int(bridge_index), None)
+
+            candidate_routes: Dict[int, Tuple[List[int], float]] = {}
+            for agent_id in cluster.employed_agents:
+                route_seed = int(self.random_seed) + int(cluster.id) * 1000 + int(agent_id)
+                solution_path, solution_cost = self.call_genetic_algorithm(
+                    nodes_dict=ga_nodes,
+                    cost=cluster.cost,
+                    depot=int(cluster.depot_id),
+                    verbose=False,
+                    generations=self.ga_generations,
+                    seed=route_seed,
+                )
+                candidate_routes[int(agent_id)] = (list(solution_path), float(solution_cost))
+
+            cluster.initial_population = candidate_routes
+            if candidate_routes:
+                best_agent_id, (best_path, best_cost) = min(candidate_routes.items(), key=lambda item: item[1][1])
+                route_time = 0.0
+                if hasattr(cluster, "estimate_route_time_from_path"):
+                    route_time = float(cluster.estimate_route_time_from_path(best_path, self))
+                cluster.initializer_timeframe_estimate = max(1, int(math.ceil(route_time))) if route_time > 0.0 else None
+                cluster.warm_start_summary = {
+                    "strategy": "ga",
+                    "objective_value": float(best_cost),
+                    "makespan": float(route_time) if route_time > 0.0 else None,
+                    "timeframe_estimate": cluster.initializer_timeframe_estimate,
+                    "selected_agent": int(best_agent_id),
+                    "candidate_count": len(candidate_routes),
+                }
+            return
+
+        if self.warm_start_mode == "alns":
+            heuristic_solution = solve_alns_baseline(cluster, self)
+            objective_value = heuristic_solution.diagnostics.get("objective_value")
+            makespan = heuristic_solution.makespan
+            cluster.initializer_timeframe_estimate = max(1, int(math.ceil(float(makespan)))) if makespan else None
+            cluster.warm_start_summary = {
+                "strategy": "alns",
+                "objective_value": float(objective_value) if objective_value is not None else None,
+                "makespan": float(makespan) if makespan is not None else None,
+                "timeframe_estimate": cluster.initializer_timeframe_estimate,
+                "covered_nodes": heuristic_solution.diagnostics.get("covered_nodes", []),
+                "uncovered_nodes": heuristic_solution.diagnostics.get("uncovered_physical_nodes", []),
+            }
+            return
+
+        raise ValueError(f"Unsupported warm_start_mode '{self.warm_start_mode}'")
     
 
     def assign_agents_to_areas(self, plethos, depots:Any)->Dict[int,int]:
@@ -235,6 +340,7 @@ class Builder(MVMTSPConfig):
             cluster=cluster,
             time_limit_seconds=time_limit,
             solver_backend=self.solver_backend,
+            solver_seed=self.solver_seed,
         )
         cluster.solve_metadata = solve_metadata
         self.solve_status_history.append({"cluster_id": cluster.id, **solve_metadata})
@@ -356,6 +462,11 @@ class Builder(MVMTSPConfig):
 
         objective_value = self.latest_run_summary.get("objective_value")
         time_limit = self.run_request.solver_time_limit_seconds if self.run_request is not None else self.solver_time_limit_seconds
+        best_bound = (
+            float(sum(float(result.best_bound) for result in cluster_results))
+            if cluster_results and all(result.best_bound is not None for result in cluster_results)
+            else None
+        )
 
         self.latest_model_run_result = ModelRunResult(
             run_id=self.metrics.run_id,
@@ -365,14 +476,14 @@ class Builder(MVMTSPConfig):
             normalized_status=normalized_status,
             objective_value=float(objective_value) if objective_value is not None else None,
             incumbent_value=float(objective_value) if objective_value is not None else None,
-            best_bound=float(objective_value) if normalized_status == "optimal" and objective_value is not None else None,
+            best_bound=best_bound,
             absolute_gap=compute_absolute_gap(
                 float(objective_value) if objective_value is not None else None,
-                float(objective_value) if normalized_status == "optimal" and objective_value is not None else None,
+                best_bound,
             ),
             relative_gap=compute_relative_gap(
                 float(objective_value) if objective_value is not None else None,
-                float(objective_value) if normalized_status == "optimal" and objective_value is not None else None,
+                best_bound,
             ),
             elapsed_time_seconds=float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
             time_limit_seconds=float(time_limit) if time_limit is not None else None,
@@ -393,6 +504,7 @@ class Builder(MVMTSPConfig):
 
 
     def _prepare_run_state(self) -> None:
+        self._seed_random_generators()
         self.cluster_status_records = []
         self.solve_status_history = []
         self.latest_run_summary = {}
@@ -426,7 +538,9 @@ class Builder(MVMTSPConfig):
             "solver_time_limit_seconds",
             runtime_config.get("time_limit_seconds", self.solver_time_limit_seconds),
         )
-        self.warm_start_mode = str(runtime_config.get("warm_start_mode", self.warm_start_mode))
+        self.random_seed = int(runtime_config.get("random_seed", runtime_config.get("seed", self.random_seed)))
+        self.solver_seed = int(runtime_config.get("solver_seed", runtime_config.get("seed", self.solver_seed)))
+        self.warm_start_mode = normalize_warm_start_mode(runtime_config.get("warm_start_mode", self.warm_start_mode))
         self.objective_weights = runtime_config.get("objective_weights", self.objective_weights)
         self.clustering_feature_weights = runtime_config.get("clustering_feature_weights", self.clustering_feature_weights)
         self.enable_ga = bool(runtime_config.get("enable_ga", self.base_enable_ga))
@@ -435,6 +549,7 @@ class Builder(MVMTSPConfig):
         self.solver_backend = str(runtime_config.get("solver_backend", self.solver_backend))
         self.objective_strategy = str(runtime_config.get("objective_strategy", self.objective_strategy))
         self.scenario_constraint_set = str(runtime_config.get("scenario_constraint_set", self.scenario_constraint_set))
+        self._seed_random_generators()
         self.optimization_model = self._create_optimization_model(self.model_name)
 
 
@@ -453,6 +568,8 @@ class Builder(MVMTSPConfig):
                 "stage_solution": self.stage_solution,
                 "enable_ga": self.enable_ga,
                 "ga_generations": self.ga_generations,
+                "random_seed": self.random_seed,
+                "solver_seed": self.solver_seed,
             },
         )
     
@@ -839,6 +956,7 @@ class Builder(MVMTSPConfig):
             "agent_start_times": dict(cluster_object.agent_start_times),
             "agent_finish_times": dict(agent_finish_times),
             "agent_next_available_times": dict(agent_next_available_times),
+            "warm_start_summary": dict(getattr(cluster_object, "warm_start_summary", {})),
             "request": asdict(request),
         }
         if diagnostics:
@@ -900,9 +1018,19 @@ class Builder(MVMTSPConfig):
             best_bound=solve_metadata.get("best_bound"),
             absolute_gap=solve_metadata.get("absolute_gap"),
             relative_gap=solve_metadata.get("relative_gap"),
-            elapsed_time_seconds=0.0,
+            elapsed_time_seconds=float(solve_metadata.get("elapsed_time_seconds", 0.0) or 0.0),
             time_limit_seconds=solve_metadata.get("time_limit_seconds"),
             termination_reason=solve_metadata.get("termination_reason"),
+            diagnostics={
+                "solver_seed": solve_metadata.get("solver_seed"),
+                "first_feasible_time_seconds": solve_metadata.get("first_feasible_time_seconds"),
+                "first_optimality_gap_percent": solve_metadata.get("first_optimality_gap_percent"),
+                "explored_bnb_nodes": solve_metadata.get("explored_bnb_nodes"),
+                "active_bnb_nodes": solve_metadata.get("active_bnb_nodes"),
+                "optimality_proven": solve_metadata.get("optimality_proven"),
+                "progress_events": solve_metadata.get("progress_events", []),
+                "solver_log_path": solve_metadata.get("solver_log_path", ""),
+            },
             agent_finish_times=agent_finish_times,
         )
 
@@ -931,6 +1059,8 @@ class Builder(MVMTSPConfig):
             paths=heuristic_solution.agent_paths,
             raw_status=heuristic_solution.raw_status,
             status_code=int(heuristic_solution.status_code),
+            objective_value=heuristic_solution.diagnostics.get("objective_value"),
+            incumbent_value=heuristic_solution.diagnostics.get("objective_value"),
             elapsed_time_seconds=float(elapsed_time_seconds),
             termination_reason="heuristic_completed",
             diagnostics={"heuristic_name": heuristic_name, **dict(heuristic_solution.diagnostics)},

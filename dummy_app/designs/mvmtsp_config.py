@@ -84,6 +84,8 @@ class MVMTSPConfig(ABC):
         self.solver_time_limit_seconds: Optional[int] = None
         self.warm_start_mode: str = "ga_only"
         self.estimated_cluster_capacity: int = 1
+        self.random_seed: int = 42
+        self.solver_seed: int = 42
         
 
     @abstractmethod
@@ -256,7 +258,19 @@ class MVMTSPConfig(ABC):
 
 
     @abstractmethod 
-    def call_genetic_algorithm(self, nodes_dict:Dict[int,int], cost:Dict[str,float], depot:int, verbose:bool=False, population_size:int=200, generations:int=100)->Tuple[List[int],Any]: 
+    def call_genetic_algorithm(
+        self,
+        nodes_dict:Dict[int,int],
+        cost:Dict[str,float],
+        depot:int,
+        verbose:bool=False,
+        population_size:int=200,
+        generations:int=100,
+        seed: Optional[int] = None,
+    )->Tuple[List[int],Any]: 
+        if seed is not None:
+            random.seed(int(seed))
+            np.random.seed(int(seed))
         
         ga = GASolution(
             population=population_size, 
@@ -336,7 +350,7 @@ class MVMTSPConfig(ABC):
             n_clusters=n_clusters, 
             size_min=2, 
             size_max=max_nodes,
-            random_state=42
+            random_state=int(getattr(self, "random_seed", 42))
         )
         cluster_labels = kmeans.fit_predict(features)
         

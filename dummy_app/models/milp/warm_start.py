@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Union
+from collections import defaultdict
+from typing import Any, Dict, List, Union
 
 import networkx as nx
 import numpy as np
-
-from collections import defaultdict
 
 from dummy_app.models.central_hubs import CentralHub
 from dummy_app.models.genetic_algorithm import GASolution, get_weights
 from dummy_app.tools.common import add_virtual_nodes
 from dummy_app.tools.graphs import is_eulerian_digraph
+
+
+def normalize_warm_start_mode(mode: Any) -> str:
+    normalized = str(mode or "none").strip().lower()
+    if normalized in {"", "none", "off", "disabled", "false"}:
+        return "none"
+    if normalized in {"ga", "ga_only", "ga_plus_time_windows", "genetic_algorithm"}:
+        return "ga"
+    if normalized in {"alns", "alns_only", "alns_plus_time_windows"}:
+        return "alns"
+    return normalized
 
 
 def prepare_cluster_cost_bundle(problem_builder: Any, extraction: Dict[str, Union[List[str], np.ndarray]], depot: int, employed_agents: List[int]):
@@ -25,7 +35,6 @@ def prepare_cluster_cost_bundle(problem_builder: Any, extraction: Dict[str, Unio
     cost_d = dict(zip(area_ids, dists))
     cost_e = dict(zip(area_ids, ees))
     cost_t = dict(zip(area_ids, travel_times))
-    initial_population = {}
     nodes_dict = {i: int(node) for i, node in enumerate(area_ids)}
     cost_bundle = {"distance": cost_d, "energy": cost_e, "travel_time": cost_t}
 
@@ -76,19 +85,4 @@ def prepare_cluster_cost_bundle(problem_builder: Any, extraction: Dict[str, Unio
             nodes_dict[count] = virtual_node
             count += 1
 
-    ga_nodes = nodes_dict.copy()
-    for bridge_node in bridge_nodes:
-        ga_nodes.pop(reverse_nodes[bridge_node])
-
-    if hasattr(problem_builder, "enable_ga") and problem_builder.enable_ga:
-        for agent in employed_agents:
-            solution_path, solution_cost = problem_builder.call_genetic_algorithm(
-                nodes_dict=ga_nodes,
-                cost=cost_bundle,
-                depot=depot,
-                verbose=False,
-                generations=getattr(problem_builder, "ga_generations", 100),
-            )
-            initial_population[agent] = (solution_path, solution_cost)
-
-    return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, initial_population
+    return cost_bundle, virtual_nodes, bridge_nodes, nodes_dict, {}

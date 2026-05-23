@@ -56,6 +56,8 @@ class Cluster:
         self.solve_metadata:Dict[str, Any] = {}
         self.agent_start_times:Dict[int, float] = {}
         self.absolute_makespan_value:float = 0.0
+        self.initializer_timeframe_estimate:int | None = None
+        self.warm_start_summary:Dict[str, Any] = {}
         
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
@@ -93,6 +95,7 @@ class Cluster:
         self.initial_population = {
             k: (list(v[0]), float(v[1])) for k, v in raw_population.items()
         }
+        builder.build_cluster_initializer(self)
 
         for vn,hub in self.virtual_nodes.items(): 
             if hub in self.allowed_visits: 
@@ -101,12 +104,32 @@ class Cluster:
                 self.allowed_visits[hub] = 1
 
 
+    def estimate_route_time_from_path(self, best_path: List[int], builder: Any) -> float:
+        if not best_path or not hasattr(builder, "get_travel_time"):
+            return 0.0
+
+        if builder.scenario == 'cooperative':
+            num_travels = int((len(best_path) - 1) / len(self.employed_agents))
+        elif builder.scenario == 'individual':
+            num_travels = len(best_path) - 1
+        else:
+            num_travels = len(best_path)
+
+        return float(sum(
+            self.get_travel_times(i, i + 1, best_path, builder)
+            for i in range(len(best_path) - 1)
+        )) + float(num_travels) * float(builder.coverage_time)
+
+
     def get_estimated_time_frame(self, builder:Any): 
         total_time = 0 
 
+        if self.initializer_timeframe_estimate is not None:
+            total_time = int(self.initializer_timeframe_estimate)
+
         # NOTE: the GA is not enabled, no initial population of paths is generated.
         # This does not account for scenario or coverage mandatory time. 
-        if not self.initial_population: 
+        if total_time == 0 and not self.initial_population: 
             
             G = GASolution.create_model_graph(
                 cost=self.cost['travel_time'], 
@@ -119,24 +142,11 @@ class Cluster:
             estimated_time = sum(edge[2]['weight'] for edge in mst.edges(data=True))
             total_time = math.ceil(estimated_time)
 
-        else: 
+        elif total_time == 0: 
             # Get the travel time baed on the GA paths considering the scenario and the coverage wait time.  
             best_agent = min(self.initial_population.items(), key=lambda item: item[1][1])
             best_path = best_agent[1][0]
-
-            if builder.scenario == 'cooperative': 
-                num_travels = int((len(best_path) - 1) /len(self.employed_agents))
-
-            elif builder.scenario == 'individual':
-                num_travels = len(best_path) - 1 
-
-            else: num_travels = len(best_path) 
-
-            if hasattr(builder, 'get_travel_time'):
-                total_time = math.ceil(sum(
-                    self.get_travel_times(i, i+1, best_path, builder)
-                    for i in range(len(best_path)-1)
-                    )) + num_travels * builder.coverage_time
+            total_time = math.ceil(self.estimate_route_time_from_path(best_path, builder))
  
         if total_time == 0: 
             logger.error(f"Total time is 0 for cluster {self.id}")

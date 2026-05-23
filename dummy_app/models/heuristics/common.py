@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
@@ -61,6 +62,87 @@ def get_service_energy(builder: Any) -> float:
     return float(builder.average_coverage_energy) * float(builder.coverage_time)
 
 
+def get_route_nodes_with_depot(cluster: Any, route_nodes: Sequence[int]) -> List[int]:
+    return [int(cluster.depot_id), *[int(node_id) for node_id in route_nodes], int(cluster.depot_id)]
+
+
+def get_route_distance(builder: Any, cluster: Any, route_nodes: Sequence[int]) -> float:
+    route = get_route_nodes_with_depot(cluster, route_nodes)
+    total_distance = 0.0
+    for index in range(len(route) - 1):
+        total_distance += get_move_distance(builder, cluster, route[index], route[index + 1])
+    return float(total_distance)
+
+
+def get_route_travel_time(builder: Any, cluster: Any, route_nodes: Sequence[int]) -> float:
+    route = get_route_nodes_with_depot(cluster, route_nodes)
+    total_time = 0.0
+    for index in range(len(route) - 1):
+        total_time += float(get_travel_steps(builder, cluster, route[index], route[index + 1]))
+    total_time += float(len(route_nodes)) * float(builder.coverage_time)
+    return float(total_time)
+
+
+def get_route_energy(builder: Any, cluster: Any, route_nodes: Sequence[int]) -> float:
+    route = get_route_nodes_with_depot(cluster, route_nodes)
+    total_energy = 0.0
+    for index in range(len(route) - 1):
+        total_energy += get_move_energy(builder, cluster, route[index], route[index + 1])
+    total_energy += float(len(route_nodes)) * get_service_energy(builder)
+    return float(total_energy)
+
+
+def is_route_feasible(builder: Any, cluster: Any, route_nodes: Sequence[int]) -> bool:
+    return get_route_energy(builder, cluster, route_nodes) <= float(builder.max_battery) + 1e-9
+
+
+def get_balance_weight(builder: Any) -> float:
+    return float(getattr(builder, "heuristic_balance_weight", 0.1))
+
+
+def compute_task_sequence_objective(
+    builder: Any,
+    cluster: Any,
+    task_sequences: Mapping[int, Sequence[int]],
+    uncovered_nodes: Sequence[int] | None = None,
+) -> Dict[str, float]:
+    route_distances = [get_route_distance(builder, cluster, route_nodes) for route_nodes in task_sequences.values()]
+    route_energies = [get_route_energy(builder, cluster, route_nodes) for route_nodes in task_sequences.values()]
+    route_times = [get_route_travel_time(builder, cluster, route_nodes) for route_nodes in task_sequences.values()]
+
+    total_distance = float(sum(route_distances))
+    total_energy = float(sum(route_energies))
+    total_time = float(sum(route_times))
+    if route_energies:
+        workload_imbalance = float(max(route_energies) - min(route_energies))
+    else:
+        workload_imbalance = 0.0
+
+    penalty_uncovered = 1e6 * float(len(list(uncovered_nodes or [])))
+    penalty_energy_violation = 0.0
+    for route_nodes in task_sequences.values():
+        energy_excess = max(get_route_energy(builder, cluster, route_nodes) - float(builder.max_battery), 0.0)
+        penalty_energy_violation += 1e6 * float(energy_excess)
+
+    weighted_cost = (
+        float(builder.objective_weights["distance"]) * total_distance
+        + float(builder.objective_weights["energy"]) * total_energy
+        + float(builder.objective_weights["travel_time"]) * total_time
+        + get_balance_weight(builder) * workload_imbalance
+        + penalty_uncovered
+        + penalty_energy_violation
+    )
+    return {
+        "objective_value": float(weighted_cost),
+        "total_distance": total_distance,
+        "total_energy": total_energy,
+        "total_time": total_time,
+        "workload_imbalance": workload_imbalance,
+        "penalty_uncovered": penalty_uncovered,
+        "penalty_energy_violation": penalty_energy_violation,
+    }
+
+
 def is_candidate_feasible(
     builder: Any,
     cluster: Any,
@@ -75,6 +157,33 @@ def is_candidate_feasible(
         + get_move_energy(builder, cluster, candidate_node, cluster.depot_id)
     )
     return required_energy <= float(builder.max_battery) + 1e-9
+
+
+def get_feasible_insertion_positions(
+    builder: Any,
+    cluster: Any,
+    route_nodes: Sequence[int],
+    candidate_node: int,
+) -> List[int]:
+    feasible_positions = []
+    for insert_at in range(len(route_nodes) + 1):
+        candidate_route = list(route_nodes[:insert_at]) + [int(candidate_node)] + list(route_nodes[insert_at:])
+        if is_route_feasible(builder, cluster, candidate_route):
+            feasible_positions.append(insert_at)
+    return feasible_positions
+
+
+def get_insertion_cost_delta(
+    builder: Any,
+    cluster: Any,
+    route_nodes: Sequence[int],
+    candidate_node: int,
+    insert_at: int,
+) -> float:
+    base_metrics = compute_task_sequence_objective(builder, cluster, {0: list(route_nodes)})
+    candidate_route = list(route_nodes[:insert_at]) + [int(candidate_node)] + list(route_nodes[insert_at:])
+    candidate_metrics = compute_task_sequence_objective(builder, cluster, {0: candidate_route})
+    return float(candidate_metrics["objective_value"] - base_metrics["objective_value"])
 
 
 def select_nearest_candidate(
@@ -95,6 +204,135 @@ def select_nearest_candidate(
             int(node_id),
         ),
     )
+
+
+def select_best_insertion(
+    builder: Any,
+    cluster: Any,
+    task_sequences: Mapping[int, Sequence[int]],
+    candidate_node: int,
+) -> Tuple[int | None, int | None, float]:
+    best_agent_id = None
+    best_position = None
+    best_delta = float("inf")
+    for agent_id, route_nodes in task_sequences.items():
+        feasible_positions = get_feasible_insertion_positions(builder, cluster, route_nodes, candidate_node)
+        for insert_at in feasible_positions:
+            delta = get_insertion_cost_delta(builder, cluster, route_nodes, candidate_node, insert_at)
+            if delta < best_delta:
+                best_agent_id = int(agent_id)
+                best_position = int(insert_at)
+                best_delta = float(delta)
+    return best_agent_id, best_position, float(best_delta)
+
+
+def greedy_repair_unassigned_nodes(
+    builder: Any,
+    cluster: Any,
+    task_sequences: Dict[int, List[int]],
+    unassigned_nodes: Sequence[int],
+) -> List[int]:
+    leftovers: List[int] = []
+    for node_id in unassigned_nodes:
+        agent_id, insert_at, _ = select_best_insertion(builder, cluster, task_sequences, int(node_id))
+        if agent_id is None or insert_at is None:
+            leftovers.append(int(node_id))
+            continue
+        task_sequences[int(agent_id)] = (
+            list(task_sequences[int(agent_id)][:insert_at])
+            + [int(node_id)]
+            + list(task_sequences[int(agent_id)][insert_at:])
+        )
+    return leftovers
+
+
+def task_sequences_to_solution(
+    builder: Any,
+    cluster: Any,
+    task_sequences: Mapping[int, Sequence[int]],
+    uncovered_task_nodes: Sequence[int] | None = None,
+    strategy_name: str = "heuristic",
+    diagnostics: Dict[str, Any] | None = None,
+) -> HeuristicClusterSolution:
+    agent_paths: Dict[int, List[Tuple[int, int, int]]] = {}
+    agent_finish_times: Dict[int, float] = {}
+    total_data_transfer = 0.0
+    reward_by_task = build_data_reward_map(builder, cluster)
+
+    for agent_id, route_nodes in task_sequences.items():
+        path, finish_time = build_detailed_path(builder, cluster, route_nodes)
+        agent_paths[int(agent_id)] = path
+        agent_finish_times[int(agent_id)] = float(finish_time)
+        total_data_transfer += sum(reward_by_task.get(int(node_id), 0.0) for node_id in route_nodes)
+
+    makespan = max(agent_finish_times.values(), default=0.0)
+    covered_nodes = sorted(
+        {
+            resolve_task_node(cluster, node_id)
+            for route_nodes in task_sequences.values()
+            for node_id in route_nodes
+        }
+    )
+    uncovered_unique = sorted({int(node_id) for node_id in (uncovered_task_nodes or [])})
+    objective_metrics = compute_task_sequence_objective(
+        builder,
+        cluster,
+        task_sequences,
+        uncovered_nodes=uncovered_unique,
+    )
+    raw_status = "Feasible" if covered_nodes else "Infeasible"
+    payload_diagnostics = {
+        "heuristic_strategy": strategy_name,
+        "covered_nodes": covered_nodes,
+        "uncovered_physical_nodes": build_uncovered_physical_nodes(cluster, uncovered_unique),
+        **objective_metrics,
+    }
+    if diagnostics:
+        payload_diagnostics.update(diagnostics)
+
+    return HeuristicClusterSolution(
+        raw_status=raw_status,
+        status_code=1 if covered_nodes else -1,
+        agent_paths=agent_paths,
+        task_sequences={int(agent_id): list(route_nodes) for agent_id, route_nodes in task_sequences.items()},
+        agent_finish_times=agent_finish_times,
+        total_data_transfer=float(total_data_transfer),
+        makespan=float(makespan),
+        uncovered_task_nodes=uncovered_unique,
+        diagnostics=payload_diagnostics,
+    )
+
+
+def apply_two_opt_local_search(
+    builder: Any,
+    cluster: Any,
+    route_nodes: Sequence[int],
+) -> List[int]:
+    best_route = list(route_nodes)
+    best_distance = get_route_distance(builder, cluster, best_route)
+    improved = True
+
+    while improved and len(best_route) >= 4:
+        improved = False
+        for start in range(len(best_route) - 2):
+            for end in range(start + 2, len(best_route) + 1):
+                candidate = best_route[:start] + list(reversed(best_route[start:end])) + best_route[end:]
+                if not is_route_feasible(builder, cluster, candidate):
+                    continue
+                candidate_distance = get_route_distance(builder, cluster, candidate)
+                if candidate_distance + 1e-9 < best_distance:
+                    best_route = candidate
+                    best_distance = candidate_distance
+                    improved = True
+                    break
+            if improved:
+                break
+
+    return best_route
+
+
+def seeded_random(seed: int = 42) -> random.Random:
+    return random.Random(seed)
 
 
 def build_detailed_path(

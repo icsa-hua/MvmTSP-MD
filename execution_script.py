@@ -47,6 +47,7 @@ def parse_csv_strings(raw_value):
 
 
 def build_runtime_config(args):
+    warm_start_mode = args.warm_start_mode if args.warm_start_mode else ("ga" if args.enable_ga == "yes" else "none")
     return {
         "model_name": args.model_name,
         "genetic_algorithm": True if args.enable_ga=='yes' else False, 
@@ -63,7 +64,10 @@ def build_runtime_config(args):
         "subtour_strategy": args.subtour_strategy,
         "objective_strategy": args.objective_strategy,
         "scenario_constraint_set": args.scenario_constraint_set,
+        "warm_start_mode": warm_start_mode,
         "solver_time_limit_seconds": None if args.solver_time_limit_seconds == 0 else args.solver_time_limit_seconds,
+        "random_seed": args.seed,
+        "solver_seed": args.seed,
         "NUMBER_OF_AGENTS":args.num_agents,
         "NUMBER_OF_USERS":args.num_users,
         "NUMBER_OF_AREAS":args.num_areas,
@@ -85,7 +89,7 @@ def build_problem_context(args):
         lat=LATITUDE_COORDS,
         low=LOW_BOUND,
         high=HIGH_BOUND,
-        seed=SEED_COUNT,
+        seed=args.seed,
     )
     logger.debug("✅ Map Generator Initialized")
 
@@ -225,8 +229,6 @@ def persist_combined_playback(problem, mobility_sim, regions, user_points) -> No
 # MAX_COVERAGE_TIME = 3
 #
 # scenario_choices = ['cooperative', 'individual']
-# objective_choices = ['energy', 'coverage'] #  , 'sum_of_times','pareto']
-# env_choices = ['urban', 'rural', 'forest', 'mountain']
 # stage_options = [1,2,3]
 # agents_choices = [3,4,5,6,7,8,9,10]
 #
@@ -245,6 +247,7 @@ def main():
     parser.add_argument("--animation_fps", type=int, default=10, help="Frames per second when saving animation.")
     parser.add_argument("--animation_interval_ms", type=int, default=100, help="Playback interval between frames in milliseconds.")
     parser.add_argument("--enable_ga", type=str, default=ENABLE_GA, help="Initialize solver with Genetic Algorithm")
+    parser.add_argument("--warm_start_mode", type=str, default="", help="MILP initializer to use: none, ga, alns.")
     parser.add_argument("--num_agents", type=int, default=NUMBER_OF_AGENTS, help="Number of agents to simulate.")
     parser.add_argument("--num_users", type=int, default=NUMBER_OF_USERS, help="Number of users to simulate.")
     parser.add_argument("--max_battery", type=int, default=MAX_BATTERY, help="Maximum battery capacity.")
@@ -260,6 +263,7 @@ def main():
     parser.add_argument("--objective_strategy", type=str, default=OBJECTIVE_STRATEGY, help="Objective orchestration strategy.")
     parser.add_argument("--scenario_constraint_set", type=str, default=SCENARIO_CONSTRAINT_SET, help="Constraint set variant to use.")
     parser.add_argument("--solver_time_limit_seconds", type=int, default=SOLVER_TIME_LIMIT, help="Optional MILP solver time limit in seconds; 0 disables the override.")
+    parser.add_argument("--seed", type=int, default=SEED_COUNT, help="Seed for instance generation, heuristics, and GLPK.")
     parser.add_argument("--enable_learning", action="store_true", help="Enable contextual bandit configuration selection.")
     parser.add_argument("--learning_alpha", type=float, default=LEARNING_ALPHA, help="Exploration factor for the contextual bandit.")
     parser.add_argument("--workflow", type=str, default=WORKFLOW, help="simulate, validate_actions, dataset, analyze_dataset, compare_baselines")

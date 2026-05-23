@@ -36,6 +36,9 @@ def ensure_default_registrations() -> None:
     _REGISTRY.register("gnn_ntw", lambda config, trials: Builder(config, trials))
     _REGISTRY.register("greedy_partition_nn", lambda config, trials: Builder(config, trials))
     _REGISTRY.register("static_partition_greedy_nn", lambda config, trials: Builder(config, trials))
+    _REGISTRY.register("ga", lambda config, trials: Builder(config, trials))
+    _REGISTRY.register("genetic_algorithm", lambda config, trials: Builder(config, trials))
+    _REGISTRY.register("alns", lambda config, trials: Builder(config, trials))
 
 
 def create_runtime(config: Dict[str, Any], trials: int) -> Any:

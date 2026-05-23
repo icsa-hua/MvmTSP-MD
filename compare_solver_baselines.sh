@@ -27,6 +27,8 @@ Runs the four baseline configurations:
   2. INDI-UC            -> MILP, individual
   3. Greedy-NN          -> greedy_nn, cooperative
   4. Static-Partition   -> greedy_partition_nn, cooperative
+  5. Genetic Algorithm  -> ga cooperative 
+  6. Adaptive Large Neighborhood Search -> alns, cooperative 
 
 Options:
   --num_agents <int>                Number of UAVs to use for every run.
@@ -173,6 +175,8 @@ run_case "COOP-UC" "milp" "cooperative"
 run_case "INDI-UC" "milp" "individual"
 run_case "Greedy-NN" "greedy_nn" "cooperative"
 run_case "Static-Partition" "greedy_partition_nn" "cooperative"
+run_case "GA" "ga" "cooperative"
+run_case "ALNS" "alns" "cooperative"
 
 "$PYTHON_BIN" dummy_app/tools/solver_comparison_report.py \
     --manifest "$MANIFEST_PATH" \
