@@ -106,7 +106,7 @@ class MapGenerator(Map):
         # Transform lon and lat into UTM for better point management. 
         # print("----------------------------artemis-----------------------------lat/lon", lat, lon)
         self.lat, self.lon = transformer_to_utm.transform(lat,lon)
-        logger.info(transformer_to_latlon.transform(self.lat,self.lon)) 
+        logger.debug(transformer_to_latlon.transform(self.lat,self.lon)) 
         self.lat_wgs84 = lat 
         self.lon_wsg84 = lon 
         self.num_areas = num_areas 

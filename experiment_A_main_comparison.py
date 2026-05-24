@@ -15,6 +15,7 @@ from program_config import (
     EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
     EXPERIMENT_RESULTS_DIR,
 )
+from tqdm import tqdm
 
 
 METHODS = [
@@ -61,45 +62,61 @@ def main() -> None:
     if output_path.exists() and not args.append:
         output_path.unlink()
 
-    for seed in EXPERIMENT_DEFAULT_SEEDS:
-        for node_count, users_per_area, uav_count, battery_level, coverage_time_profile in product(
-            EXPERIMENT_A_GRID["areas"],
-            EXPERIMENT_A_GRID["users_per_area"],
-            EXPERIMENT_A_GRID["uavs"],
-            EXPERIMENT_A_GRID["battery_level"],
-            EXPERIMENT_A_GRID["coverage_time_profile"],
-        ):
-            scenario_payload = create_scenario(
-                node_count=node_count,
-                users_per_area=users_per_area,
-                uav_count=uav_count,
-                battery_level=battery_level,
-                coverage_time_profile=coverage_time_profile,
-                seed=seed,
-                scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
-                objective_function=EXPERIMENT_DEFAULT_OBJECTIVE,
-                env_type=EXPERIMENT_DEFAULT_ENV,
-            )
-            for method_name, model_name in METHODS:
-                result = run_method(
-                    scenario_payload,
-                    method_name,
-                    model_name=model_name,
-                    time_limit_seconds=EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
-                    memory_limit_bytes=EXPERIMENT_DEFAULT_MEMORY_LIMIT,
-                    stage_solution=1,
+    total_runs = (
+        len(EXPERIMENT_DEFAULT_SEEDS)
+        * len(EXPERIMENT_A_GRID["areas"])
+        * len(EXPERIMENT_A_GRID["users_per_area"])
+        * len(EXPERIMENT_A_GRID["uavs"])
+        * len(EXPERIMENT_A_GRID["battery_level"])
+        * len(EXPERIMENT_A_GRID["coverage_time_profile"])
+        * len(METHODS)
+    )
+
+    with tqdm(total=total_runs, desc="Experiment A", unit="run", dynamic_ncols=True) as progress:
+        for seed in EXPERIMENT_DEFAULT_SEEDS:
+            for node_count, users_per_area, uav_count, battery_level, coverage_time_profile in product(
+                EXPERIMENT_A_GRID["areas"],
+                EXPERIMENT_A_GRID["users_per_area"],
+                EXPERIMENT_A_GRID["uavs"],
+                EXPERIMENT_A_GRID["battery_level"],
+                EXPERIMENT_A_GRID["coverage_time_profile"],
+            ):
+                scenario_payload = create_scenario(
+                    node_count=node_count,
+                    users_per_area=users_per_area,
+                    uav_count=uav_count,
+                    battery_level=battery_level,
+                    coverage_time_profile=coverage_time_profile,
+                    seed=seed,
+                    scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
+                    objective_function=EXPERIMENT_DEFAULT_OBJECTIVE,
+                    env_type=EXPERIMENT_DEFAULT_ENV,
                 )
-                metrics = dict(EMPTY_FIELDS)
-                metrics.update(result.get("metrics", {}))
-                metrics["error_message"] = result.get("error_message", "")
-                metrics["artifact_dir"] = result.get("artifact_dir", "")
-                row = format_result_row(
-                    scenario_payload,
-                    method_name,
-                    status=result["status"],
-                    extra_fields=metrics,
-                )
-                save_results(output_path, [row])
+                for method_name, model_name in METHODS:
+                    progress.set_postfix_str(
+                        f"seed={seed} n={node_count} u={users_per_area} k={uav_count} b={battery_level:.2f} {coverage_time_profile} | {method_name}",
+                        refresh=False,
+                    )
+                    result = run_method(
+                        scenario_payload,
+                        method_name,
+                        model_name=model_name,
+                        time_limit_seconds=EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
+                        memory_limit_bytes=EXPERIMENT_DEFAULT_MEMORY_LIMIT,
+                        stage_solution=1,
+                    )
+                    metrics = dict(EMPTY_FIELDS)
+                    metrics.update(result.get("metrics", {}))
+                    metrics["error_message"] = result.get("error_message", "")
+                    metrics["artifact_dir"] = result.get("artifact_dir", "")
+                    row = format_result_row(
+                        scenario_payload,
+                        method_name,
+                        status=result["status"],
+                        extra_fields=metrics,
+                    )
+                    save_results(output_path, [row])
+                    progress.update(1)
 
 
 if __name__ == "__main__":

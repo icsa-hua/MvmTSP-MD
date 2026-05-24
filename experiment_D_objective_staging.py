@@ -15,6 +15,7 @@ from program_config import (
     EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
     EXPERIMENT_RESULTS_DIR,
 )
+from tqdm import tqdm
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,52 +35,66 @@ def main() -> None:
     if output_path.exists() and not args.append:
         output_path.unlink()
 
-    for seed in EXPERIMENT_DEFAULT_SEEDS:
-        for node_count, uav_count, battery_level in product(
-            EXPERIMENT_D_GRID["areas"],
-            EXPERIMENT_D_GRID["uavs"],
-            EXPERIMENT_D_GRID["battery_level"],
-        ):
-            scenario_payload = create_scenario(
-                node_count=node_count,
-                uav_count=uav_count,
-                battery_level=battery_level,
-                coverage_time_profile="medium",
-                seed=seed,
-                scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
-                objective_function="coverage",
-                env_type=EXPERIMENT_DEFAULT_ENV,
-            )
-            for formulation_type, stage_solution in EXPERIMENT_D_FORMULATIONS.items():
-                result = run_method(
-                    scenario_payload,
-                    "MILP",
-                    model_name="milp",
-                    stage_solution=stage_solution,
-                    time_limit_seconds=EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
-                    memory_limit_bytes=EXPERIMENT_DEFAULT_MEMORY_LIMIT,
+    total_runs = (
+        len(EXPERIMENT_DEFAULT_SEEDS)
+        * len(EXPERIMENT_D_GRID["areas"])
+        * len(EXPERIMENT_D_GRID["uavs"])
+        * len(EXPERIMENT_D_GRID["battery_level"])
+        * len(EXPERIMENT_D_FORMULATIONS)
+    )
+
+    with tqdm(total=total_runs, desc="Experiment D", unit="run", dynamic_ncols=True) as progress:
+        for seed in EXPERIMENT_DEFAULT_SEEDS:
+            for node_count, uav_count, battery_level in product(
+                EXPERIMENT_D_GRID["areas"],
+                EXPERIMENT_D_GRID["uavs"],
+                EXPERIMENT_D_GRID["battery_level"],
+            ):
+                scenario_payload = create_scenario(
+                    node_count=node_count,
+                    uav_count=uav_count,
+                    battery_level=battery_level,
+                    coverage_time_profile="medium",
+                    seed=seed,
+                    scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
+                    objective_function="coverage",
+                    env_type=EXPERIMENT_DEFAULT_ENV,
                 )
-                metrics = result.get("metrics", {})
-                row = format_result_row(
-                    scenario_payload,
-                    "MILP",
-                    status=result["status"],
-                    extra_fields={
-                        "formulation_type": formulation_type,
-                        "coverage_ratio": metrics.get("coverage_ratio"),
-                        "total_distance": metrics.get("total_distance"),
-                        "total_energy": metrics.get("total_energy"),
-                        "total_travel_time": metrics.get("total_travel_time"),
-                        "workload_balance_distance_std": metrics.get("distance_std_across_uavs"),
-                        "workload_balance_energy_std": metrics.get("energy_std_across_uavs"),
-                        "objective_value": metrics.get("objective_value"),
-                        "runtime_sec": metrics.get("runtime_sec"),
-                        "optimality_gap_percent": metrics.get("optimality_gap_percent"),
-                        "artifact_dir": result.get("artifact_dir", ""),
-                        "error_message": result.get("error_message", ""),
-                    },
-                )
-                save_results(output_path, [row])
+                for formulation_type, stage_solution in EXPERIMENT_D_FORMULATIONS.items():
+                    progress.set_postfix_str(
+                        f"seed={seed} n={node_count} k={uav_count} b={battery_level:.2f} | {formulation_type}",
+                        refresh=False,
+                    )
+                    result = run_method(
+                        scenario_payload,
+                        "MILP",
+                        model_name="milp",
+                        stage_solution=stage_solution,
+                        time_limit_seconds=EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
+                        memory_limit_bytes=EXPERIMENT_DEFAULT_MEMORY_LIMIT,
+                    )
+                    metrics = result.get("metrics", {})
+                    row = format_result_row(
+                        scenario_payload,
+                        "MILP",
+                        status=result["status"],
+                        extra_fields={
+                            "formulation_type": formulation_type,
+                            "coverage_ratio": metrics.get("coverage_ratio"),
+                            "total_distance": metrics.get("total_distance"),
+                            "total_energy": metrics.get("total_energy"),
+                            "total_travel_time": metrics.get("total_travel_time"),
+                            "workload_balance_distance_std": metrics.get("distance_std_across_uavs"),
+                            "workload_balance_energy_std": metrics.get("energy_std_across_uavs"),
+                            "objective_value": metrics.get("objective_value"),
+                            "runtime_sec": metrics.get("runtime_sec"),
+                            "optimality_gap_percent": metrics.get("optimality_gap_percent"),
+                            "artifact_dir": result.get("artifact_dir", ""),
+                            "error_message": result.get("error_message", ""),
+                        },
+                    )
+                    save_results(output_path, [row])
+                    progress.update(1)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import csv
 import json
+import logging
 import random
 import resource
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
@@ -13,6 +15,7 @@ import numpy as np
 
 from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.tools.common import call_builder
+from dummy_app.tools.logger import logger as app_logger
 from experiments.metrics import (
     aggregate_agent_routes,
     compute_coverage_ratio,
@@ -71,6 +74,24 @@ def _enforce_memory_limit(max_memory_bytes: int | None) -> None:
         resource.setrlimit(resource.RLIMIT_AS, (int(max_memory_bytes), int(max_memory_bytes)))
     except Exception:
         return
+
+
+@contextmanager
+def _suppress_nested_output():
+    previous_level = app_logger.level
+    previous_handler_levels = [handler.level for handler in app_logger.handlers]
+    devnull_path = Path("/dev/null")
+    with devnull_path.open("w", encoding="utf-8") as sink:
+        try:
+            app_logger.setLevel(logging.WARNING)
+            for handler in app_logger.handlers:
+                handler.setLevel(logging.WARNING)
+            with redirect_stdout(sink), redirect_stderr(sink):
+                yield
+        finally:
+            app_logger.setLevel(previous_level)
+            for handler, level in zip(app_logger.handlers, previous_handler_levels):
+                handler.setLevel(level)
 
 
 def create_scenario(
@@ -285,24 +306,25 @@ def run_method(
             time_limit_seconds=enforce_time_limit(time_limit_seconds),
             priority=priority,
         )
-        builder = call_builder(config, 1)
-        data = builder.preprocess_generated_data(
-            distance_matrix=np.array(scenario_payload["distance_matrix"], copy=True),
-            centroids=copy.deepcopy(scenario_payload["centroids"]),
-            depots=np.array(scenario_payload["depots"], copy=True),
-            num_of_agents=int(scenario_payload["uav_count"]),
-            v_hor=HORIZONTAL_VELOCITY,
-            v_ver=VERTICAL_VELOCITY,
-            altitude=ALTITUDE,
-            coverage_time=int(scenario_payload["coverage_time"]),
-            user_points=copy.deepcopy(scenario_payload["user_points"]),
-        )
-        builder.run_model(
-            distance_matrix=np.array(scenario_payload["distance_matrix"], copy=True),
-            data=data,
-            cue_groups=copy.deepcopy(scenario_payload["user_points"]),
-        )
-        builder.gather_results()
+        with _suppress_nested_output():
+            builder = call_builder(config, 1)
+            data = builder.preprocess_generated_data(
+                distance_matrix=np.array(scenario_payload["distance_matrix"], copy=True),
+                centroids=copy.deepcopy(scenario_payload["centroids"]),
+                depots=np.array(scenario_payload["depots"], copy=True),
+                num_of_agents=int(scenario_payload["uav_count"]),
+                v_hor=HORIZONTAL_VELOCITY,
+                v_ver=VERTICAL_VELOCITY,
+                altitude=ALTITUDE,
+                coverage_time=int(scenario_payload["coverage_time"]),
+                user_points=copy.deepcopy(scenario_payload["user_points"]),
+            )
+            builder.run_model(
+                distance_matrix=np.array(scenario_payload["distance_matrix"], copy=True),
+                data=data,
+                cue_groups=copy.deepcopy(scenario_payload["user_points"]),
+            )
+            builder.gather_results()
         if builder.latest_model_run_result is None:
             raise RuntimeError("No ModelRunResult was produced.")
 
