@@ -86,6 +86,8 @@ class MVMTSPConfig(ABC):
         self.estimated_cluster_capacity: int = 1
         self.random_seed: int = 42
         self.solver_seed: int = 42
+        self.fairness_tolerance: int = 2
+        self.time_step_sec: int = TIME_STEP_SEC[-1]
         
 
     @abstractmethod
@@ -160,6 +162,7 @@ class MVMTSPConfig(ABC):
         energy_model = DroneEnergyModel(
             v_hor=v_hor, 
             v_ver=v_ver,
+            dt=int(getattr(self, "time_step_sec", TIME_STEP_SEC[-1])),
             max_battery=self.max_battery)
         
         energy_matrix = np.ndarray(distance_matrix.shape)

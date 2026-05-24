@@ -96,6 +96,8 @@ class Builder(MVMTSPConfig):
         self.clustering_feature_weights = config.get("clustering_feature_weights", self.clustering_feature_weights)
         self.random_seed = int(config.get("random_seed", config.get("seed", getattr(self, "random_seed", 42))))
         self.solver_seed = int(config.get("solver_seed", self.random_seed))
+        self.fairness_tolerance = int(config.get("fairness_tolerance", getattr(self, "fairness_tolerance", 2)))
+        self.time_step_sec = int(config.get("time_step_sec", getattr(self, "time_step_sec", 600)))
         self.warm_start_mode = normalize_warm_start_mode(
             config.get("warm_start_mode", "ga" if self.enable_ga else "none")
         )
@@ -540,6 +542,8 @@ class Builder(MVMTSPConfig):
         )
         self.random_seed = int(runtime_config.get("random_seed", runtime_config.get("seed", self.random_seed)))
         self.solver_seed = int(runtime_config.get("solver_seed", runtime_config.get("seed", self.solver_seed)))
+        self.fairness_tolerance = int(runtime_config.get("fairness_tolerance", self.fairness_tolerance))
+        self.time_step_sec = int(runtime_config.get("time_step_sec", self.time_step_sec))
         self.warm_start_mode = normalize_warm_start_mode(runtime_config.get("warm_start_mode", self.warm_start_mode))
         self.objective_weights = runtime_config.get("objective_weights", self.objective_weights)
         self.clustering_feature_weights = runtime_config.get("clustering_feature_weights", self.clustering_feature_weights)
@@ -570,6 +574,8 @@ class Builder(MVMTSPConfig):
                 "ga_generations": self.ga_generations,
                 "random_seed": self.random_seed,
                 "solver_seed": self.solver_seed,
+                "fairness_tolerance": self.fairness_tolerance,
+                "time_step_sec": self.time_step_sec,
             },
         )
     

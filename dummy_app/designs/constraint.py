@@ -153,10 +153,11 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
 
     # Work balancing constraint (similar amount of nodes visited per agent) 
     visit_counts = [pl.lpSum(cluster.visit[i,k] for i in NODES) for k in agents]
+    fairness_tolerance = int(getattr(builder, "fairness_tolerance", 2))
     for i in range(len(visit_counts)):
         for j in range(i +1, len(visit_counts)):
-            model += visit_counts[i] - visit_counts[j] <= 2 
-            model += visit_counts[j] - visit_counts[i] <= 2
+            model += visit_counts[i] - visit_counts[j] <= fairness_tolerance
+            model += visit_counts[j] - visit_counts[i] <= fairness_tolerance
 
     # Get the makespan for this problem formulation 
     for k in agents:
