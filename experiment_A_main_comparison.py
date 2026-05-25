@@ -67,25 +67,22 @@ def main() -> None:
         * len(EXPERIMENT_A_GRID["areas"])
         * len(EXPERIMENT_A_GRID["users_per_area"])
         * len(EXPERIMENT_A_GRID["uavs"])
-        * len(EXPERIMENT_A_GRID["battery_level"])
         * len(EXPERIMENT_A_GRID["coverage_time_profile"])
         * len(METHODS)
     )
 
     with tqdm(total=total_runs, desc="Experiment A", unit="run", dynamic_ncols=True) as progress:
         for seed in EXPERIMENT_DEFAULT_SEEDS:
-            for node_count, users_per_area, uav_count, battery_level, coverage_time_profile in product(
+            for node_count, users_per_area, uav_count, coverage_time_profile in product(
                 EXPERIMENT_A_GRID["areas"],
                 EXPERIMENT_A_GRID["users_per_area"],
                 EXPERIMENT_A_GRID["uavs"],
-                EXPERIMENT_A_GRID["battery_level"],
                 EXPERIMENT_A_GRID["coverage_time_profile"],
             ):
                 scenario_payload = create_scenario(
                     node_count=node_count,
                     users_per_area=users_per_area,
                     uav_count=uav_count,
-                    battery_level=battery_level,
                     coverage_time_profile=coverage_time_profile,
                     seed=seed,
                     scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
@@ -94,7 +91,7 @@ def main() -> None:
                 )
                 for method_name, model_name in METHODS:
                     progress.set_postfix_str(
-                        f"seed={seed} n={node_count} u={users_per_area} k={uav_count} b={battery_level:.2f} {coverage_time_profile} | {method_name}",
+                        f"seed={seed} n={node_count} u={users_per_area} k={uav_count} {coverage_time_profile} | {method_name}",
                         refresh=False,
                     )
                     result = run_method(

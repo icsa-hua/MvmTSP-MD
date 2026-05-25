@@ -98,7 +98,6 @@ def create_scenario(
     node_count: int,
     users_per_area: int = NUMBER_OF_USERS,
     uav_count: int = 3,
-    battery_level: float = 1.0,
     coverage_time_profile: str = "medium",
     seed: int = 42,
     scenario_name: str = EXPERIMENT_DEFAULT_SCENARIO,
@@ -125,15 +124,14 @@ def create_scenario(
     target_nodes = [int(node_id) for node_id in all_nodes if int(node_id) not in set(depot_list)]
     scenario_id = (
         f"seed{int(seed)}_n{int(node_count)}_u{int(users_per_area)}"
-        f"_k{int(uav_count)}_b{float(battery_level):.2f}_{coverage_time_profile}"
+        f"_k{int(uav_count)}_{coverage_time_profile}"
     )
     return {
         "scenario_id": scenario_id,
         "node_count": int(node_count),
         "users_per_area": int(users_per_area),
         "uav_count": int(uav_count),
-        "battery_level": float(battery_level),
-        "battery_capacity": float(MAX_BATTERY) * float(battery_level),
+        "battery_capacity": float(MAX_BATTERY),
         "coverage_time_profile": str(coverage_time_profile),
         "coverage_time": int(coverage_time),
         "seed": int(seed),
@@ -364,7 +362,6 @@ def format_result_row(
         "node_count": int(scenario_payload["node_count"]),
         "users_per_area": int(scenario_payload["users_per_area"]),
         "uav_count": int(scenario_payload["uav_count"]),
-        "battery_level": float(scenario_payload["battery_level"]),
         "coverage_time_profile": str(scenario_payload["coverage_time_profile"]),
         "method_name": method_name,
         "seed": int(scenario_payload["seed"]),

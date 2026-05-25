@@ -55,21 +55,18 @@ def main() -> None:
         len(EXPERIMENT_DEFAULT_SEEDS)
         * len(EXPERIMENT_C_GRID["areas"])
         * len(EXPERIMENT_C_GRID["uavs"])
-        * len(EXPERIMENT_C_GRID["battery_level"])
         * len(EXPERIMENT_C_WARM_STARTS)
     )
 
     with tqdm(total=total_runs, desc="Experiment C", unit="run", dynamic_ncols=True) as progress:
         for seed in EXPERIMENT_DEFAULT_SEEDS:
-            for node_count, uav_count, battery_level in product(
+            for node_count, uav_count in product(
                 EXPERIMENT_C_GRID["areas"],
                 EXPERIMENT_C_GRID["uavs"],
-                EXPERIMENT_C_GRID["battery_level"],
             ):
                 scenario_payload = create_scenario(
                     node_count=node_count,
                     uav_count=uav_count,
-                    battery_level=battery_level,
                     coverage_time_profile="medium",
                     seed=seed,
                     scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
@@ -79,7 +76,7 @@ def main() -> None:
                 scenario_results = {}
                 for warm_start_method in EXPERIMENT_C_WARM_STARTS:
                     progress.set_postfix_str(
-                        f"seed={seed} n={node_count} k={uav_count} b={battery_level:.2f} | {warm_start_method}",
+                        f"seed={seed} n={node_count} k={uav_count} | {warm_start_method}",
                         refresh=False,
                     )
                     label = f"MILP + {warm_start_method.upper()}" if warm_start_method != "none" else "MILP"

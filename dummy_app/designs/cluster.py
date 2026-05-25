@@ -132,14 +132,14 @@ class Cluster:
         if total_time == 0 and not self.initial_population: 
             
             G = GASolution.create_model_graph(
-                cost=self.cost['travel_time'], 
+                cost={'travel_time': self.cost['travel_time']}, 
                 nodes=self.nodes_dict, 
                 weights={'travel_time':1}
             )
             
             # Find the minimum spanning tree to consider it as a solution and estimate the time frame for the cluster
-            mst = nx.minimum_spanning_tree(G, weight='weight')
-            estimated_time = sum(edge[2]['weight'] for edge in mst.edges(data=True))
+            mst = nx.minimum_spanning_tree(G.to_undirected(), weight='cost')
+            estimated_time = sum(edge[2]['cost'] for edge in mst.edges(data=True))
             total_time = math.ceil(estimated_time)
 
         elif total_time == 0: 
@@ -464,7 +464,10 @@ class Cluster:
             user_per_area[i] = 0 
             
             for user in user_points[area]:
-                user_coords = (user.x, user.y)
+                if hasattr(user, "x") and hasattr(user, "y"):
+                    user_coords = (float(user.x), float(user.y))
+                else:
+                    user_coords = (float(user[0]), float(user[1]))
                 horizontal_distance = 0.0                 
 
                 horizontal_distance = np.linalg.norm(np.array(coords) - np.array(user_coords))

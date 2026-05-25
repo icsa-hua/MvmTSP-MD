@@ -13,6 +13,7 @@ from dummy_app.tools.logger import logger
 from dummy_app.models.genetic_algorithm import GASolution
 from dummy_app.models.topsis import TOPSISPriority
 from dummy_app.models.energy_model import DroneEnergyModel
+from program_config import TIME_STEP_SEC
 
 import joblib
 import geopandas 
@@ -343,16 +344,26 @@ class MVMTSPConfig(ABC):
         time_features = non_depot_gdf[self.travel_time_columns] * self.clustering_feature_weights["travel_time"]
         features = pd.concat([distance_features, energy_features, time_features], axis=1)
         
-        # Determine total demand (total nodes to cover)
-        total_nodes = len(GDF)
-        n_clusters = int(np.ceil(total_nodes / max_nodes))
+        sample_count = len(non_depot_gdf)
+        if sample_count == 0:
+            logger.warning("No non-depot nodes were available for clustering.")
+            GDF = GDF.copy()
+            GDF["cluster"] = -1
+            return GDF.groupby("cluster")
 
-        logger.info(f"Total Nodes: {total_nodes}, Clusters: {n_clusters}")
+        size_max = max(1, min(int(max_nodes), int(sample_count)))
+        n_clusters = max(1, min(int(sample_count), int(np.ceil(float(sample_count) / float(size_max)))))
+        size_min = 2 if sample_count >= 2 else 1
+        if n_clusters * size_min > sample_count:
+            size_min = max(1, sample_count // n_clusters)
+        size_min = min(size_min, size_max)
+
+        logger.info(f"Total Nodes: {sample_count}, Clusters: {n_clusters}")
         
         kmeans = KMeansConstrained(
             n_clusters=n_clusters, 
-            size_min=2, 
-            size_max=max_nodes,
+            size_min=size_min, 
+            size_max=size_max,
             random_state=int(getattr(self, "random_seed", 42))
         )
         cluster_labels = kmeans.fit_predict(features)

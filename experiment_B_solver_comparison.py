@@ -55,21 +55,18 @@ def main() -> None:
         len(EXPERIMENT_DEFAULT_SEEDS)
         * len(EXPERIMENT_B_GRID["areas"])
         * len(EXPERIMENT_B_GRID["uavs"])
-        * len(EXPERIMENT_B_GRID["battery_level"])
         * len(EXPERIMENT_B_SOLVERS)
     )
 
     with tqdm(total=total_runs, desc="Experiment B", unit="run", dynamic_ncols=True) as progress:
         for seed in EXPERIMENT_DEFAULT_SEEDS:
-            for node_count, uav_count, battery_level in product(
+            for node_count, uav_count in product(
                 EXPERIMENT_B_GRID["areas"],
                 EXPERIMENT_B_GRID["uavs"],
-                EXPERIMENT_B_GRID["battery_level"],
             ):
                 scenario_payload = create_scenario(
                     node_count=node_count,
                     uav_count=uav_count,
-                    battery_level=battery_level,
                     coverage_time_profile="medium",
                     seed=seed,
                     scenario_name=EXPERIMENT_DEFAULT_SCENARIO,
@@ -78,7 +75,7 @@ def main() -> None:
                 )
                 for solver_name in EXPERIMENT_B_SOLVERS:
                     progress.set_postfix_str(
-                        f"seed={seed} n={node_count} k={uav_count} b={battery_level:.2f} | {solver_name}",
+                        f"seed={seed} n={node_count} k={uav_count} | {solver_name}",
                         refresh=False,
                     )
                     result = run_method(

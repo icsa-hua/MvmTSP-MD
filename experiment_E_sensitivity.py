@@ -76,7 +76,6 @@ def main() -> None:
                 node_count=EXPERIMENT_E_BASELINE["areas"],
                 users_per_area=EXPERIMENT_E_BASELINE["users_per_area"],
                 uav_count=EXPERIMENT_E_BASELINE["uavs"],
-                battery_level=EXPERIMENT_E_BASELINE["battery_level"],
                 coverage_time_profile=EXPERIMENT_E_BASELINE["coverage_time_profile"],
                 seed=seed,
                 scenario_name=EXPERIMENT_DEFAULT_SCENARIO,

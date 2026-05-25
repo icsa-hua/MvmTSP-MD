@@ -94,28 +94,24 @@ EXPERIMENT_A_GRID = {
     "areas": [25, 50, 100, 150, 200],
     "users_per_area": [1, 3, 5],
     "uavs": [3, 4, 6, 8],
-    "battery_level": [1.0, 0.75, 0.5],
     "coverage_time_profile": ["low", "medium", "high"],
 }
 
 EXPERIMENT_B_GRID = {
     "areas": [25, 50, 100],
     "uavs": [3, 4, 6],
-    "battery_level": [1.0, 0.75],
 }
 EXPERIMENT_B_SOLVERS = ["glpk", "cbc", "gurobi", "cplex"]
 
 EXPERIMENT_C_GRID = {
     "areas": [50, 100, 150],
     "uavs": [4, 6],
-    "battery_level": [1.0, 0.75, 0.5],
 }
 EXPERIMENT_C_WARM_STARTS = ["none", "alns", "ga"]
 
 EXPERIMENT_D_GRID = {
     "areas": [25, 50, 100],
     "uavs": [3, 4, 6],
-    "battery_level": [1.0, 0.75],
 }
 EXPERIMENT_D_FORMULATIONS = {
     "single_stage_milp": 1,
@@ -126,7 +122,6 @@ EXPERIMENT_E_BASELINE = {
     "areas": 100,
     "users_per_area": 3,
     "uavs": 4,
-    "battery_level": 1.0,
     "coverage_time_profile": "medium",
 }
 EXPERIMENT_E_FAIRNESS_THRESHOLDS = [1, 2, 3, 4]
@@ -153,6 +148,5 @@ P_BS = 200 # In W is the power to operate the drone as a low level base station
 MOTOR_SPEED_MULTIPLIER = 10.5
 
 BANK_ANGLE_DEG = 0.0 
-
 
 
