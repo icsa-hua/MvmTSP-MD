@@ -130,17 +130,27 @@ class Cluster:
         # NOTE: the GA is not enabled, no initial population of paths is generated.
         # This does not account for scenario or coverage mandatory time. 
         if total_time == 0 and not self.initial_population: 
-            
             G = GASolution.create_model_graph(
                 cost={'travel_time': self.cost['travel_time']}, 
                 nodes=self.nodes_dict, 
                 weights={'travel_time':1}
             )
-            
-            # Find the minimum spanning tree to consider it as a solution and estimate the time frame for the cluster
+
             mst = nx.minimum_spanning_tree(G.to_undirected(), weight='cost')
-            estimated_time = sum(edge[2]['cost'] for edge in mst.edges(data=True))
-            total_time = math.ceil(estimated_time)
+            mst_travel_estimate = float(sum(edge[2]['cost'] for edge in mst.edges(data=True)))
+
+            service_node_count = len(getattr(self, "NODES", []))
+            agent_count = max(len(self.employed_agents), 1)
+            if builder.scenario == 'cooperative':
+                per_agent_service_load = math.ceil(float(service_node_count) / float(agent_count))
+            elif builder.scenario == 'individual':
+                per_agent_service_load = service_node_count
+            else:
+                per_agent_service_load = math.ceil(float(service_node_count) / float(agent_count))
+
+            travel_step_floor = max(service_node_count + 1, math.ceil(mst_travel_estimate))
+            service_step_floor = per_agent_service_load * int(builder.coverage_time)
+            total_time = max(math.ceil(mst_travel_estimate), travel_step_floor + service_step_floor)
 
         elif total_time == 0: 
             # Get the travel time baed on the GA paths considering the scenario and the coverage wait time.  
