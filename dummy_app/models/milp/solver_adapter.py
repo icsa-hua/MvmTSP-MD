@@ -10,7 +10,13 @@ from typing import Any, Dict, List
 
 import pulp as pl
 
-from dummy_app.core.statuses import compute_absolute_gap, compute_relative_gap, infer_termination_reason, normalize_solver_status
+from dummy_app.core.statuses import (
+    compute_absolute_gap,
+    compute_relative_gap,
+    compute_relative_gap_percent,
+    infer_termination_reason,
+    normalize_solver_status,
+)
 
 _TIMESTAMPED_LINE_RE = re.compile(r"^\[(?P<elapsed>\d+(?:\.\d+)?)\]\s(?P<line>.*)$")
 _MIP_PROGRESS_RE = re.compile(
@@ -187,12 +193,29 @@ def solve_cluster_problem(
         objective_value = None
 
     incumbent_value = objective_value
-    best_bound = objective_value if raw_status == "Optimal" else None
+    if raw_status == "Optimal" and incumbent_value is not None:
+        best_bound = incumbent_value
+        absolute_gap = 0.0
+        relative_gap = 0.0
+        relative_gap_percent = 0.0
+    else:
+        best_bound = None
+        absolute_gap = None
+        relative_gap = None
+        relative_gap_percent = None
 
     if solver_backend == "glpk":
         progress_summary = _parse_glpk_progress(log_path, objective_value, raw_status)
         if best_bound is None:
             best_bound = progress_summary["progress_events"][-1]["best_bound"] if progress_summary["progress_events"] else None
+        if raw_status != "Optimal":
+            absolute_gap = compute_absolute_gap(incumbent_value, best_bound)
+            relative_gap = compute_relative_gap(incumbent_value, best_bound)
+            relative_gap_percent = compute_relative_gap_percent(incumbent_value, best_bound)
+    elif raw_status != "Optimal":
+        absolute_gap = compute_absolute_gap(incumbent_value, best_bound)
+        relative_gap = compute_relative_gap(incumbent_value, best_bound)
+        relative_gap_percent = compute_relative_gap_percent(incumbent_value, best_bound)
 
     return {
         "status_code": int(cluster.problem.status),
@@ -201,8 +224,9 @@ def solve_cluster_problem(
         "objective_value": objective_value,
         "incumbent_value": incumbent_value,
         "best_bound": best_bound,
-        "absolute_gap": compute_absolute_gap(incumbent_value, best_bound),
-        "relative_gap": compute_relative_gap(incumbent_value, best_bound),
+        "absolute_gap": absolute_gap,
+        "relative_gap": relative_gap,
+        "relative_gap_percent": relative_gap_percent,
         "time_limit_seconds": time_limit_seconds,
         "elapsed_time_seconds": float(elapsed_time_seconds),
         "termination_reason": infer_termination_reason(raw_status, time_limit_seconds),

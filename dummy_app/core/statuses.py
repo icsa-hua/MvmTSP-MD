@@ -3,18 +3,45 @@ from __future__ import annotations
 from typing import Optional
 
 
-def compute_absolute_gap(incumbent: Optional[float], best_bound: Optional[float]) -> Optional[float]:
+def compute_absolute_gap(
+    incumbent: Optional[float],
+    best_bound: Optional[float],
+) -> Optional[float]:
     if incumbent is None or best_bound is None:
         return None
-    return abs(float(incumbent) - float(best_bound))
+
+    incumbent = float(incumbent)
+    best_bound = float(best_bound)
+    return abs(incumbent - best_bound)
 
 
-def compute_relative_gap(incumbent: Optional[float], best_bound: Optional[float]) -> Optional[float]:
+def compute_relative_gap(
+    incumbent: Optional[float],
+    best_bound: Optional[float],
+    *,
+    eps: float = 1e-9,
+) -> Optional[float]:
     absolute_gap = compute_absolute_gap(incumbent, best_bound)
     if absolute_gap is None:
         return None
-    scale = max(abs(float(incumbent)), 1e-9)
-    return absolute_gap / scale
+
+    incumbent = float(incumbent)
+    if abs(incumbent) < eps:
+        return None
+
+    return absolute_gap / abs(incumbent)
+
+
+def compute_relative_gap_percent(
+    incumbent: Optional[float],
+    best_bound: Optional[float],
+    *,
+    eps: float = 1e-9,
+) -> Optional[float]:
+    gap = compute_relative_gap(incumbent, best_bound, eps=eps)
+    if gap is None:
+        return None
+    return 100.0 * gap
 
 
 def normalize_solver_status(raw_status: str) -> str:

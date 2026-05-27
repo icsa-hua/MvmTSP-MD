@@ -13,7 +13,7 @@ from dummy_app.tools.logger import logger
 from dummy_app.models.genetic_algorithm import GASolution
 from dummy_app.models.topsis import TOPSISPriority
 from dummy_app.models.energy_model import DroneEnergyModel
-from program_config import TIME_STEP_SEC
+from dummy_app.program_config import TIME_STEP_SEC
 
 import joblib
 import geopandas 

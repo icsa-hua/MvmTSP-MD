@@ -38,7 +38,7 @@ MODEL_NAME = "milp"
 OBJECTIVE_OPTIONS = ['energy', 'coverage', 'sum_of_times', 'pareto' ]
 ENVIRONMENT_OPTIONS = ['urban', 'rural', 'forest']
 STAGE_OPTIONS = [1, 2, 3] 
-AGENTS_OPTIONS = [3, 4, 5, 6, 7] 
+AGENTS_OPTIONS = [3, 4, 5, 6, 7, 8] 
 FAIRNESS_TOLERANCE = [0, 1, 2, 3, 5]
 TIME_STEP_SEC = [30, 60, 120, 300, 600]
 
@@ -50,7 +50,7 @@ SOLVER_TIME_LIMIT = 30 # Considered in mins
 ENABLE_GA = 'yes'
 SCENARIO_CONSTRAINT_SET = "default"
 PRIORITY = 'yes' 
-SOLVER_BACKEND = 'glpk'
+SOLVER_BACKEND = 'cplex'
 SUBTOUR_STRATEGY = 'mtz' 
 OBJECTIVE_STRATEGY = 'legacy_stage'
 WORKFLOW = 'simulate' 

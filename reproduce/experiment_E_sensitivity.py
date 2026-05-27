@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from experiments.runner_utils import create_scenario, format_result_row, run_method, save_results
-from program_config import (
+from dummy_app.experiments.runner_utils import create_scenario, format_result_row, run_method, save_results
+from dummy_app.program_config import (
     EXPERIMENT_DEFAULT_ENV,
     EXPERIMENT_DEFAULT_MEMORY_LIMIT,
     EXPERIMENT_DEFAULT_OBJECTIVE,

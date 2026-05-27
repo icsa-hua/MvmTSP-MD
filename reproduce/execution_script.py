@@ -6,7 +6,7 @@ from dummy_app.designs.mobility import GroundUserGroup
 from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.tools.common import call_builder
 from dummy_app.visualization.playback import find_latest_playback_artifact, render_playback
-from program_config import * 
+from dummy_app.program_config import * 
 
 import os
 import sys

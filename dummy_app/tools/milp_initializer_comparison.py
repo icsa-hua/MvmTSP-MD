@@ -11,9 +11,10 @@ from typing import Any, Dict, Iterable, List
 
 import numpy as np
 
+from dummy_app.core.statuses import compute_relative_gap_percent
 from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.tools.common import call_builder
-from program_config import (
+from dummy_app.program_config import (
     ALTITUDE,
     ENVIRONMENT_OPTIONS,
     HIGH_BOUND,
@@ -135,7 +136,7 @@ def _cluster_progress_events(cluster_result: Any) -> List[Dict[str, Any]]:
     diagnostics = dict(getattr(cluster_result, "diagnostics", {}))
     events = list(diagnostics.get("progress_events", []))
     if not events and cluster_result.objective_value is not None:
-        gap_percent = float(cluster_result.relative_gap) * 100.0 if cluster_result.relative_gap is not None else None
+        gap_percent = compute_relative_gap_percent(cluster_result.incumbent_value, cluster_result.best_bound)
         events = [
             {
                 "elapsed_time_seconds": float(cluster_result.elapsed_time_seconds or 0.0),
@@ -202,7 +203,7 @@ def run_strategy(args: argparse.Namespace, label: str, warm_start_mode: str, sha
                 "first_optimality_gap_percent": diagnostics.get("first_optimality_gap_percent"),
                 "final_objective_value": cluster_result.objective_value,
                 "best_bound": cluster_result.best_bound,
-                "final_relative_gap_percent": float(cluster_result.relative_gap) * 100.0 if cluster_result.relative_gap is not None else None,
+                "final_relative_gap_percent": compute_relative_gap_percent(cluster_result.incumbent_value, cluster_result.best_bound),
                 "elapsed_time_seconds": float(cluster_result.elapsed_time_seconds or 0.0),
                 "explored_bnb_nodes": diagnostics.get("explored_bnb_nodes"),
                 "active_bnb_nodes": diagnostics.get("active_bnb_nodes"),

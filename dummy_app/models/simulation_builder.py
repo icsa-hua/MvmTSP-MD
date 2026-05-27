@@ -19,6 +19,7 @@ from dummy_app.models.milp.model import MILPOptimizationModel
 from dummy_app.models.milp.solver_adapter import solve_cluster_problem
 from dummy_app.models.RL.controller import RLController
 from dummy_app.tools.logger import logger 
+from dummy_app.program_config import CENTROIDS_PATH
 
 import os 
 import gc
@@ -27,7 +28,6 @@ import math
 import copy 
 import time
 import random
-from program_config import CENTROIDS_PATH
 import pulp as pl 
 import numpy as np 
 import pandas as pd

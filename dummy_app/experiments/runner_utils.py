@@ -13,17 +13,18 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import numpy as np
 
+from dummy_app.core.statuses import compute_relative_gap_percent
 from dummy_app.designs.voronoi_map import MapGenerator
 from dummy_app.tools.common import call_builder
 from dummy_app.tools.logger import logger as app_logger
-from experiments.metrics import (
+from dummy_app.experiments.metrics import (
     aggregate_agent_routes,
     compute_coverage_ratio,
     compute_jain_fairness,
     compute_std,
     count_unvisited_nodes,
 )
-from program_config import (
+from dummy_app.program_config import (
     ALTITUDE,
     EXPERIMENT_COVERAGE_TIME_PROFILES,
     EXPERIMENT_DEFAULT_ENV,
@@ -262,7 +263,7 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         "unvisited_nodes": int(unvisited_nodes),
         "objective_value": run_result.objective_value,
         "best_bound": run_result.best_bound,
-        "optimality_gap_percent": float(run_result.relative_gap * 100.0) if run_result.relative_gap is not None else None,
+        "optimality_gap_percent": compute_relative_gap_percent(run_result.incumbent_value, run_result.best_bound),
         "feasible_solution_found": run_result.normalized_status in {"optimal", "feasible", "feasible_time_limit"},
         "time_to_first_feasible_sec": _aggregate_first_feasible_time(run_result),
         "branch_and_bound_nodes": _sum_branch_and_bound_nodes(run_result),

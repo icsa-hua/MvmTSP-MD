@@ -1,5 +1,5 @@
 import numpy as np 
-from program_config import * 
+from dummy_app.program_config import * 
 
 
 class DroneEnergyModel: 
