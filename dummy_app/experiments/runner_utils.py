@@ -45,6 +45,7 @@ from dummy_app.program_config import (
     PRIORITY,
     SCENARIO_CONSTRAINT_SET,
     SOLVER_BACKEND,
+    SUBTOUR_MODE,
     SUBTOUR_STRATEGY,
     VERTICAL_VELOCITY,
 )
@@ -177,6 +178,7 @@ def _build_runtime_config(
         "priority": priority,
         "validate": False,
         "solver_backend": solver_backend,
+        "subtour_mode": SUBTOUR_MODE,
         "subtour_strategy": SUBTOUR_STRATEGY,
         "objective_strategy": OBJECTIVE_STRATEGY,
         "scenario_constraint_set": SCENARIO_CONSTRAINT_SET,

@@ -20,6 +20,7 @@ from dummy_app.models.heuristics.global_greedy_nn import GlobalGreedyNNOptimizat
 from dummy_app.models.heuristics.static_partition_greedy_nn import StaticPartitionGreedyNNOptimizationModel
 from dummy_app.models.milp.model import MILPOptimizationModel
 from dummy_app.models.milp.solver_adapter import solve_cluster_problem
+from dummy_app.models.milp.subtour.strategies import normalize_subtour_mode
 from dummy_app.models.RL.controller import RLController
 from dummy_app.tools.logger import logger 
 from dummy_app.program_config import CENTROIDS_PATH
@@ -75,7 +76,8 @@ class Builder(MVMTSPConfig):
         self.Time = 0 
         self.model_name = str(config.get("model_name", "milp"))
         self.solver_backend = str(config.get("solver_backend", "glpk"))
-        self.subtour_strategy = str(config.get("subtour_strategy", "mtz"))
+        self.subtour_mode = normalize_subtour_mode(config.get("subtour_mode", config.get("subtour_strategy", "mtz")))
+        self.subtour_strategy = self.subtour_mode
         self.objective_strategy = str(config.get("objective_strategy", "legacy_stage"))
         self.scenario_constraint_set = str(config.get("scenario_constraint_set", "default"))
 
@@ -376,6 +378,7 @@ class Builder(MVMTSPConfig):
                 "number_of_agents": self.NUMBER_OF_AGENTS,
                 "number_of_users": self.NUMBER_OF_USERS,
                 "stage_solution": self.stage_solution,
+                "subtour_mode": self.subtour_mode,
                 "subtour_strategy": self.subtour_strategy,
                 "solver_backend": self.solver_backend,
             },
@@ -560,7 +563,8 @@ class Builder(MVMTSPConfig):
         self.clustering_feature_weights = runtime_config.get("clustering_feature_weights", self.clustering_feature_weights)
         self.enable_ga = bool(runtime_config.get("enable_ga", self.base_enable_ga))
         self.model_name = str(runtime_config.get("model_name", self.model_name))
-        self.subtour_strategy = str(runtime_config.get("subtour_strategy", self.subtour_strategy))
+        self.subtour_mode = normalize_subtour_mode(runtime_config.get("subtour_mode", runtime_config.get("subtour_strategy", self.subtour_mode)))
+        self.subtour_strategy = self.subtour_mode
         self.solver_backend = str(runtime_config.get("solver_backend", self.solver_backend))
         self.objective_strategy = str(runtime_config.get("objective_strategy", self.objective_strategy))
         self.scenario_constraint_set = str(runtime_config.get("scenario_constraint_set", self.scenario_constraint_set))
@@ -572,7 +576,8 @@ class Builder(MVMTSPConfig):
         return ModelRunRequest(
             model_name=self.model_name,
             solver_backend=self.solver_backend,
-            subtour_strategy=self.subtour_strategy,
+            subtour_mode=self.subtour_mode,
+            subtour_strategy=self.subtour_mode,
             scenario_constraint_set=self.scenario_constraint_set,
             objective_strategy=self.objective_strategy,
             warm_start_strategy=self.warm_start_mode,
@@ -909,7 +914,8 @@ class Builder(MVMTSPConfig):
             "status": raw_status,
             "agent_count": len(cluster_input.assigned_agents),
             "node_count": len(cluster_object.original_nodes_dict),
-            "subtour_strategy": request.subtour_strategy,
+            "subtour_mode": request.subtour_mode,
+            "subtour_strategy": request.subtour_mode,
             "solver_backend": request.solver_backend,
         }
         self.cluster_status_records.append(cluster_status_record)
@@ -926,7 +932,8 @@ class Builder(MVMTSPConfig):
                 "average_sinr": dict(cluster_object.sinr),
                 "makespan": cluster_makespan,
                 "total_data_transfer": cluster_total_data_transfer,
-                "subtour_strategy": request.subtour_strategy,
+                "subtour_mode": request.subtour_mode,
+                "subtour_strategy": request.subtour_mode,
                 "solver_backend": request.solver_backend,
             }
         )
@@ -1047,6 +1054,12 @@ class Builder(MVMTSPConfig):
                 "feasible_solution_found": solve_metadata.get("feasible_solution_found"),
                 "time_limit_reached": solve_metadata.get("time_limit_reached"),
                 "optimality_proven": solve_metadata.get("optimality_proven"),
+                "subtour_mode": request.subtour_mode,
+                "dfj_rounds": solve_metadata.get("dfj_rounds"),
+                "dfj_solve_passes": solve_metadata.get("dfj_solve_passes"),
+                "dfj_cuts_added": solve_metadata.get("dfj_cuts_added"),
+                "dfj_round_history": solve_metadata.get("dfj_round_history", []),
+                "violated_subtours": solve_metadata.get("violated_subtours", []),
                 "progress_events": solve_metadata.get("progress_events", []),
                 "solver_log_path": solve_metadata.get("solver_log_path", ""),
             },
@@ -1479,6 +1492,7 @@ class Builder(MVMTSPConfig):
         return {
             "model_name": self.model_name,
             "solver_backend": self.solver_backend,
+            "subtour_mode": self.subtour_mode,
             "subtour_strategy": self.subtour_strategy,
             "objective_strategy": self.objective_strategy,
             "solve_time_seconds": float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
@@ -1527,6 +1541,7 @@ class Builder(MVMTSPConfig):
         return {
             "model_name": self.model_name,
             "solver_backend": self.solver_backend,
+            "subtour_mode": self.subtour_mode,
             "subtour_strategy": self.subtour_strategy,
             "solve_time_seconds": float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
             "timeout_flag": timeout_flag,

@@ -17,6 +17,8 @@ from dummy_app.core.statuses import (
     infer_termination_reason,
     normalize_solver_status,
 )
+from dummy_app.models.milp.subtour.dfj import add_dfj_cuts, find_disconnected_subtours
+from dummy_app.models.milp.subtour.strategies import normalize_subtour_mode
 from dummy_app.models.milp.warm_start import apply_warm_start_to_model
 
 _TIMESTAMPED_LINE_RE = re.compile(r"^\[(?P<elapsed>\d+(?:\.\d+)?)\]\s(?P<line>.*)$")
@@ -725,7 +727,70 @@ def _resolve_effective_raw_status(raw_status: str, progress_summary: Dict[str, A
     return raw_status
 
 
-def solve_cluster_problem(
+def _annotate_dfj_metadata(
+    solve_metadata: Dict[str, Any],
+    *,
+    dfj_rounds: int,
+    dfj_solve_passes: int,
+    dfj_cuts_added: int,
+    dfj_round_history: List[Dict[str, Any]],
+    violated_subtours: List[tuple[int, tuple[int, ...]]] | None = None,
+) -> Dict[str, Any]:
+    annotated = dict(solve_metadata)
+    annotated["dfj_rounds"] = int(dfj_rounds)
+    annotated["dfj_solve_passes"] = int(dfj_solve_passes)
+    annotated["dfj_cuts_added"] = int(dfj_cuts_added)
+    annotated["dfj_round_history"] = [dict(entry) for entry in dfj_round_history]
+    annotated["violated_subtours"] = [
+        {"agent_id": int(agent_id), "nodes": list(subset)}
+        for agent_id, subset in (violated_subtours or [])
+    ]
+    return annotated
+
+
+def _mark_dfj_cut_limit_reached(
+    cluster: Any,
+    last_solve_metadata: Dict[str, Any],
+    *,
+    dfj_rounds: int,
+    dfj_solve_passes: int,
+    dfj_cuts_added: int,
+    dfj_round_history: List[Dict[str, Any]],
+    violated_subtours: List[tuple[int, tuple[int, ...]]],
+) -> Dict[str, Any]:
+    cluster.problem.status = pl.LpStatusNotSolved
+    elapsed_time_seconds = float(
+        sum(float(round_info.get("elapsed_time_seconds", 0.0) or 0.0) for round_info in dfj_round_history)
+    )
+    solve_metadata = dict(last_solve_metadata)
+    solve_metadata.update(
+        {
+            "status_code": int(cluster.problem.status),
+            "raw_status": "Not Solved",
+            "normalized_status": normalize_solver_status("Not Solved"),
+            "objective_value": None,
+            "incumbent_value": None,
+            "best_bound": None,
+            "absolute_gap": None,
+            "relative_gap": None,
+            "relative_gap_percent": None,
+            "elapsed_time_seconds": elapsed_time_seconds,
+            "termination_reason": "dfj_cut_limit_reached",
+            "feasible_solution_found": False,
+            "optimality_proven": False,
+        }
+    )
+    return _annotate_dfj_metadata(
+        solve_metadata,
+        dfj_rounds=dfj_rounds,
+        dfj_solve_passes=dfj_solve_passes,
+        dfj_cuts_added=dfj_cuts_added,
+        dfj_round_history=dfj_round_history,
+        violated_subtours=violated_subtours,
+    )
+
+
+def _solve_cluster_problem_once(
     cluster: Any,
     builder: Any,
     time_limit_seconds=None,
@@ -912,3 +977,163 @@ def solve_cluster_problem(
         "solver_log_path": progress_summary.get("log_path", log_path),
         "solver_seed": int(solver_seed),
     }
+
+
+def _solve_cluster_problem_with_iterative_dfj(
+    cluster: Any,
+    builder: Any,
+    time_limit_seconds=None,
+    solver_backend: str = "glpk",
+    solver_seed: int = 42,
+) -> Dict[str, Any]:
+    max_dfj_rounds = max(1, int(getattr(builder, "max_dfj_rounds", 50) or 50))
+    solve_started_at = time.perf_counter()
+    round_history: List[Dict[str, Any]] = []
+    total_cuts_added = 0
+    last_solve_metadata: Dict[str, Any] | None = None
+    last_subtours: List[tuple[int, tuple[int, ...]]] = []
+
+    for round_id in range(max_dfj_rounds):
+        round_time_limit = time_limit_seconds
+        if time_limit_seconds is not None:
+            elapsed_so_far = time.perf_counter() - solve_started_at
+            remaining_time = float(time_limit_seconds) - float(elapsed_so_far)
+            if remaining_time <= 0.0:
+                cluster.problem.status = pl.LpStatusNotSolved
+                timeout_metadata = dict(last_solve_metadata or {})
+                timeout_metadata.update(
+                    {
+                        "status_code": int(cluster.problem.status),
+                        "raw_status": "Not Solved",
+                        "normalized_status": normalize_solver_status("Not Solved"),
+                        "objective_value": None,
+                        "incumbent_value": None,
+                        "best_bound": None,
+                        "absolute_gap": None,
+                        "relative_gap": None,
+                        "relative_gap_percent": None,
+                        "elapsed_time_seconds": float(time_limit_seconds),
+                        "time_limit_seconds": float(time_limit_seconds),
+                        "termination_reason": "dfj_time_limit_reached",
+                        "feasible_solution_found": False,
+                        "time_limit_reached": True,
+                        "optimality_proven": False,
+                    }
+                )
+                return _annotate_dfj_metadata(
+                    timeout_metadata,
+                    dfj_rounds=round_id,
+                    dfj_solve_passes=round_id,
+                    dfj_cuts_added=total_cuts_added,
+                    dfj_round_history=round_history,
+                    violated_subtours=last_subtours,
+                )
+            round_time_limit = remaining_time
+
+        solve_metadata = _solve_cluster_problem_once(
+            cluster=cluster,
+            builder=builder,
+            time_limit_seconds=round_time_limit,
+            solver_backend=solver_backend,
+            solver_seed=solver_seed,
+        )
+        last_solve_metadata = solve_metadata
+
+        round_entry = {
+            "round_id": int(round_id),
+            "raw_status": solve_metadata.get("raw_status"),
+            "normalized_status": solve_metadata.get("normalized_status"),
+            "elapsed_time_seconds": float(solve_metadata.get("elapsed_time_seconds", 0.0) or 0.0),
+            "cuts_added_total": int(total_cuts_added),
+        }
+
+        if not bool(solve_metadata.get("feasible_solution_found")):
+            round_history.append(round_entry)
+            return _annotate_dfj_metadata(
+                solve_metadata,
+                dfj_rounds=round_id,
+                dfj_solve_passes=round_id + 1,
+                dfj_cuts_added=total_cuts_added,
+                dfj_round_history=round_history,
+            )
+
+        subtours = find_disconnected_subtours(cluster)
+        last_subtours = subtours
+        round_entry["violated_subtours"] = [
+            {"agent_id": int(agent_id), "nodes": list(subset)}
+            for agent_id, subset in subtours
+        ]
+
+        if not subtours:
+            round_history.append(round_entry)
+            solve_metadata["elapsed_time_seconds"] = float(
+                sum(float(entry.get("elapsed_time_seconds", 0.0) or 0.0) for entry in round_history)
+            )
+            return _annotate_dfj_metadata(
+                solve_metadata,
+                dfj_rounds=round_id,
+                dfj_solve_passes=round_id + 1,
+                dfj_cuts_added=total_cuts_added,
+                dfj_round_history=round_history,
+            )
+
+        cuts_added_this_round = add_dfj_cuts(cluster, subtours)
+        total_cuts_added += cuts_added_this_round
+        round_entry["cuts_added_this_round"] = int(cuts_added_this_round)
+        round_entry["cuts_added_total"] = int(total_cuts_added)
+        round_history.append(round_entry)
+
+        if cuts_added_this_round <= 0:
+            return _mark_dfj_cut_limit_reached(
+                cluster,
+                solve_metadata,
+                dfj_rounds=round_id + 1,
+                dfj_solve_passes=round_id + 1,
+                dfj_cuts_added=total_cuts_added,
+                dfj_round_history=round_history,
+                violated_subtours=subtours,
+            )
+
+    return _mark_dfj_cut_limit_reached(
+        cluster,
+        last_solve_metadata or {},
+        dfj_rounds=max_dfj_rounds,
+        dfj_solve_passes=max_dfj_rounds,
+        dfj_cuts_added=total_cuts_added,
+        dfj_round_history=round_history,
+        violated_subtours=last_subtours,
+    )
+
+
+def solve_cluster_problem(
+    cluster: Any,
+    builder: Any,
+    time_limit_seconds=None,
+    solver_backend: str = "glpk",
+    solver_seed: int = 42,
+) -> Dict[str, Any]:
+    subtour_mode = normalize_subtour_mode(
+        getattr(builder, "subtour_mode", getattr(builder, "subtour_strategy", "mtz"))
+    )
+    if subtour_mode == "dfj_iter":
+        return _solve_cluster_problem_with_iterative_dfj(
+            cluster=cluster,
+            builder=builder,
+            time_limit_seconds=time_limit_seconds,
+            solver_backend=solver_backend,
+            solver_seed=solver_seed,
+        )
+    solve_metadata = _solve_cluster_problem_once(
+        cluster=cluster,
+        builder=builder,
+        time_limit_seconds=time_limit_seconds,
+        solver_backend=solver_backend,
+        solver_seed=solver_seed,
+    )
+    return _annotate_dfj_metadata(
+        solve_metadata,
+        dfj_rounds=0,
+        dfj_solve_passes=1,
+        dfj_cuts_added=0,
+        dfj_round_history=[],
+    )

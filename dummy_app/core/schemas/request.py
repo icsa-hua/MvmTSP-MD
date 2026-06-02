@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 class ModelRunRequest:
     model_name: str
     solver_backend: str = "glpk"
+    subtour_mode: str = "mtz"
     subtour_strategy: str = "mtz"
     scenario_constraint_set: str = "default"
     objective_strategy: str = "legacy_stage"

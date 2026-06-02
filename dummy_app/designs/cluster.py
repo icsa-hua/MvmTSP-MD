@@ -257,7 +257,7 @@ class Cluster:
             builder=builder,
             scenario=scenario,
             list_of_agents=list_of_agents,
-            subtour_strategy=getattr(builder, "subtour_strategy", "mtz"),
+            subtour_mode=getattr(builder, "subtour_mode", getattr(builder, "subtour_strategy", "mtz")),
         )
         
         # STAGE 1 SOLUTION : ONLY Objective Functions to solve

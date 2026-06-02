@@ -25,7 +25,7 @@ def get_depot_node(depot_id, nodes_dict):
     return reverse[depot_id]
 
 
-def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, list_of_agents:dict, subtour_strategy: str = "mtz"): 
+def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, list_of_agents:dict, subtour_mode: str = "mtz"): 
     """
     This function sets all the constraints (Spatial flow, Energy constraints, Time progression, synchronization and path completion) 
     NOTE: No objective function is enforced here. Constraints are mathematical inequalities and are linear. This scenario 
@@ -65,7 +65,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
-    apply_subtour_constraints(cluster, agents, NODES, depot_ind, subtour_strategy)
+    apply_subtour_constraints(cluster, agents, NODES, depot_ind, subtour_mode)
     
     M = TF[-1]
     original_depot_ind = get_depot_node(cluster.depot_id, cluster.original_nodes_dict)
@@ -179,7 +179,7 @@ def cooperative_scenario_constraints(cluster:Any, builder: Any, V_nodes:list, li
 
 
     
-def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict, subtour_strategy: str = "mtz"):
+def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, list_of_agents:dict, subtour_mode: str = "mtz"):
     """
     This function sets all the constraints (Spatial flow, Energy constraints, Time progression, synchronization and path completion) 
     NOTE: No objective function is enforced here. Constraints are mathematical inequalities and are linear. This scenario 
@@ -224,7 +224,7 @@ def individual_scenario_constraints(cluster:Any, builder:Any , V_nodes:list, lis
         for k in agents: 
             model += pl.lpSum(cluster.x[i,j,k] for j in V_nodes) == pl.lpSum(cluster.x[j,i,k] for j in V_nodes)
 
-    apply_subtour_constraints(cluster, agents, NODES, depot_ind, subtour_strategy)
+    apply_subtour_constraints(cluster, agents, NODES, depot_ind, subtour_mode)
    
     # Collision avoidance defined by precedence (to visit a node, an agent must ensure that the other agent has entered, serviced and left the next node) 
     M = TF[-1]

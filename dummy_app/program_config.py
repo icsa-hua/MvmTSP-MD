@@ -50,7 +50,8 @@ ENABLE_GA = 'yes'
 SCENARIO_CONSTRAINT_SET = "default"
 PRIORITY = 'yes' 
 SOLVER_BACKEND = 'cplex'
-SUBTOUR_STRATEGY = 'mtz' 
+SUBTOUR_MODE = 'mtz'
+SUBTOUR_STRATEGY = SUBTOUR_MODE
 OBJECTIVE_STRATEGY = 'legacy_stage'
 WORKFLOW = 'simulate' 
 
@@ -147,5 +148,4 @@ P_CHARGE = 350 # WATTS
 P_BS = 200 # In W is the power to operate the drone as a low level base station
 MOTOR_SPEED_MULTIPLIER = 10.5
 BANK_ANGLE_DEG = 0.0 
-
 

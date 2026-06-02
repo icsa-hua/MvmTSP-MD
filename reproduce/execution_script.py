@@ -61,7 +61,8 @@ def build_runtime_config(args):
         "priority":args.priority,
         "validate":args.validate,
         "solver_backend": args.solver_backend,
-        "subtour_strategy": args.subtour_strategy,
+        "subtour_mode": args.subtour_mode,
+        "subtour_strategy": args.subtour_mode,
         "objective_strategy": args.objective_strategy,
         "scenario_constraint_set": args.scenario_constraint_set,
         "warm_start_mode": warm_start_mode,
@@ -271,7 +272,14 @@ def main():
     parser.add_argument("--validate", action="store_true", help="Validate the solution.")
     parser.add_argument("--trials", type=int, default=TRIALS, help="Number of trials to run.")
     parser.add_argument("--solver_backend", type=str, default=SOLVER_BACKEND, help="MILP solver backend.")
-    parser.add_argument("--subtour_strategy", type=str, default=SUBTOUR_STRATEGY, help="Subtour elimination strategy.")
+    parser.add_argument(
+        "--subtour_mode",
+        "--subtour_strategy",
+        dest="subtour_mode",
+        type=str,
+        default=SUBTOUR_MODE,
+        help="Subtour elimination mode: mtz, dfj_iter, or flow.",
+    )
     parser.add_argument("--objective_strategy", type=str, default=OBJECTIVE_STRATEGY, help="Objective orchestration strategy.")
     parser.add_argument("--scenario_constraint_set", type=str, default=SCENARIO_CONSTRAINT_SET, help="Constraint set variant to use.")
     parser.add_argument("--solver_time_limit_seconds", type=int, default=SOLVER_TIME_LIMIT, help="Optional MILP solver time limit in seconds; 0 disables the override.")

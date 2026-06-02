@@ -35,6 +35,7 @@ from dummy_app.program_config import (
     SOLVER_BACKEND,
     SOLVER_TIME_LIMIT,
     STAGE_OPTIONS,
+    SUBTOUR_MODE,
     SUBTOUR_STRATEGY,
     VERTICAL_VELOCITY,
 )
@@ -92,6 +93,7 @@ def build_base_config(args: argparse.Namespace, warm_start_mode: str) -> Dict[st
         "priority": PRIORITY,
         "validate": False,
         "solver_backend": args.solver_backend,
+        "subtour_mode": SUBTOUR_MODE,
         "subtour_strategy": SUBTOUR_STRATEGY,
         "objective_strategy": OBJECTIVE_STRATEGY,
         "scenario_constraint_set": SCENARIO_CONSTRAINT_SET,
