@@ -28,7 +28,12 @@ def build_runtime_index(cluster: Any) -> Dict[int, int]:
 
 
 def list_service_nodes(cluster: Any) -> List[int]:
-    return [int(node_id) for node_id in cluster.nodes_dict.values() if int(node_id) != int(cluster.depot_id)]
+    removed_bridge_nodes = {int(node_id) for node_id in getattr(cluster, "virtual_nodes", {}).values()}
+    return [
+        int(node_id)
+        for node_id in cluster.nodes_dict.values()
+        if int(node_id) != int(cluster.depot_id) and int(node_id) not in removed_bridge_nodes
+    ]
 
 
 def get_node_coordinates(cluster: Any, node_id: int) -> Tuple[float, float]:

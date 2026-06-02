@@ -12,7 +12,10 @@ from dummy_app.pipeline.instance_builder import build_problem_instance
 from dummy_app.tools.performance_metrics import Metrics
 from dummy_app.designs.cluster import Cluster
 from dummy_app.models.heuristics.alns_solver import ALNSOptimizationModel, solve_alns_baseline
-from dummy_app.models.heuristics.genetic_algorithm_solver import GeneticAlgorithmOptimizationModel
+from dummy_app.models.heuristics.genetic_algorithm_solver import (
+    GeneticAlgorithmOptimizationModel,
+    solve_genetic_algorithm_baseline,
+)
 from dummy_app.models.heuristics.global_greedy_nn import GlobalGreedyNNOptimizationModel
 from dummy_app.models.heuristics.static_partition_greedy_nn import StaticPartitionGreedyNNOptimizationModel
 from dummy_app.models.milp.model import MILPOptimizationModel
@@ -38,7 +41,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from typing import Any, Callable, List, Dict, Tuple, Mapping
 
-from dummy_app.models.milp.warm_start import normalize_warm_start_mode
+from dummy_app.models.milp.warm_start import build_warm_start_payload, normalize_warm_start_mode
 
 # Functions to transform coordinates from EPSG to UTM 
 transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
@@ -171,9 +174,16 @@ class Builder(MVMTSPConfig):
     def build_cluster_initializer(self, cluster: Cluster) -> None:
         cluster.initial_population = {}
         cluster.initializer_timeframe_estimate = None
+        cluster.warm_start_solution = {}
         cluster.warm_start_summary = {
             "strategy": self.warm_start_mode,
+            "available": False,
+            "provided_to_solver": False,
+            "accepted_by_solver": None,
+            "acceptance_source": "",
+            "generation_time_sec": 0.0,
             "objective_value": None,
+            "solver_objective_value": None,
             "makespan": None,
             "timeframe_estimate": None,
         }
@@ -182,56 +192,35 @@ class Builder(MVMTSPConfig):
             return
 
         if self.warm_start_mode == "ga":
-            reverse_nodes = {v: k for k, v in cluster.nodes_dict.items()}
-            ga_nodes = cluster.nodes_dict.copy()
-            for bridge_node in cluster.bridge_nodes:
-                bridge_index = reverse_nodes.get(int(bridge_node))
-                if bridge_index is not None:
-                    ga_nodes.pop(int(bridge_index), None)
-
-            candidate_routes: Dict[int, Tuple[List[int], float]] = {}
-            for agent_id in cluster.employed_agents:
-                route_seed = int(self.random_seed) + int(cluster.id) * 1000 + int(agent_id)
-                solution_path, solution_cost = self.call_genetic_algorithm(
-                    nodes_dict=ga_nodes,
-                    cost=cluster.cost,
-                    depot=int(cluster.depot_id),
-                    verbose=False,
-                    generations=self.ga_generations,
-                    seed=route_seed,
-                )
-                candidate_routes[int(agent_id)] = (list(solution_path), float(solution_cost))
-
-            cluster.initial_population = candidate_routes
-            if candidate_routes:
-                best_agent_id, (best_path, best_cost) = min(candidate_routes.items(), key=lambda item: item[1][1])
-                route_time = 0.0
-                if hasattr(cluster, "estimate_route_time_from_path"):
-                    route_time = float(cluster.estimate_route_time_from_path(best_path, self))
-                cluster.initializer_timeframe_estimate = max(1, int(math.ceil(route_time))) if route_time > 0.0 else None
-                cluster.warm_start_summary = {
-                    "strategy": "ga",
-                    "objective_value": float(best_cost),
-                    "makespan": float(route_time) if route_time > 0.0 else None,
-                    "timeframe_estimate": cluster.initializer_timeframe_estimate,
-                    "selected_agent": int(best_agent_id),
-                    "candidate_count": len(candidate_routes),
-                }
+            generation_started_at = time.perf_counter()
+            heuristic_solution = solve_genetic_algorithm_baseline(cluster, self)
+            generation_time_sec = time.perf_counter() - generation_started_at
+            summary, payload = build_warm_start_payload(
+                builder=self,
+                cluster=cluster,
+                heuristic_solution=heuristic_solution,
+                strategy_name="ga",
+                generation_time_sec=generation_time_sec,
+            )
+            cluster.warm_start_solution = payload
+            cluster.warm_start_summary = summary
+            cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
         if self.warm_start_mode == "alns":
+            generation_started_at = time.perf_counter()
             heuristic_solution = solve_alns_baseline(cluster, self)
-            objective_value = heuristic_solution.diagnostics.get("objective_value")
-            makespan = heuristic_solution.makespan
-            cluster.initializer_timeframe_estimate = max(1, int(math.ceil(float(makespan)))) if makespan else None
-            cluster.warm_start_summary = {
-                "strategy": "alns",
-                "objective_value": float(objective_value) if objective_value is not None else None,
-                "makespan": float(makespan) if makespan is not None else None,
-                "timeframe_estimate": cluster.initializer_timeframe_estimate,
-                "covered_nodes": heuristic_solution.diagnostics.get("covered_nodes", []),
-                "uncovered_nodes": heuristic_solution.diagnostics.get("uncovered_physical_nodes", []),
-            }
+            generation_time_sec = time.perf_counter() - generation_started_at
+            summary, payload = build_warm_start_payload(
+                builder=self,
+                cluster=cluster,
+                heuristic_solution=heuristic_solution,
+                strategy_name="alns",
+                generation_time_sec=generation_time_sec,
+            )
+            cluster.warm_start_solution = payload
+            cluster.warm_start_summary = summary
+            cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
         raise ValueError(f"Unsupported warm_start_mode '{self.warm_start_mode}'")
@@ -340,6 +329,7 @@ class Builder(MVMTSPConfig):
         time_limit = self.solver_time_limit_seconds if self.solver_time_limit_seconds is not None else default_limit
         solve_metadata = solve_cluster_problem(
             cluster=cluster,
+            builder=self,
             time_limit_seconds=time_limit,
             solver_backend=self.solver_backend,
             solver_seed=self.solver_seed,
@@ -448,21 +438,31 @@ class Builder(MVMTSPConfig):
 
         self.latest_run_summary = self.build_run_summary()
         overall_statuses = [result.normalized_status for result in cluster_results]
+        all_clusters_have_incumbent = bool(cluster_results) and all(result.incumbent_value is not None for result in cluster_results)
 
         # Here the path has been solved for each cluster. 
         if overall_statuses and all(status == "optimal" for status in overall_statuses):
             normalized_status = "optimal"
             raw_status = "Optimal"
 
-        elif overall_statuses and all(status in {"optimal", "feasible", "feasible_time_limit"} for status in overall_statuses):
+        elif overall_statuses and all(status in {"optimal", "feasible"} for status in overall_statuses):
             normalized_status = "feasible"
             raw_status = "Feasible"
+
+        elif overall_statuses and all(status in {"optimal", "feasible", "feasible_time_limit"} for status in overall_statuses):
+            normalized_status = "feasible" if all_clusters_have_incumbent else "feasible_time_limit"
+            raw_status = "Feasible" if all_clusters_have_incumbent else "Not Solved"
 
         else:
             normalized_status = "error"
             raw_status = "Error"
 
-        objective_value = self.latest_run_summary.get("objective_value")
+        summary_objective_value = self.latest_run_summary.get("objective_value")
+        solver_objective_value = (
+            float(sum(float(result.incumbent_value) for result in cluster_results))
+            if cluster_results and all(result.incumbent_value is not None for result in cluster_results)
+            else None
+        )
         time_limit = self.run_request.solver_time_limit_seconds if self.run_request is not None else self.solver_time_limit_seconds
         best_bound = (
             float(sum(float(result.best_bound) for result in cluster_results))
@@ -476,15 +476,16 @@ class Builder(MVMTSPConfig):
             model_name=self.model_name,
             raw_status=raw_status,
             normalized_status=normalized_status,
-            objective_value=float(objective_value) if objective_value is not None else None,
-            incumbent_value=float(objective_value) if objective_value is not None else None,
+            objective_value=float(solver_objective_value) if solver_objective_value is not None else None,
+            summary_objective_value=float(summary_objective_value) if summary_objective_value is not None else None,
+            incumbent_value=float(solver_objective_value) if solver_objective_value is not None else None,
             best_bound=best_bound,
             absolute_gap=compute_absolute_gap(
-                float(objective_value) if objective_value is not None else None,
+                float(solver_objective_value) if solver_objective_value is not None else None,
                 best_bound,
             ),
             relative_gap=compute_relative_gap(
-                float(objective_value) if objective_value is not None else None,
+                float(solver_objective_value) if solver_objective_value is not None else None,
                 best_bound,
             ),
             elapsed_time_seconds=float(getattr(self.metrics, "elapsed_time", 0.0) or 0.0),
@@ -497,6 +498,16 @@ class Builder(MVMTSPConfig):
                 "cluster_status_records": list(self.cluster_status_records),
                 "coordinated_plan_agents": sorted(self.coordinated_plan.keys()),
             },
+        )
+        self.latest_run_summary["solver_objective_value"] = float(solver_objective_value) if solver_objective_value is not None else None
+        self.latest_run_summary["summary_objective_value"] = (
+            float(summary_objective_value) if summary_objective_value is not None else None
+        )
+        self.latest_run_summary["best_bound"] = float(best_bound) if best_bound is not None else None
+        self.latest_run_summary["optimality_gap_percent"] = (
+            float(self.latest_model_run_result.relative_gap) * 100.0
+            if self.latest_model_run_result.relative_gap is not None
+            else None
         )
 
         if self.learning_enabled and self.learning_controller is not None:
@@ -1033,6 +1044,8 @@ class Builder(MVMTSPConfig):
                 "first_optimality_gap_percent": solve_metadata.get("first_optimality_gap_percent"),
                 "explored_bnb_nodes": solve_metadata.get("explored_bnb_nodes"),
                 "active_bnb_nodes": solve_metadata.get("active_bnb_nodes"),
+                "feasible_solution_found": solve_metadata.get("feasible_solution_found"),
+                "time_limit_reached": solve_metadata.get("time_limit_reached"),
                 "optimality_proven": solve_metadata.get("optimality_proven"),
                 "progress_events": solve_metadata.get("progress_events", []),
                 "solver_log_path": solve_metadata.get("solver_log_path", ""),

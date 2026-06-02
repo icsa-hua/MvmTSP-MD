@@ -9,7 +9,6 @@ RL_EXISTING_DATASET = ""
 RL_DATASET_OUTPUT_DIR = f"{PROJECT_DIR}/results/rl_dataset"
 CENTROIDS_PATH = f"{PROJECT_DIR}/dummy_app/drone_centroids_path.csv"
 
-
 # --- Simulation Config --- # 
 TRIALS = 1
 
@@ -19,18 +18,18 @@ NUMBER_OF_USERS = 1 # Users to cover per Area
 
 LATITUDE_COORDS = 37.961322948559
 LONGITUDE_COORDS = 23.708232317542667
-ALTITUDE = 300 # Optimal Coverage Altitude 
+ALTITUDE = 100 # Optimal Coverage Altitude 
 
 LOW_BOUND = 75 # Considered in meters 
 HIGH_BOUND = 120 # Considered in meters 
 
 # --- UAV Config --- # 
-MAX_BATTERY = 355.2 #Wh 
+MAX_BATTERY = 362 #Wh 
 MAX_COVERAGE_TIME = 3
 MASS = 6.4 # In kg with payload for coverage
 
-HORIZONTAL_VELOCITY = 15.56 # m/s 
-VERTICAL_VELOCITY = 2.78 # m/s 
+HORIZONTAL_VELOCITY = 10 # m/s 
+VERTICAL_VELOCITY = 2.5 # m/s 
 
 # --- Scenario Options  --- # 
 SCENARIO_OPTIONS = ['cooperative', 'individual']
@@ -98,20 +97,22 @@ EXPERIMENT_A_GRID = {
 }
 
 EXPERIMENT_B_GRID = {
-    "areas": [25, 50, 100],
-    "uavs": [3, 4, 6],
+    "areas": [25, 50, 100, 200],
+    "uavs": [3, 4, 6, 8],
 }
 EXPERIMENT_B_SOLVERS = ["glpk", "cbc", "gurobi", "cplex"]
 
 EXPERIMENT_C_GRID = {
-    "areas": [50, 100, 150],
-    "uavs": [4, 6],
+    "areas": [50, 100, 150, 200],
+    "uavs": [3, 4, 6, 8],
 }
-EXPERIMENT_C_WARM_STARTS = ["none", "alns", "ga"]
+
+EXPERIMENT_C_WARM_STARTS = ["none", "ga", "alns"]
 
 EXPERIMENT_D_GRID = {
-    "areas": [25, 50, 100],
-    "uavs": [3, 4, 6],
+    "areas": [50, 100, 150, 200],
+    "uavs": [3, 4, 6, 8],
+
 }
 EXPERIMENT_D_FORMULATIONS = {
     "single_stage_milp": 1,
@@ -144,9 +145,7 @@ MIN_HOVER = 30 # Least power required to minimally hover over the grouind
 NUMBER_OF_ROTORS = 4 
 P_CHARGE = 350 # WATTS 
 P_BS = 200 # In W is the power to operate the drone as a low level base station
-
 MOTOR_SPEED_MULTIPLIER = 10.5
-
 BANK_ANGLE_DEG = 0.0 
 
 

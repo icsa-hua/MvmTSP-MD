@@ -32,6 +32,7 @@ class ModelRunResult:
     raw_status: str
     normalized_status: str
     objective_value: Optional[float] = None
+    summary_objective_value: Optional[float] = None
     incumbent_value: Optional[float] = None
     best_bound: Optional[float] = None
     absolute_gap: Optional[float] = None

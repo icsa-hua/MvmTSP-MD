@@ -239,12 +239,130 @@ def _sum_branch_and_bound_nodes(run_result: Any) -> int:
     )
 
 
+def _aggregate_solver_incumbent(run_result: Any) -> float | None:
+    incumbents = [cluster_result.incumbent_value for cluster_result in run_result.cluster_results]
+    if not incumbents or any(value is None for value in incumbents):
+        return None
+    return float(sum(float(value) for value in incumbents))
+
+
+def _aggregate_solver_best_bound(run_result: Any) -> float | None:
+    best_bounds = [cluster_result.best_bound for cluster_result in run_result.cluster_results]
+    if not best_bounds or any(value is None for value in best_bounds):
+        return None
+    return float(sum(float(value) for value in best_bounds))
+
+
+def _aggregate_history_incumbent(status_history: Iterable[Mapping[str, Any]]) -> float | None:
+    records = list(status_history)
+    incumbents = [record.get("incumbent_value") for record in records]
+    if not records or any(value is None for value in incumbents):
+        return None
+    return float(sum(float(value) for value in incumbents))
+
+
+def _aggregate_history_best_bound(status_history: Iterable[Mapping[str, Any]]) -> float | None:
+    records = list(status_history)
+    best_bounds = [record.get("best_bound") for record in records]
+    if not records or any(value is None for value in best_bounds):
+        return None
+    return float(sum(float(value) for value in best_bounds))
+
+
+def _failure_category_flags(error_message: str, status_history: Iterable[Mapping[str, Any]]) -> Dict[str, bool]:
+    records = list(status_history)
+    time_limit_feasible = any(
+        bool(record.get("time_limit_reached")) and record.get("incumbent_value") is not None for record in records
+    )
+    time_limit_no_solution = any(
+        bool(record.get("time_limit_reached")) and record.get("incumbent_value") is None for record in records
+    )
+    normalized_error = str(error_message or "")
+    model_build_error = any(
+        marker in normalized_error
+        for marker in (
+            "Error in creating the problem for Cluster",
+            "Error processing cluster",
+        )
+    )
+    solver_error = bool(normalized_error) and not (time_limit_feasible or time_limit_no_solution or model_build_error)
+    return {
+        "time_limit_feasible": bool(time_limit_feasible),
+        "time_limit_no_solution": bool(time_limit_no_solution),
+        "model_build_error": bool(model_build_error),
+        "solver_error": bool(solver_error),
+    }
+
+
+def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]:
+    if builder is None:
+        flags = _failure_category_flags(error_message, [])
+        return {
+            "objective_value": None,
+            "summary_objective_value": None,
+            "best_bound": None,
+            "optimality_gap_percent": None,
+            "feasible_solution_found": False,
+            "time_to_first_feasible_sec": None,
+            "branch_and_bound_nodes": None,
+            "memory_usage_mb": None,
+            **flags,
+        }
+
+    status_history = list(getattr(builder, "solve_status_history", []))
+    flags = _failure_category_flags(error_message, status_history)
+    objective_value = _aggregate_history_incumbent(status_history)
+    best_bound = _aggregate_history_best_bound(status_history)
+    feasible_solution_found = bool(status_history) and all(record.get("incumbent_value") is not None for record in status_history)
+
+    first_feasible_times = [
+        float(record.get("first_feasible_time_seconds"))
+        for record in status_history
+        if record.get("first_feasible_time_seconds") is not None
+    ]
+    return {
+        "objective_value": objective_value,
+        "summary_objective_value": None,
+        "best_bound": best_bound,
+        "optimality_gap_percent": compute_relative_gap_percent(objective_value, best_bound),
+        "feasible_solution_found": feasible_solution_found,
+        "time_to_first_feasible_sec": min(first_feasible_times) if first_feasible_times else None,
+        "branch_and_bound_nodes": int(
+            sum(int(record.get("explored_bnb_nodes", 0) or 0) for record in status_history)
+        ) if status_history else None,
+        "memory_usage_mb": float(getattr(builder.metrics, "memory_usage", 0.0) or 0.0) if getattr(builder, "metrics", None) else None,
+        **flags,
+    }
+
+
 def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, Any]) -> Dict[str, Any]:
     routes = aggregate_agent_routes(run_result.cluster_results)
     distance_per_uav, energy_per_uav, total_travel_time = _aggregate_per_uav_metrics(run_result)
     distance_values = list(distance_per_uav.values())
     energy_values = list(energy_per_uav.values())
     summary = dict(run_result.summary)
+    solver_objective_value = _aggregate_solver_incumbent(run_result)
+    solver_best_bound = _aggregate_solver_best_bound(run_result)
+    summary_objective_value = getattr(run_result, "summary_objective_value", None)
+    if summary_objective_value is None:
+        summary_objective_value = summary.get("objective_value")
+    comparable_objective_value = solver_objective_value if solver_objective_value is not None else run_result.objective_value
+    feasible_solution_found = bool(run_result.cluster_results) and all(
+        cluster_result.incumbent_value is not None for cluster_result in run_result.cluster_results
+    )
+    time_limit_feasible = any(
+        bool(dict(cluster_result.diagnostics).get("time_limit_reached")) and cluster_result.incumbent_value is not None
+        for cluster_result in run_result.cluster_results
+    )
+    time_limit_no_solution = any(
+        bool(dict(cluster_result.diagnostics).get("time_limit_reached")) and cluster_result.incumbent_value is None
+        for cluster_result in run_result.cluster_results
+    )
+    model_build_error = False
+    solver_error = any(
+        getattr(cluster_result, "termination_reason", "") == "solver_error"
+        for cluster_result in run_result.cluster_results
+    )
 
     coverage_ratio = compute_coverage_ratio(routes, scenario_payload["target_nodes"])
     unvisited_nodes = count_unvisited_nodes(routes, scenario_payload["target_nodes"])
@@ -261,13 +379,19 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         "jain_fairness_distance": float(compute_jain_fairness(distance_values)),
         "jain_fairness_energy": float(compute_jain_fairness(energy_values)),
         "unvisited_nodes": int(unvisited_nodes),
-        "objective_value": run_result.objective_value,
-        "best_bound": run_result.best_bound,
-        "optimality_gap_percent": compute_relative_gap_percent(run_result.incumbent_value, run_result.best_bound),
-        "feasible_solution_found": run_result.normalized_status in {"optimal", "feasible", "feasible_time_limit"},
+        "objective_value": comparable_objective_value,
+        "solver_objective_value": solver_objective_value,
+        "summary_objective_value": summary_objective_value,
+        "best_bound": solver_best_bound,
+        "optimality_gap_percent": compute_relative_gap_percent(comparable_objective_value, solver_best_bound),
+        "feasible_solution_found": feasible_solution_found,
         "time_to_first_feasible_sec": _aggregate_first_feasible_time(run_result),
         "branch_and_bound_nodes": _sum_branch_and_bound_nodes(run_result),
         "memory_usage_mb": summary.get("memory_usage_mb"),
+        "time_limit_feasible": time_limit_feasible,
+        "time_limit_no_solution": time_limit_no_solution,
+        "model_build_error": model_build_error,
+        "solver_error": solver_error,
         "status": run_result.normalized_status,
         "distance_per_uav": json.dumps(distance_per_uav, sort_keys=True),
         "energy_per_uav": json.dumps(energy_per_uav, sort_keys=True),
@@ -290,6 +414,7 @@ def run_method(
     priority: str = PRIORITY,
 ) -> Dict[str, Any]:
     effective_model_name = model_name or METHOD_MODEL_MAP.get(method_name, "milp")
+    builder = None
     try:
         _enforce_memory_limit(memory_limit_bytes)
         set_random_seed(int(scenario_payload["seed"]))
@@ -338,6 +463,7 @@ def run_method(
             "metrics": extract_common_run_metrics(builder.latest_model_run_result, scenario_payload),
         }
     except Exception as exc:
+        error_message = f"{exc.__class__.__name__}: {exc}"
         return {
             "status": "failed",
             "method_name": method_name,
@@ -345,9 +471,9 @@ def run_method(
             "solver_backend": solver_backend,
             "warm_start_mode": warm_start_mode,
             "run_result": None,
-            "artifact_dir": "",
-            "error_message": f"{exc.__class__.__name__}: {exc}",
-            "metrics": {},
+            "artifact_dir": getattr(builder, "latest_artifact_dir", "") if builder is not None else "",
+            "error_message": error_message,
+            "metrics": _extract_failure_metrics(builder, error_message),
         }
 
 

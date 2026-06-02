@@ -131,7 +131,19 @@ def run_solve_mode(args):
         trials=args.trials,
     )
     persist_combined_playback(problem, mobility_sim, regions, user_points)
-    logger.info(f"Solve completed. Artifacts: {constructor.latest_artifact_dir}")
+    run_result = getattr(constructor, "latest_model_run_result", None)
+    run_summary = dict(getattr(constructor, "latest_run_summary", {}))
+    if run_result is not None:
+        logger.info(
+            "Solve completed. "
+            f"status={run_result.normalized_status}, "
+            f"objective_value={run_result.objective_value}, "
+            f"best_bound={run_result.best_bound}, "
+            f"optimality_gap_percent={run_summary.get('optimality_gap_percent')}, "
+            f"artifacts={constructor.latest_artifact_dir}"
+        )
+    else:
+        logger.info(f"Solve completed. Artifacts: {constructor.latest_artifact_dir}")
     return constructor.latest_artifact_dir
 
 

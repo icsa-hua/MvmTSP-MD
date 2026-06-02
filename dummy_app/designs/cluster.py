@@ -58,6 +58,7 @@ class Cluster:
         self.absolute_makespan_value:float = 0.0
         self.initializer_timeframe_estimate:int | None = None
         self.warm_start_summary:Dict[str, Any] = {}
+        self.warm_start_solution:Dict[str, Any] = {}
         
 
     def get_cluster_content(self, distance, energy, time, column_names )->Dict:
