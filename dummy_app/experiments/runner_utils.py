@@ -157,6 +157,7 @@ def _build_runtime_config(
     *,
     model_name: str,
     solver_backend: str,
+    subtour_mode: str,
     warm_start_mode: str,
     stage_solution: int,
     objective_weights: Optional[Dict[str, float]],
@@ -164,6 +165,7 @@ def _build_runtime_config(
     time_step_sec: int,
     time_limit_seconds: int | None,
     priority: str,
+    bridge_node_required_visits_override: int | None = None,
 ) -> Dict[str, Any]:
     config = {
         "model_name": model_name,
@@ -178,8 +180,8 @@ def _build_runtime_config(
         "priority": priority,
         "validate": False,
         "solver_backend": solver_backend,
-        "subtour_mode": SUBTOUR_MODE,
-        "subtour_strategy": SUBTOUR_STRATEGY,
+        "subtour_mode": subtour_mode,
+        "subtour_strategy": subtour_mode,
         "objective_strategy": OBJECTIVE_STRATEGY,
         "scenario_constraint_set": SCENARIO_CONSTRAINT_SET,
         "solver_time_limit_seconds": time_limit_seconds,
@@ -195,6 +197,8 @@ def _build_runtime_config(
         "learning_enabled": False,
         "learning_alpha": 0.75,
     }
+    if bridge_node_required_visits_override is not None:
+        config["bridge_node_required_visits_override"] = int(bridge_node_required_visits_override)
     if objective_weights:
         config["objective_weights"] = dict(objective_weights)
     return config
@@ -271,6 +275,20 @@ def _aggregate_history_best_bound(status_history: Iterable[Mapping[str, Any]]) -
     return float(sum(float(value) for value in best_bounds))
 
 
+def _sum_solver_runtime_seconds(run_result: Any) -> float:
+    return float(
+        sum(float(cluster_result.elapsed_time_seconds or 0.0) for cluster_result in getattr(run_result, "cluster_results", []))
+    )
+
+
+def _sum_dfj_metric(run_result: Any, key: str) -> int:
+    total = 0
+    for cluster_result in getattr(run_result, "cluster_results", []):
+        diagnostics = dict(getattr(cluster_result, "diagnostics", {}))
+        total += int(diagnostics.get(key, 0) or 0)
+    return int(total)
+
+
 def _failure_category_flags(error_message: str, status_history: Iterable[Mapping[str, Any]]) -> Dict[str, bool]:
     records = list(status_history)
     time_limit_feasible = any(
@@ -300,6 +318,13 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
     if builder is None:
         flags = _failure_category_flags(error_message, [])
         return {
+            "subtour_mode": SUBTOUR_MODE,
+            "num_variables": None,
+            "num_binary_variables": None,
+            "num_continuous_variables": None,
+            "num_constraints": None,
+            "model_build_time_sec": None,
+            "solver_runtime_sec": None,
             "objective_value": None,
             "summary_objective_value": None,
             "best_bound": None,
@@ -308,6 +333,8 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
             "time_to_first_feasible_sec": None,
             "branch_and_bound_nodes": None,
             "memory_usage_mb": None,
+            "subtour_cuts_added": None,
+            "dfj_iterations": None,
             **flags,
         }
 
@@ -316,6 +343,11 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
     objective_value = _aggregate_history_incumbent(status_history)
     best_bound = _aggregate_history_best_bound(status_history)
     feasible_solution_found = bool(status_history) and all(record.get("incumbent_value") is not None for record in status_history)
+    summary = dict(getattr(builder, "latest_run_summary", {}))
+    total_solver_runtime_sec = float(
+        sum(float(record.get("elapsed_time_seconds", 0.0) or 0.0) for record in status_history)
+    )
+    total_runtime_sec = float(getattr(builder.metrics, "elapsed_time", 0.0) or 0.0)
 
     first_feasible_times = [
         float(record.get("first_feasible_time_seconds"))
@@ -323,6 +355,16 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
         if record.get("first_feasible_time_seconds") is not None
     ]
     return {
+        "subtour_mode": getattr(builder, "subtour_mode", SUBTOUR_MODE),
+        "num_variables": summary.get("num_variables", getattr(builder, "variables_count", None)),
+        "num_binary_variables": summary.get("num_binary_variables", getattr(builder, "num_binary_variables", None)),
+        "num_continuous_variables": summary.get(
+            "num_continuous_variables",
+            getattr(builder, "num_continuous_variables", None),
+        ),
+        "num_constraints": summary.get("num_constraints", getattr(builder, "num_constraints", None)),
+        "model_build_time_sec": max(total_runtime_sec - total_solver_runtime_sec, 0.0),
+        "solver_runtime_sec": total_solver_runtime_sec,
         "objective_value": objective_value,
         "summary_objective_value": None,
         "best_bound": best_bound,
@@ -333,6 +375,8 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
             sum(int(record.get("explored_bnb_nodes", 0) or 0) for record in status_history)
         ) if status_history else None,
         "memory_usage_mb": float(getattr(builder.metrics, "memory_usage", 0.0) or 0.0) if getattr(builder, "metrics", None) else None,
+        "subtour_cuts_added": int(sum(int(record.get("dfj_cuts_added", 0) or 0) for record in status_history)) if status_history else None,
+        "dfj_iterations": int(sum(int(record.get("dfj_rounds", 0) or 0) for record in status_history)) if status_history else None,
         **flags,
     }
 
@@ -345,6 +389,8 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
     summary = dict(run_result.summary)
     solver_objective_value = _aggregate_solver_incumbent(run_result)
     solver_best_bound = _aggregate_solver_best_bound(run_result)
+    solver_runtime_sec = _sum_solver_runtime_seconds(run_result)
+    total_runtime_sec = float(run_result.elapsed_time_seconds or summary.get("solve_time_seconds", 0.0) or 0.0)
     summary_objective_value = getattr(run_result, "summary_objective_value", None)
     if summary_objective_value is None:
         summary_objective_value = summary.get("objective_value")
@@ -369,7 +415,10 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
     coverage_ratio = compute_coverage_ratio(routes, scenario_payload["target_nodes"])
     unvisited_nodes = count_unvisited_nodes(routes, scenario_payload["target_nodes"])
     return {
+        "subtour_mode": summary.get("subtour_mode", SUBTOUR_MODE),
         "runtime_sec": float(run_result.elapsed_time_seconds or summary.get("solve_time_seconds", 0.0) or 0.0),
+        "model_build_time_sec": max(total_runtime_sec - solver_runtime_sec, 0.0),
+        "solver_runtime_sec": float(solver_runtime_sec),
         "coverage_ratio": float(coverage_ratio),
         "total_distance": float(sum(distance_values)),
         "total_energy": float(sum(energy_values)),
@@ -390,6 +439,12 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         "time_to_first_feasible_sec": _aggregate_first_feasible_time(run_result),
         "branch_and_bound_nodes": _sum_branch_and_bound_nodes(run_result),
         "memory_usage_mb": summary.get("memory_usage_mb"),
+        "num_variables": summary.get("num_variables"),
+        "num_binary_variables": summary.get("num_binary_variables"),
+        "num_continuous_variables": summary.get("num_continuous_variables"),
+        "num_constraints": summary.get("num_constraints"),
+        "subtour_cuts_added": _sum_dfj_metric(run_result, "dfj_cuts_added"),
+        "dfj_iterations": _sum_dfj_metric(run_result, "dfj_rounds"),
         "time_limit_feasible": time_limit_feasible,
         "time_limit_no_solution": time_limit_no_solution,
         "model_build_error": model_build_error,
@@ -406,6 +461,7 @@ def run_method(
     *,
     model_name: str | None = None,
     solver_backend: str = SOLVER_BACKEND,
+    subtour_mode: str = SUBTOUR_MODE,
     warm_start_mode: str = "none",
     stage_solution: int = 1,
     objective_weights: Optional[Dict[str, float]] = None,
@@ -414,6 +470,7 @@ def run_method(
     time_limit_seconds: int | None = EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
     memory_limit_bytes: int | None = EXPERIMENT_DEFAULT_MEMORY_LIMIT,
     priority: str = PRIORITY,
+    bridge_node_required_visits_override: int | None = None,
 ) -> Dict[str, Any]:
     effective_model_name = model_name or METHOD_MODEL_MAP.get(method_name, "milp")
     builder = None
@@ -424,6 +481,7 @@ def run_method(
             scenario_payload,
             model_name=effective_model_name,
             solver_backend=solver_backend,
+            subtour_mode=subtour_mode,
             warm_start_mode=warm_start_mode,
             stage_solution=stage_solution,
             objective_weights=objective_weights,
@@ -431,6 +489,7 @@ def run_method(
             time_step_sec=time_step_sec,
             time_limit_seconds=enforce_time_limit(time_limit_seconds),
             priority=priority,
+            bridge_node_required_visits_override=bridge_node_required_visits_override,
         )
         with _suppress_nested_output():
             builder = call_builder(config, 1)
@@ -459,6 +518,7 @@ def run_method(
             "method_name": method_name,
             "model_name": effective_model_name,
             "solver_backend": solver_backend,
+            "subtour_mode": subtour_mode,
             "warm_start_mode": warm_start_mode,
             "run_result": builder.latest_model_run_result,
             "artifact_dir": builder.latest_artifact_dir,
@@ -471,6 +531,7 @@ def run_method(
             "method_name": method_name,
             "model_name": effective_model_name,
             "solver_backend": solver_backend,
+            "subtour_mode": subtour_mode,
             "warm_start_mode": warm_start_mode,
             "run_result": None,
             "artifact_dir": getattr(builder, "latest_artifact_dir", "") if builder is not None else "",

@@ -63,11 +63,17 @@ def prepare_cluster_cost_bundle(problem_builder: Any, extraction: Dict[str, Unio
     bridge_nodes = [nodes_dict[bridge_nodes[i]] for i in range(len(bridge_nodes))]
     reverse_nodes = {v: k for k, v in nodes_dict.items()}
     virtual_nodes = defaultdict(int)
+    bridge_visit_override = getattr(problem_builder, "bridge_node_required_visits_override", None)
+    if bridge_visit_override is not None:
+        bridge_visit_override = max(int(bridge_visit_override), 1)
 
     required_visits = []
     for i in nodes_dict:
         if nodes_dict[i] in bridge_nodes:
-            allowed_visits = hub.number_allowed_visits[i]
+            if bridge_visit_override is not None:
+                allowed_visits = int(bridge_visit_override)
+            else:
+                allowed_visits = hub.number_allowed_visits[i]
         else:
             allowed_visits = 1
         required_visits.append(allowed_visits)

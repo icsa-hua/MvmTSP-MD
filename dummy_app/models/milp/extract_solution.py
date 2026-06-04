@@ -99,8 +99,6 @@ def extract_cluster_solution(cluster, builder: Any):
             unique_nodes_among_paths.add(target)
 
     logger.debug(f"Solutions created for {len(cluster.employed_agents)} agents")
-    builder.num_constraints += len(cluster.problem.constraints)
-    builder.variables_count += len(cluster.problem.variables())
     builder.global_nodes_visited += len(unique_nodes_among_paths)
     builder.validate_paths(paths=detailed_log, nodes_dict=cluster.nodes_dict, cluster=cluster)
     return detailed_log

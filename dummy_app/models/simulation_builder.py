@@ -85,6 +85,8 @@ class Builder(MVMTSPConfig):
         self.recharge_time_window:int = 5 #descrete time steps
         self.num_constraints = 0 
         self.variables_count = 0
+        self.num_binary_variables = 0
+        self.num_continuous_variables = 0
         self.problem_results = defaultdict()
         self.global_nodes_visited:int = 0
         self.visits_per_nodes:Dict[int,int] = {}
@@ -105,6 +107,10 @@ class Builder(MVMTSPConfig):
         self.time_step_sec = int(config.get("time_step_sec", getattr(self, "time_step_sec", 600)))
         self.warm_start_mode = normalize_warm_start_mode(
             config.get("warm_start_mode", "ga" if self.enable_ga else "none")
+        )
+        bridge_visit_override = config.get("bridge_node_required_visits_override")
+        self.bridge_node_required_visits_override = (
+            None if bridge_visit_override in {None, "", 0} else int(bridge_visit_override)
         )
         self.cluster_status_records: List[Dict[str, Any]] = []
         self.solve_status_history: List[Dict[str, Any]] = []
@@ -542,6 +548,8 @@ class Builder(MVMTSPConfig):
         self.total_number_cluster = 0
         self.num_constraints = 0
         self.variables_count = 0
+        self.num_binary_variables = 0
+        self.num_continuous_variables = 0
         self.agent_next_available_time = {}
         self.enable_ga = self.base_enable_ga
         self.metrics.reset()
@@ -568,6 +576,13 @@ class Builder(MVMTSPConfig):
         self.solver_backend = str(runtime_config.get("solver_backend", self.solver_backend))
         self.objective_strategy = str(runtime_config.get("objective_strategy", self.objective_strategy))
         self.scenario_constraint_set = str(runtime_config.get("scenario_constraint_set", self.scenario_constraint_set))
+        bridge_visit_override = runtime_config.get(
+            "bridge_node_required_visits_override",
+            self.bridge_node_required_visits_override,
+        )
+        self.bridge_node_required_visits_override = (
+            None if bridge_visit_override in {None, "", 0} else int(bridge_visit_override)
+        )
         self._seed_random_generators()
         self.optimization_model = self._create_optimization_model(self.model_name)
 
@@ -592,6 +607,7 @@ class Builder(MVMTSPConfig):
                 "solver_seed": self.solver_seed,
                 "fairness_tolerance": self.fairness_tolerance,
                 "time_step_sec": self.time_step_sec,
+                "bridge_node_required_visits_override": self.bridge_node_required_visits_override,
             },
         )
     
@@ -830,6 +846,52 @@ class Builder(MVMTSPConfig):
         self.validate_paths(paths=paths, nodes_dict=cluster_object.nodes_dict, cluster=cluster_object)
 
 
+    def _count_problem_variables(self, cluster_object: Cluster) -> Dict[str, int]:
+        problem = getattr(cluster_object, "problem", None)
+        if problem is None:
+            return {
+                "num_variables": 0,
+                "num_binary_variables": 0,
+                "num_continuous_variables": 0,
+            }
+
+        total_variables = 0
+        binary_variables = 0
+        continuous_variables = 0
+
+        for variable in problem.variables():
+            total_variables += 1
+
+            is_binary = False
+            if hasattr(variable, "isBinary"):
+                try:
+                    is_binary = bool(variable.isBinary())
+                except Exception:
+                    is_binary = False
+            if not is_binary:
+                try:
+                    is_binary = (
+                        float(getattr(variable, "lowBound", None)) == 0.0
+                        and float(getattr(variable, "upBound", None)) == 1.0
+                        and str(getattr(variable, "cat", "")).strip().lower() == "integer"
+                    )
+                except Exception:
+                    is_binary = False
+
+            if is_binary:
+                binary_variables += 1
+                continue
+
+            if str(getattr(variable, "cat", "")).strip().lower() == "continuous":
+                continuous_variables += 1
+
+        return {
+            "num_variables": int(total_variables),
+            "num_binary_variables": int(binary_variables),
+            "num_continuous_variables": int(continuous_variables),
+        }
+
+
     def _finalize_cluster_solution(
         self,
         cluster_object: Cluster,
@@ -947,6 +1009,12 @@ class Builder(MVMTSPConfig):
             results=results,
             uncovered_nodes=uncovered_nodes,
         )
+        problem_size_metrics = self._count_problem_variables(cluster_object)
+        problem_size_metrics["num_constraints"] = int(len(cluster_object.problem.constraints))
+        self.num_constraints += int(problem_size_metrics["num_constraints"])
+        self.variables_count += int(problem_size_metrics["num_variables"])
+        self.num_binary_variables += int(problem_size_metrics["num_binary_variables"])
+        self.num_continuous_variables += int(problem_size_metrics["num_continuous_variables"])
         self.problem_results[f"Cluster_{cluster_object.id}"].update(comparison_metrics)
         cluster_metrics = {
             "agent_count": len(cluster_input.assigned_agents),
@@ -958,6 +1026,7 @@ class Builder(MVMTSPConfig):
             "makespan": cluster_makespan,
             "absolute_makespan": cluster_absolute_makespan,
             "total_data_transfer": cluster_total_data_transfer,
+            **problem_size_metrics,
             **comparison_metrics,
         }
 
@@ -981,6 +1050,7 @@ class Builder(MVMTSPConfig):
             "agent_finish_times": dict(agent_finish_times),
             "agent_next_available_times": dict(agent_next_available_times),
             "warm_start_summary": dict(getattr(cluster_object, "warm_start_summary", {})),
+            "problem_size_metrics": dict(problem_size_metrics),
             "request": asdict(request),
         }
         if diagnostics:
@@ -1406,6 +1476,8 @@ class Builder(MVMTSPConfig):
         self.problem_results = defaultdict()
         self.num_constraints = 0
         self.variables_count = 0
+        self.num_binary_variables = 0
+        self.num_continuous_variables = 0
         self.total_number_cluster = 0
         self.coordinated_plan = defaultdict(dict)
         return self.latest_run_report
@@ -1531,6 +1603,8 @@ class Builder(MVMTSPConfig):
             "largest_cluster_size": max((record["node_count"] for record in self.cluster_status_records), default=0),
             "num_constraints": self.num_constraints,
             "num_variables": self.variables_count,
+            "num_binary_variables": self.num_binary_variables,
+            "num_continuous_variables": self.num_continuous_variables,
             "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
         }
 
@@ -1570,6 +1644,8 @@ class Builder(MVMTSPConfig):
             "largest_cluster_size": max((record.get("node_count", 0) for record in self.cluster_status_records), default=0),
             "num_constraints": float(self.num_constraints),
             "num_variables": float(self.variables_count),
+            "num_binary_variables": float(self.num_binary_variables),
+            "num_continuous_variables": float(self.num_continuous_variables),
             "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
             "error_type": exc.__class__.__name__,
         }

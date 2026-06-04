@@ -120,6 +120,11 @@ EXPERIMENT_D_FORMULATIONS = {
     "two_stage_milp": 2,
 }
 
+EXPERIMENT_SUBTOUR_AREAS = [50, 100, 150, 200]
+EXPERIMENT_SUBTOUR_UAVS = [6]
+EXPERIMENT_SUBTOUR_MODES = ["mtz", "dfj_iter", "flow"]
+EXPERIMENT_SUBTOUR_SOLVER = "cplex"
+
 EXPERIMENT_E_BASELINE = {
     "areas": 100,
     "users_per_area": 3,
@@ -135,6 +140,14 @@ EXPERIMENT_E_OBJECTIVE_WEIGHT_PROFILES = [
     "time_focused",
 ]
 
+EXPERIMENT_H_BASELINE = {
+    "areas": 100,
+    "users_per_area": 1,
+    "uavs": 4,
+    "coverage_time_profile": "medium",
+}
+EXPERIMENT_H_REQUIRED_VISITS = [1, 2, 3, 4, 5]
+
 # --- Energy configuration --- # 
 ROTOR_AREA = 0.2 # Rotor disk area in m 
 LAMBDA_COEF = 0.08 # Coeff for the drag profile depending on the type of UAV 
@@ -148,4 +161,3 @@ P_CHARGE = 350 # WATTS
 P_BS = 200 # In W is the power to operate the drone as a low level base station
 MOTOR_SPEED_MULTIPLIER = 10.5
 BANK_ANGLE_DEG = 0.0 
-
