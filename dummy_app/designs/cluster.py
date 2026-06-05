@@ -166,7 +166,7 @@ class Cluster:
         self.timeframe = list(range(0, total_time + 1))
 
 
-    def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy', stage_solution:int=2): 
+    def problem_formulation(self, builder, scenario:str='cooperative', objective_function:str='energy', stage_solution:int=2, build_only: bool = False): 
         
 
         if not hasattr(builder, 'get_travel_time'):
@@ -278,6 +278,10 @@ class Cluster:
                 #     time=self.cost['travel_time']
                 # ) 
 
+            if build_only:
+                builder.capture_cluster_model_build(self, build_mode="preflight")
+                return {}
+
             builder.solve_problem(self)
 
             # NOTE: In the case the solution from the MILP solver is indeed optimal, this should terminate the implenetation. 
@@ -301,6 +305,10 @@ class Cluster:
                     energy=self.cost['energy'], 
                     time=self.cost['travel_time'],
                 )
+
+                if build_only:
+                    builder.capture_cluster_model_build(self, build_mode="preflight")
+                    return {}
 
                 builder.solve_problem(self) 
 
@@ -326,6 +334,11 @@ class Cluster:
             elif objective_function == "coverage":
                 isolation_thr = 0.85
                 self.set_max_coverage_objective(builder)
+
+                if build_only:
+                    builder.capture_cluster_model_build(self, build_mode="preflight")
+                    return {}
+
                 builder.solve_problem(self)
 
                 if self.problem.status != pl.LpStatusOptimal:

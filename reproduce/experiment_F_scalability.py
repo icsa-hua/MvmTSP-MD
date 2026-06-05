@@ -30,6 +30,7 @@ from dummy_app.experiments.runner_utils import (
     save_results,
     set_random_seed,
 )
+from dummy_app.pipeline.instance_builder import build_problem_instance
 from dummy_app.program_config import (
     ALTITUDE,
     EXPERIMENT_B_SOLVERS,
@@ -75,6 +76,13 @@ _INT_FIELDS = {
     "largest_cluster_size",
     "active_uav_count",
     "unvisited_nodes",
+    "failed_cluster_id",
+    "failed_cluster_order_index",
+    "failed_cluster_node_count",
+    "failed_cluster_virtual_node_count",
+    "failed_cluster_uav_count",
+    "failed_cluster_time_horizon",
+    "failed_cluster_arc_count",
 }
 _FLOAT_FIELDS = {
     "model_build_time_sec",
@@ -477,6 +485,108 @@ def _release_case_memory(builder: Any, scenario_payload: Dict[str, Any] | None) 
     gc.collect()
 
 
+def _preflight_audit_filename(
+    scenario_payload: Mapping[str, Any],
+    *,
+    solver_name: str,
+) -> str:
+    return (
+        f"preflight_{scenario_payload['scenario_id']}_{solver_name}_"
+        f"n{int(scenario_payload['node_count'])}_u{int(scenario_payload['users_per_area'])}_k{int(scenario_payload['uav_count'])}.csv"
+    )
+
+
+def _run_scalability_preflight(
+    scenario_payload: Mapping[str, Any],
+    *,
+    solver_name: str,
+    fairness_tolerance: int,
+    memory_limit_bytes: int | None,
+) -> Dict[str, Any]:
+    builder = None
+    data = None
+    audit_records: List[Dict[str, Any]] = []
+    audit_path = ""
+    started_at = time.perf_counter()
+
+    try:
+        _enforce_memory_limit(memory_limit_bytes)
+        set_random_seed(int(scenario_payload["seed"]))
+        config = _build_runtime_config(
+            scenario_payload,
+            model_name="milp",
+            solver_backend=solver_name,
+            subtour_mode=SUBTOUR_MODE,
+            warm_start_mode="none",
+            stage_solution=1,
+            objective_weights=None,
+            fairness_tolerance=int(fairness_tolerance),
+            time_step_sec=600,
+            time_limit_seconds=enforce_time_limit(EXPERIMENT_F_TIME_LIMIT_SECONDS),
+            priority=EXPERIMENT_DEFAULT_PRIORITY,
+        )
+
+        with _suppress_nested_output():
+            builder = call_builder(config, 1)
+            data = builder.preprocess_generated_data(
+                distance_matrix=np.array(scenario_payload["distance_matrix"], copy=True),
+                centroids=copy.deepcopy(scenario_payload["centroids"]),
+                depots=np.array(scenario_payload["depots"], copy=True),
+                num_of_agents=int(scenario_payload["uav_count"]),
+                v_hor=HORIZONTAL_VELOCITY,
+                v_ver=VERTICAL_VELOCITY,
+                altitude=ALTITUDE,
+                coverage_time=int(scenario_payload["coverage_time"]),
+                user_points=copy.deepcopy(scenario_payload["user_points"]),
+            )
+            builder._prepare_run_state()
+            builder.run_request = builder.build_run_request()
+            builder.current_problem_instance = build_problem_instance(
+                builder,
+                np.array(scenario_payload["distance_matrix"], copy=True),
+                data,
+                copy.deepcopy(scenario_payload["user_points"]),
+            )
+            builder.total_number_cluster = len(builder.current_problem_instance.prepared_clusters)
+            for cluster_solve_order, prepared_cluster in enumerate(builder.current_problem_instance.prepared_clusters):
+                prepared_cluster.metadata["cluster_solve_order"] = int(cluster_solve_order)
+                audit_records.append(
+                    builder.build_cluster_model_only(
+                        builder.current_problem_instance,
+                        prepared_cluster,
+                        builder.run_request,
+                    )
+                )
+
+        audit_dir = getattr(builder, "exported_problems_dir", Path(os.getcwd()) / "exported_problems")
+        audit_path_obj = Path(audit_dir) / _preflight_audit_filename(scenario_payload, solver_name=solver_name)
+        if audit_path_obj.exists():
+            audit_path_obj.unlink()
+        save_results(audit_path_obj, audit_records)
+        audit_path = str(audit_path_obj)
+
+        return {
+            "status": "ok",
+            "audit_records": audit_records,
+            "audit_path": audit_path,
+            "failed_cluster_context": dict(getattr(builder, "latest_failed_cluster_context", {})),
+            "preflight_runtime_sec": float(time.perf_counter() - started_at),
+            "error_message": "",
+        }
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "audit_records": audit_records,
+            "audit_path": audit_path,
+            "failed_cluster_context": dict(getattr(builder, "latest_failed_cluster_context", {})) if builder is not None else {},
+            "preflight_runtime_sec": float(time.perf_counter() - started_at),
+            "error_message": f"{exc.__class__.__name__}: {exc}",
+        }
+    finally:
+        data = None
+        _release_case_memory(builder, None)
+
+
 def _run_scalability_case(
     scenario_payload: Mapping[str, Any],
     *,
@@ -635,6 +745,14 @@ def _build_monitored_failure_row(
             "num_binary_variables": None,
             "num_constraints": None,
             "largest_cluster_size": None,
+            "cluster_solve_order": [],
+            "failed_cluster_id": None,
+            "failed_cluster_order_index": None,
+            "failed_cluster_node_count": None,
+            "failed_cluster_virtual_node_count": None,
+            "failed_cluster_uav_count": None,
+            "failed_cluster_time_horizon": None,
+            "failed_cluster_arc_count": None,
             "model_build_time_sec": None,
             "solver_runtime_sec": None,
             "total_runtime_sec": float(total_runtime_sec),
@@ -653,6 +771,7 @@ def _build_monitored_failure_row(
             "time_limit_no_solution": termination_reason == "wall_clock_time_limit_exceeded",
             "model_build_error": False,
             "solver_error": False,
+            "preflight_audit_path": "",
             "artifact_dir": "",
             "error_message": error_message,
         },
@@ -688,12 +807,51 @@ def _scalability_case_worker(
             objective_function=EXPERIMENT_DEFAULT_OBJECTIVE,
             env_type=EXPERIMENT_DEFAULT_ENV,
         )
+        preflight = _run_scalability_preflight(
+            scenario_payload,
+            solver_name=solver_name,
+            fairness_tolerance=fairness_tolerance,
+            memory_limit_bytes=memory_limit_bytes,
+        )
+        if preflight["status"] != "ok":
+            result_row = _build_monitored_failure_row(
+                seed=seed,
+                node_count=node_count,
+                users_per_area=users_per_area,
+                uav_count=uav_count,
+                solver_name=solver_name,
+                fairness_tolerance=fairness_tolerance,
+                memory_limit_bytes=memory_limit_bytes,
+                process_memory_cap_bytes=process_memory_cap_bytes,
+                wall_clock_limit_seconds=wall_clock_limit_seconds,
+                termination_reason="preflight_model_build_failed",
+                error_message=str(preflight.get("error_message", "") or "Preflight model build failed."),
+                total_runtime_sec=float(preflight.get("preflight_runtime_sec", 0.0) or 0.0),
+                memory_peak_mb=0.0,
+            )
+            failed_cluster_context = dict(preflight.get("failed_cluster_context", {}))
+            if failed_cluster_context:
+                result_row.update(
+                    {
+                        "cluster_solve_order": [record.get("cluster_id") for record in preflight.get("audit_records", [])],
+                        "failed_cluster_id": failed_cluster_context.get("cluster_id"),
+                        "failed_cluster_order_index": failed_cluster_context.get("cluster_solve_order"),
+                        "failed_cluster_node_count": failed_cluster_context.get("original_node_count"),
+                        "failed_cluster_virtual_node_count": failed_cluster_context.get("virtual_node_count"),
+                        "failed_cluster_uav_count": failed_cluster_context.get("assigned_uav_count"),
+                        "failed_cluster_time_horizon": failed_cluster_context.get("time_horizon"),
+                        "failed_cluster_arc_count": failed_cluster_context.get("arc_count"),
+                    }
+                )
+            result_row["preflight_audit_path"] = str(preflight.get("audit_path", "") or "")
+            return
         result = _run_scalability_case(
             scenario_payload,
             solver_name=solver_name,
             fairness_tolerance=fairness_tolerance,
             memory_limit_bytes=memory_limit_bytes,
         )
+        result["preflight_audit_path"] = str(preflight.get("audit_path", "") or "")
         result_row = _build_result_row(
             scenario_payload,
             result,
@@ -766,9 +924,17 @@ def _build_result_row(
             "attempted": True,
             "num_clusters": summary.get("num_clusters"),
             "num_variables": summary.get("num_variables"),
-            "num_binary_variables": result.get("binary_variables"),
+            "num_binary_variables": summary.get("num_binary_variables"),
             "num_constraints": summary.get("num_constraints"),
             "largest_cluster_size": summary.get("largest_cluster_size"),
+            "cluster_solve_order": summary.get("cluster_solve_order", []),
+            "failed_cluster_id": summary.get("failed_cluster_id"),
+            "failed_cluster_order_index": summary.get("failed_cluster_order_index"),
+            "failed_cluster_node_count": summary.get("failed_cluster_node_count"),
+            "failed_cluster_virtual_node_count": summary.get("failed_cluster_virtual_node_count"),
+            "failed_cluster_uav_count": summary.get("failed_cluster_uav_count"),
+            "failed_cluster_time_horizon": summary.get("failed_cluster_time_horizon"),
+            "failed_cluster_arc_count": summary.get("failed_cluster_arc_count"),
             "model_build_time_sec": result.get("model_build_time_sec"),
             "solver_runtime_sec": result.get("solver_runtime_sec"),
             "total_runtime_sec": result.get("total_runtime_sec"),
@@ -787,6 +953,7 @@ def _build_result_row(
             "time_limit_no_solution": metrics.get("time_limit_no_solution", False),
             "model_build_error": metrics.get("model_build_error", False),
             "solver_error": metrics.get("solver_error", False),
+            "preflight_audit_path": result.get("preflight_audit_path", ""),
             "artifact_dir": result.get("artifact_dir", ""),
             "error_message": result.get("error_message", ""),
         },

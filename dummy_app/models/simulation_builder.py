@@ -48,6 +48,33 @@ from dummy_app.models.milp.warm_start import build_warm_start_payload, normalize
 transformer_to_utm = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True)
 transformer_to_latlon = Transformer.from_crs("EPSG:32633", "EPSG:4326", always_xy=True)
 
+
+def log_model_size(prob, cluster_id, solver_name, extra=None):
+    vars_ = prob.variables()
+    constraints_ = prob.constraints
+
+    n_total_vars = len(vars_)
+    n_binary_vars = sum(1 for v in vars_ if str(getattr(v, "cat", "")).strip() in ("Binary", "Integer"))
+    n_constraints = len(constraints_)
+
+    print(f"\n[MODEL SIZE] Solver={solver_name}, Cluster={cluster_id}")
+    print(f"Variables: {n_total_vars}")
+    print(f"Binary/Integer Variables: {n_binary_vars}")
+    print(f"Constraints: {n_constraints}")
+
+    if extra:
+        for k, val in extra.items():
+            print(f"{k}: {val}")
+
+    return {
+        "cluster_id": cluster_id,
+        "solver": solver_name,
+        "n_variables": n_total_vars,
+        "n_binary_integer_variables": n_binary_vars,
+        "n_constraints": n_constraints,
+        **(extra or {})
+    }
+
 class Builder(MVMTSPConfig):
     """
     This class is the builder for the problem formulation. It utilizes PuLP 
@@ -95,6 +122,8 @@ class Builder(MVMTSPConfig):
         self.plan_with_nodes =  defaultdict(dict)
         self.total_data_rate = 0.0 
         self.makespan = 0.0 
+        self.exported_problems_dir = Path(os.getcwd()) / "exported_problems"
+        self.exported_problems_dir.mkdir(parents=True, exist_ok=True)
         self.base_enable_ga = bool(config["genetic_algorithm"])
         self.enable_ga = self.base_enable_ga
         self.ga_generations = int(config.get("ga_generations", 100))
@@ -123,6 +152,8 @@ class Builder(MVMTSPConfig):
         self.latest_artifact_dir: str = ""
         self.latest_playback_rows: List[Dict[str, Any]] = []
         self.latest_playback_metadata: Dict[str, Any] = {}
+        self.cluster_model_build_records: List[Dict[str, Any]] = []
+        self.latest_failed_cluster_context: Dict[str, Any] = {}
         self.current_problem_instance = None
         self.run_request: ModelRunRequest | None = None
         self.latest_model_run_result: ModelRunResult | None = None
@@ -335,6 +366,7 @@ class Builder(MVMTSPConfig):
 
     @timeout_decorator.timeout(1800)
     def solve_problem(self, cluster:Any):
+        self.capture_cluster_model_build(cluster, build_mode="solve")
         default_limit = 500 if self.objective_function == "coverage" else None
         time_limit = self.solver_time_limit_seconds if self.solver_time_limit_seconds is not None else default_limit
         solve_metadata = solve_cluster_problem(
@@ -410,7 +442,8 @@ class Builder(MVMTSPConfig):
 
         cluster_results: List[ClusterSolveResult] = []
         with tqdm(total=len(self.current_problem_instance.prepared_clusters), desc="Solving problem ", unit="cluster") as pbar:
-            for prepared_cluster in self.current_problem_instance.prepared_clusters:
+            for cluster_solve_order, prepared_cluster in enumerate(self.current_problem_instance.prepared_clusters):
+                prepared_cluster.metadata["cluster_solve_order"] = int(cluster_solve_order)
                 cluster_result = self.optimization_model.solve_cluster(
                     self.current_problem_instance,
                     prepared_cluster,
@@ -515,6 +548,7 @@ class Builder(MVMTSPConfig):
             diagnostics={
                 "solve_status_history": list(self.solve_status_history),
                 "cluster_status_records": list(self.cluster_status_records),
+                "cluster_model_build_records": list(self.cluster_model_build_records),
                 "coordinated_plan_agents": sorted(self.coordinated_plan.keys()),
             },
         )
@@ -545,6 +579,8 @@ class Builder(MVMTSPConfig):
         self.latest_artifact_dir = ""
         self.latest_playback_rows = []
         self.latest_playback_metadata = {}
+        self.cluster_model_build_records = []
+        self.latest_failed_cluster_context = {}
         self.latest_model_run_result = None
         self.current_problem_instance = None
         self.run_request = None
@@ -602,6 +638,125 @@ class Builder(MVMTSPConfig):
         )
         self._seed_random_generators()
         self.optimization_model = self._create_optimization_model(self.model_name)
+
+
+    def _build_cluster_failure_context(self, cluster_object: Cluster, cluster_input) -> Dict[str, Any]:
+        original_node_count = len(getattr(cluster_object, "original_nodes_dict", {}) or {})
+        if original_node_count <= 0:
+            original_node_count = int(len(getattr(cluster_input, "cluster_frame", [])) or 0)
+        return {
+            "cluster_id": int(getattr(cluster_object, "id", getattr(cluster_input, "cluster_id", -1))),
+            "cluster_solve_order": int(dict(getattr(cluster_input, "metadata", {})).get("cluster_solve_order", -1)),
+            "original_node_count": int(original_node_count),
+            "expanded_node_count_after_vni": int(len(getattr(cluster_object, "nodes_dict", {}) or {})),
+            "virtual_node_count": int(len(getattr(cluster_object, "virtual_nodes", {}) or {})),
+            "bridge_node_count": int(len(getattr(cluster_object, "bridge_nodes", []) or [])),
+            "required_visits": int(sum(int(value) for value in dict(getattr(cluster_object, "allowed_visits", {})).values())),
+            "assigned_uav_count": int(len(getattr(cluster_input, "assigned_agents", []) or [])),
+            "time_horizon": int(len(getattr(cluster_object, "timeframe", []) or []) - 1) if getattr(cluster_object, "timeframe", None) else None,
+            "arc_count": int(len(getattr(cluster_object, "x", {}) or {})),
+        }
+
+
+    def capture_cluster_model_build(self, cluster_object: Cluster, *, build_mode: str = "solve") -> Dict[str, Any]:
+        existing_record = getattr(cluster_object, "model_build_record", None)
+        if existing_record:
+            return dict(existing_record)
+
+        build_started_at = float(getattr(cluster_object, "model_build_started_at", time.perf_counter()))
+        solver_name = str(self.solver_backend)
+        cluster_solve_order = int(getattr(cluster_object, "solve_order_index", -1))
+        original_node_count = int(len(getattr(cluster_object, "original_nodes_dict", {}) or {}))
+        expanded_node_count = int(len(getattr(cluster_object, "nodes_dict", {}) or {}))
+        virtual_node_count = int(len(getattr(cluster_object, "virtual_nodes", {}) or {}))
+        bridge_node_count = int(len(getattr(cluster_object, "bridge_nodes", []) or []))
+        assigned_uav_count = int(len(getattr(cluster_object, "employed_agents", []) or []))
+        time_horizon = int(len(getattr(cluster_object, "timeframe", []) or []) - 1) if getattr(cluster_object, "timeframe", None) else None
+        estimated_x_variables = int(len(getattr(cluster_object, "x", {}) or {}))
+        estimated_t_variables = int(len(getattr(cluster_object, "t", {}) or {}))
+        required_visits = int(sum(int(value) for value in dict(getattr(cluster_object, "allowed_visits", {})).values()))
+
+        lp_filename = f"debug_cluster_{int(cluster_object.id)}_{solver_name}_order{max(cluster_solve_order, 0)}_{build_mode}.lp"
+        lp_export_path = self.exported_problems_dir / lp_filename
+        lp_export_started_at = time.perf_counter()
+        cluster_object.problem.writeLP(str(lp_export_path))
+        lp_export_time = float(time.perf_counter() - lp_export_started_at)
+
+        extra = {
+            "build_mode": build_mode,
+            "cluster_solve_order": cluster_solve_order,
+            "original_node_count": original_node_count,
+            "expanded_node_count_after_vni": expanded_node_count,
+            "virtual_node_count": virtual_node_count,
+            "bridge_node_count": bridge_node_count,
+            "required_visits": required_visits,
+            "assigned_uav_count": assigned_uav_count,
+            "time_horizon": time_horizon,
+            "arc_count": estimated_x_variables,
+            "estimated_x_variables": estimated_x_variables,
+            "estimated_t_variables": estimated_t_variables,
+            "lp_export_path": str(lp_export_path),
+            "lp_export_time": lp_export_time,
+            "model_build_time": float(time.perf_counter() - build_started_at),
+        }
+        size_info = log_model_size(cluster_object.problem, cluster_object.id, solver_name, extra=extra)
+
+        actual_pulp_variables = int(size_info["n_variables"])
+        actual_binary_integer_variables = int(size_info["n_binary_integer_variables"])
+        actual_pulp_constraints = int(size_info["n_constraints"])
+        actual_pulp_continuous_variables = max(actual_pulp_variables - actual_binary_integer_variables, 0)
+
+        record = {
+            "cluster_id": int(cluster_object.id),
+            "solver_name": solver_name,
+            "build_mode": build_mode,
+            "cluster_solve_order": cluster_solve_order,
+            "original_node_count": original_node_count,
+            "expanded_node_count_after_vni": expanded_node_count,
+            "virtual_node_count": virtual_node_count,
+            "bridge_node_count": bridge_node_count,
+            "required_visits": required_visits,
+            "assigned_uav_count": assigned_uav_count,
+            "time_horizon": time_horizon,
+            "arc_count": estimated_x_variables,
+            "estimated_x_variables": estimated_x_variables,
+            "estimated_t_variables": estimated_t_variables,
+            "actual_pulp_variables": actual_pulp_variables,
+            "actual_pulp_constraints": actual_pulp_constraints,
+            "actual_pulp_binary_integer_variables": actual_binary_integer_variables,
+            "actual_pulp_continuous_variables": actual_pulp_continuous_variables,
+            "model_build_time": float(extra["model_build_time"]),
+            "lp_export_time": lp_export_time,
+            "lp_export_path": str(lp_export_path),
+        }
+
+        cluster_object.model_build_record = dict(record)
+        self.cluster_model_build_records.append(dict(record))
+        self.num_constraints += int(actual_pulp_constraints)
+        self.variables_count += int(actual_pulp_variables)
+        self.num_binary_variables += int(actual_binary_integer_variables)
+        self.num_continuous_variables += int(actual_pulp_continuous_variables)
+        return dict(record)
+
+
+    def build_cluster_model_only(self, instance, cluster_input, request: ModelRunRequest) -> Dict[str, Any]:
+        cluster_object = self._prepare_cluster_object(cluster_input)
+        cluster_object.solve_order_index = int(dict(getattr(cluster_input, "metadata", {})).get("cluster_solve_order", -1))
+        cluster_object.model_build_started_at = time.perf_counter()
+
+        try:
+            cluster_object.problem_formulation(
+                builder=self,
+                scenario=self.scenario,
+                objective_function=self.objective_function,
+                stage_solution=self.stage_solution,
+                build_only=True,
+            )
+        except Exception:
+            self.latest_failed_cluster_context = self._build_cluster_failure_context(cluster_object, cluster_input)
+            raise
+
+        return dict(getattr(cluster_object, "model_build_record", {}))
 
 
     def build_run_request(self) -> ModelRunRequest:
@@ -894,6 +1049,8 @@ class Builder(MVMTSPConfig):
                     )
                 except Exception:
                     is_binary = False
+            if not is_binary and str(getattr(variable, "cat", "")).strip().lower() == "integer":
+                is_binary = True
 
             if is_binary:
                 binary_variables += 1
@@ -987,10 +1144,12 @@ class Builder(MVMTSPConfig):
             "agent_start_times": dict(cluster_object.agent_start_times),
             "agent_finish_times": dict(agent_finish_times),
             "agent_next_available_times": dict(agent_next_available_times),
+            "model_build_record": dict(getattr(cluster_object, "model_build_record", {})),
         }
 
         cluster_status_record = {
             "cluster_id": cluster_object.id,
+            "cluster_solve_order": getattr(cluster_object, "solve_order_index", None),
             "status_code": int(status_code),
             "status": raw_status,
             "agent_count": len(cluster_input.assigned_agents),
@@ -1003,6 +1162,7 @@ class Builder(MVMTSPConfig):
         self.metrics.record_cluster_result(
             {
                 "cluster_id": cluster_object.id,
+                "cluster_solve_order": getattr(cluster_object, "solve_order_index", None),
                 "status": raw_status,
                 "agent_count": len(cluster_input.assigned_agents),
                 "node_count": len(cluster_object.original_nodes_dict),
@@ -1028,14 +1188,15 @@ class Builder(MVMTSPConfig):
             results=results,
             uncovered_nodes=uncovered_nodes,
         )
-        problem_size_metrics = self._count_problem_variables(cluster_object)
-        problem_size_metrics["num_constraints"] = int(len(cluster_object.problem.constraints))
-        self.num_constraints += int(problem_size_metrics["num_constraints"])
-        self.variables_count += int(problem_size_metrics["num_variables"])
-        self.num_binary_variables += int(problem_size_metrics["num_binary_variables"])
-        self.num_continuous_variables += int(problem_size_metrics["num_continuous_variables"])
+        problem_size_metrics = {
+            "num_variables": int(dict(getattr(cluster_object, "model_build_record", {})).get("actual_pulp_variables", 0)),
+            "num_binary_variables": int(dict(getattr(cluster_object, "model_build_record", {})).get("actual_pulp_binary_integer_variables", 0)),
+            "num_continuous_variables": int(dict(getattr(cluster_object, "model_build_record", {})).get("actual_pulp_continuous_variables", 0)),
+            "num_constraints": int(dict(getattr(cluster_object, "model_build_record", {})).get("actual_pulp_constraints", 0)),
+        }
         self.problem_results[f"Cluster_{cluster_object.id}"].update(comparison_metrics)
         cluster_metrics = {
+            "cluster_solve_order": getattr(cluster_object, "solve_order_index", None),
             "agent_count": len(cluster_input.assigned_agents),
             "node_count": len(cluster_object.original_nodes_dict),
             "priority_rank": cluster_input.priority_rank,
@@ -1098,6 +1259,8 @@ class Builder(MVMTSPConfig):
 
     def solve_cluster_instance(self, instance, cluster_input, request: ModelRunRequest) -> ClusterSolveResult:
         cluster_object = self._prepare_cluster_object(cluster_input)
+        cluster_object.solve_order_index = int(dict(getattr(cluster_input, "metadata", {})).get("cluster_solve_order", -1))
+        cluster_object.model_build_started_at = time.perf_counter()
 
         try:
             paths = cluster_object.problem_formulation(
@@ -1110,6 +1273,14 @@ class Builder(MVMTSPConfig):
         except ValidationOptimalityConfirmed:
             raise
         except Exception as exc:
+            if getattr(cluster_object, "model_build_record", None) is None and getattr(cluster_object, "problem", None) is not None:
+                try:
+                    self.capture_cluster_model_build(cluster_object, build_mode="solve")
+                except Exception:
+                    pass
+            self.latest_failed_cluster_context = dict(
+                getattr(cluster_object, "model_build_record", {}) or self._build_cluster_failure_context(cluster_object, cluster_input)
+            )
             logger.exception(f"❌ Error creating problem for cluster {cluster_input.cluster_id}: {exc}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_input.cluster_id}") from exc
 
@@ -1582,6 +1753,7 @@ class Builder(MVMTSPConfig):
                 + float(self.objective_weights["distance"]) * total_distance
                 + float(self.objective_weights["travel_time"]) * total_mission_time
             )
+        failed_cluster_context = dict(getattr(self, "latest_failed_cluster_context", {}))
 
         return {
             "model_name": self.model_name,
@@ -1628,12 +1800,21 @@ class Builder(MVMTSPConfig):
             "num_binary_variables": self.num_binary_variables,
             "num_continuous_variables": self.num_continuous_variables,
             "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
+            "cluster_solve_order": [int(record.get("cluster_id", -1)) for record in self.cluster_model_build_records],
+            "failed_cluster_id": failed_cluster_context.get("cluster_id"),
+            "failed_cluster_order_index": failed_cluster_context.get("cluster_solve_order"),
+            "failed_cluster_node_count": failed_cluster_context.get("original_node_count"),
+            "failed_cluster_virtual_node_count": failed_cluster_context.get("virtual_node_count"),
+            "failed_cluster_uav_count": failed_cluster_context.get("assigned_uav_count"),
+            "failed_cluster_time_horizon": failed_cluster_context.get("time_horizon"),
+            "failed_cluster_arc_count": failed_cluster_context.get("arc_count"),
         }
 
 
     def build_failed_run_summary(self, exc: Exception) -> Dict[str, Any]:
         statuses = [record.get("raw_status", record.get("status", "Unknown")) for record in self.solve_status_history]
         timeout_flag = 1.0 if "timeout" in str(exc).lower() or any(status in {"Not Solved", "Undefined"} for status in statuses) else 0.0
+        failed_cluster_context = dict(getattr(self, "latest_failed_cluster_context", {}))
         return {
             "model_name": self.model_name,
             "solver_backend": self.solver_backend,
@@ -1669,6 +1850,14 @@ class Builder(MVMTSPConfig):
             "num_binary_variables": float(self.num_binary_variables),
             "num_continuous_variables": float(self.num_continuous_variables),
             "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
+            "cluster_solve_order": [int(record.get("cluster_id", -1)) for record in self.cluster_model_build_records],
+            "failed_cluster_id": failed_cluster_context.get("cluster_id"),
+            "failed_cluster_order_index": failed_cluster_context.get("cluster_solve_order"),
+            "failed_cluster_node_count": failed_cluster_context.get("original_node_count"),
+            "failed_cluster_virtual_node_count": failed_cluster_context.get("virtual_node_count"),
+            "failed_cluster_uav_count": failed_cluster_context.get("assigned_uav_count"),
+            "failed_cluster_time_horizon": failed_cluster_context.get("time_horizon"),
+            "failed_cluster_arc_count": failed_cluster_context.get("arc_count"),
             "error_type": exc.__class__.__name__,
         }
         
