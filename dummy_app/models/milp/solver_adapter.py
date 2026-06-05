@@ -715,15 +715,15 @@ def _create_solver_log_path(solver_backend: str, cluster_id: Any) -> str:
 
 
 def _resolve_effective_raw_status(raw_status: str, progress_summary: Dict[str, Any]) -> str:
+    if progress_summary.get("optimality_proven"):
+        return "Optimal"
+    if progress_summary.get("time_limit_reached"):
+        return "Not Solved"
     status_hint = str(progress_summary.get("status_hint") or "").strip()
     if status_hint:
         return status_hint
-    if progress_summary.get("optimality_proven"):
-        return "Optimal"
     if progress_summary.get("feasible_solution_found"):
         return "Feasible"
-    if progress_summary.get("time_limit_reached"):
-        return "Not Solved"
     return raw_status
 
 

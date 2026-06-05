@@ -43,6 +43,7 @@ EXPERIMENT_G_CASES = [
     {"areas": 100, "users_per_area": 3, "uavs": 4},
     {"areas": 200, "users_per_area": 3, "uavs": 6},
 ]
+EXPERIMENT_G_SEEDS = [42, 101, 202]
 EXPERIMENT_G_USABLE_CAPACITY_FACTORS = [1.0, 0.75, 0.50]
 EXPERIMENT_G_ENVIRONMENTS = ["urban", "rural", "forest"]
 EXPERIMENT_G_COVERAGE_PROFILES = ["low", "medium", "high"]
@@ -133,6 +134,79 @@ def _energy_used_percent(
     return float(float(total_energy) / usable_capacity_total * 100.0)
 
 
+def _count_sorties(run_result: Any) -> int | None:
+    if run_result is None:
+        return None
+    sortie_count = 0
+    for cluster_result in getattr(run_result, "cluster_results", []):
+        for metrics in dict(getattr(cluster_result, "agent_metrics", {})).values():
+            energy = float(metrics.get("energy", 0.0) or 0.0)
+            distance = float(metrics.get("distance", 0.0) or 0.0)
+            travel_time = float(metrics.get("travel_time", 0.0) or 0.0)
+            service_time = float(metrics.get("service_time", 0.0) or 0.0)
+            if any(value > 1e-9 for value in (energy, distance, travel_time, service_time)):
+                sortie_count += 1
+    return int(sortie_count)
+
+
+def _energy_used_percent_with_recharges(
+    total_energy: float | None,
+    usable_battery_capacity_wh: float,
+    sortie_count: int | None,
+) -> float | None:
+    if total_energy is None or sortie_count is None:
+        return None
+    total_available_energy = float(usable_battery_capacity_wh) * float(max(int(sortie_count), 0))
+    if total_available_energy <= 1e-9:
+        return None
+    return float(float(total_energy) / total_available_energy * 100.0)
+
+
+def _derive_solver_status_fields(result: Mapping[str, Any], metrics: Mapping[str, Any]) -> Dict[str, Any]:
+    run_result = result.get("run_result")
+    raw_status = getattr(run_result, "raw_status", "") if run_result is not None else ""
+    normalized_status = getattr(run_result, "normalized_status", "") if run_result is not None else ""
+    termination_reason = getattr(run_result, "termination_reason", "") if run_result is not None else ""
+
+    if not raw_status:
+        raw_status = str(metrics.get("raw_status", "") or "")
+    if not normalized_status:
+        normalized_status = str(metrics.get("normalized_status", "") or "")
+    if not termination_reason:
+        termination_reason = str(metrics.get("termination_reason", "") or "")
+    if not termination_reason and result.get("error_message"):
+        termination_reason = str(result.get("error_message", ""))
+
+    gap_percent = metrics.get("optimality_gap_percent")
+    has_positive_gap = gap_percent is not None and float(gap_percent) > 1e-9
+    if bool(metrics.get("time_limit_feasible")) and has_positive_gap:
+        raw_status = "Not Solved"
+        normalized_status = "feasible_time_limit"
+        if not termination_reason:
+            termination_reason = "time_limit_or_undefined_solver_stop"
+    elif bool(metrics.get("optimality_proven")) and not normalized_status:
+        raw_status = "Optimal"
+        normalized_status = "optimal"
+
+    return {
+        "raw_status": raw_status,
+        "normalized_status": normalized_status,
+        "termination_reason": termination_reason,
+    }
+
+
+def _enriched_scenario_id(
+    scenario_payload: Mapping[str, Any],
+    *,
+    usable_battery_capacity_wh: float,
+) -> str:
+    return (
+        f"{scenario_payload['scenario_id']}"
+        f"_{str(scenario_payload['env_type'])}"
+        f"_bat{int(round(float(usable_battery_capacity_wh)))}wh"
+    )
+
+
 def _run_constraint_stress_case(
     scenario_payload: Mapping[str, Any],
     *,
@@ -160,6 +234,8 @@ def _run_constraint_stress_case(
             priority=EXPERIMENT_DEFAULT_PRIORITY,
         )
         config["max_battery"] = float(usable_battery_capacity_wh)
+        config["original_battery_capacity_wh"] = float(MAX_BATTERY)
+        config["recharge_battery_capacity_wh"] = float(usable_battery_capacity_wh)
 
         with _suppress_nested_output():
             builder = call_builder(config, 1)
@@ -237,21 +313,28 @@ def _build_row(
     metrics = dict(result.get("metrics", {}))
     summary = dict(result.get("summary", {}))
     solve_status_history = list(result.get("solve_status_history", []))
+    metrics.update(_derive_solver_status_fields(result, metrics))
 
-    raw_status = getattr(run_result, "raw_status", None) if run_result is not None else None
-    normalized_status = getattr(run_result, "normalized_status", None) if run_result is not None else None
-    termination_reason = getattr(run_result, "termination_reason", None) if run_result is not None else None
-    if termination_reason is None and solve_status_history:
+    raw_status = str(metrics.get("raw_status", "") or "")
+    normalized_status = str(metrics.get("normalized_status", "") or "")
+    termination_reason = str(metrics.get("termination_reason", "") or "")
+    if not termination_reason and solve_status_history:
         termination_reason = str(solve_status_history[-1].get("termination_reason", "") or "")
-    if termination_reason is None and result.get("error_message"):
+    if not termination_reason and result.get("error_message"):
         termination_reason = str(result["error_message"])
 
     active_uav_count = summary.get("num_uavs_used")
-    energy_used_percent = _energy_used_percent(
+    single_charge_energy_used_percent = _energy_used_percent(
         total_energy=metrics.get("total_energy"),
         usable_battery_capacity_wh=float(usable_battery_capacity_wh),
         active_uav_count=int(active_uav_count) if active_uav_count is not None else None,
         configured_uav_count=int(scenario_payload["uav_count"]),
+    )
+    sortie_count = _count_sorties(run_result)
+    energy_used_percent = _energy_used_percent_with_recharges(
+        total_energy=metrics.get("total_energy"),
+        usable_battery_capacity_wh=float(usable_battery_capacity_wh),
+        sortie_count=sortie_count,
     )
 
     return format_result_row(
@@ -259,6 +342,10 @@ def _build_row(
         "MILP",
         status=result["status"],
         extra_fields={
+            "scenario_id": _enriched_scenario_id(
+                scenario_payload,
+                usable_battery_capacity_wh=usable_battery_capacity_wh,
+            ),
             "case_label": case_label,
             "environment_type": scenario_payload["env_type"],
             "coverage_time_profile": scenario_payload["coverage_time_profile"],
@@ -269,12 +356,15 @@ def _build_row(
             "usable_capacity_factor": float(usable_capacity_factor),
             "usable_battery_capacity_wh": float(usable_battery_capacity_wh),
             "original_battery_capacity_wh": float(MAX_BATTERY),
+            "recharge_battery_capacity_wh": float(usable_battery_capacity_wh),
             "runtime_sec": result.get("total_runtime_sec"),
             "optimality_gap_percent": metrics.get("optimality_gap_percent"),
             "coverage_ratio": metrics.get("coverage_ratio", summary.get("coverage_ratio")),
             "feasible_solution_found": metrics.get("feasible_solution_found", False),
             "unvisited_nodes": metrics.get("unvisited_nodes"),
             "energy_used_percent": energy_used_percent,
+            "single_charge_energy_used_percent": single_charge_energy_used_percent,
+            "sortie_count": sortie_count,
             "total_energy": metrics.get("total_energy"),
             "total_distance": metrics.get("total_distance"),
             "total_travel_time": metrics.get("total_travel_time"),
@@ -287,6 +377,8 @@ def _build_row(
             "raw_status": raw_status or result["status"],
             "normalized_status": normalized_status or result["status"],
             "termination_reason": termination_reason or "",
+            "optimality_proven": metrics.get("optimality_proven", False),
+            "time_limit_reached": metrics.get("time_limit_reached", False),
             "time_limit_feasible": metrics.get("time_limit_feasible", False),
             "time_limit_no_solution": metrics.get("time_limit_no_solution", False),
             "model_build_error": metrics.get("model_build_error", False),
@@ -305,7 +397,7 @@ def main() -> None:
 
     fairness_tolerance = _load_fairness_baseline()
     total_runs = (
-        len(EXPERIMENT_DEFAULT_SEEDS)
+        len(EXPERIMENT_G_SEEDS)
         * len(EXPERIMENT_G_CASES)
         * len(EXPERIMENT_G_USABLE_CAPACITY_FACTORS)
         * len(EXPERIMENT_G_ENVIRONMENTS)
@@ -313,7 +405,7 @@ def main() -> None:
     )
 
     with tqdm(total=total_runs, desc="Experiment G", unit="run", dynamic_ncols=True) as progress:
-        for seed in EXPERIMENT_DEFAULT_SEEDS:
+        for seed in EXPERIMENT_G_SEEDS:
             for case_spec in EXPERIMENT_G_CASES:
                 case_name = _case_label(case_spec)
                 for env_type in EXPERIMENT_G_ENVIRONMENTS:

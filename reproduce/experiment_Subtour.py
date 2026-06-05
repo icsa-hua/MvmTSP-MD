@@ -28,6 +28,9 @@ from dummy_app.program_config import (
 EMPTY_FIELDS = {
     "solver_backend": EXPERIMENT_SUBTOUR_SOLVER,
     "subtour_mode": "",
+    "raw_status": "",
+    "normalized_status": "",
+    "termination_reason": "",
     "num_variables": None,
     "num_binary_variables": None,
     "num_continuous_variables": None,
@@ -43,9 +46,72 @@ EMPTY_FIELDS = {
     "total_travel_time": None,
     "subtour_cuts_added": None,
     "dfj_iterations": None,
+    "dfj_solve_passes": None,
+    "violated_subtours_detected": None,
+    "dfj_loop_executed": False,
+    "dfj_cuts_triggered": False,
+    "optimality_proven": False,
+    "time_limit_reached": False,
+    "time_limit_feasible": False,
+    "time_limit_no_solution": False,
     "artifact_dir": "",
     "error_message": "",
 }
+
+
+def _derive_solver_status_fields(result: Mapping[str, Any], metrics: Mapping[str, Any]) -> Dict[str, Any]:
+    run_result = result.get("run_result")
+    raw_status = getattr(run_result, "raw_status", "") if run_result is not None else ""
+    normalized_status = getattr(run_result, "normalized_status", "") if run_result is not None else ""
+    termination_reason = getattr(run_result, "termination_reason", "") if run_result is not None else ""
+
+    if not raw_status:
+        raw_status = str(metrics.get("raw_status", "") or "")
+    if not normalized_status:
+        normalized_status = str(metrics.get("normalized_status", "") or "")
+    if not termination_reason:
+        termination_reason = str(metrics.get("termination_reason", "") or "")
+    if not termination_reason and result.get("error_message"):
+        termination_reason = str(result.get("error_message", ""))
+
+    gap_percent = metrics.get("optimality_gap_percent")
+    has_positive_gap = gap_percent is not None and float(gap_percent) > 1e-9
+    if bool(metrics.get("time_limit_feasible")) and has_positive_gap:
+        raw_status = "Not Solved"
+        normalized_status = "feasible_time_limit"
+        if not termination_reason:
+            termination_reason = "time_limit_or_undefined_solver_stop"
+    elif bool(metrics.get("optimality_proven")) and not normalized_status:
+        raw_status = "Optimal"
+        normalized_status = "optimal"
+
+    return {
+        "raw_status": raw_status,
+        "normalized_status": normalized_status,
+        "termination_reason": termination_reason,
+    }
+
+
+def _derive_dfj_validation_fields(metrics: Mapping[str, Any], subtour_mode: str) -> Dict[str, Any]:
+    dfj_solve_passes = metrics.get("dfj_solve_passes")
+    violated_subtours_detected = metrics.get("violated_subtours_detected")
+    subtour_cuts_added = metrics.get("subtour_cuts_added")
+    dfj_iterations = metrics.get("dfj_iterations")
+
+    if str(subtour_mode) != "dfj_iter":
+        return {
+            "dfj_loop_executed": False,
+            "dfj_cuts_triggered": False,
+        }
+
+    return {
+        "dfj_loop_executed": bool(dfj_solve_passes is not None and int(dfj_solve_passes) > 0),
+        "dfj_cuts_triggered": bool(
+            (violated_subtours_detected is not None and int(violated_subtours_detected) > 0)
+            or (subtour_cuts_added is not None and int(subtour_cuts_added) > 0)
+            or (dfj_iterations is not None and int(dfj_iterations) > 0)
+        ),
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -207,6 +273,8 @@ def main() -> None:
                         metrics["subtour_mode"] = subtour_mode
                         metrics["artifact_dir"] = result.get("artifact_dir", "")
                         metrics["error_message"] = result.get("error_message", "")
+                        metrics.update(_derive_solver_status_fields(result, metrics))
+                        metrics.update(_derive_dfj_validation_fields(metrics, subtour_mode))
                         row = format_result_row(
                             scenario_payload,
                             "MILP",

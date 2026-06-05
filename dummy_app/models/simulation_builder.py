@@ -99,6 +99,8 @@ class Builder(MVMTSPConfig):
         self.enable_ga = self.base_enable_ga
         self.ga_generations = int(config.get("ga_generations", 100))
         self.solver_time_limit_seconds = config.get("solver_time_limit_seconds")
+        self.original_battery_capacity_wh = float(config.get("original_battery_capacity_wh", self.max_battery))
+        self.recharge_battery_capacity_wh = float(config.get("recharge_battery_capacity_wh", self.max_battery))
         self.objective_weights = config.get("objective_weights", self.objective_weights)
         self.clustering_feature_weights = config.get("clustering_feature_weights", self.clustering_feature_weights)
         self.random_seed = int(config.get("random_seed", config.get("seed", getattr(self, "random_seed", 42))))
@@ -448,19 +450,27 @@ class Builder(MVMTSPConfig):
         self.latest_run_summary = self.build_run_summary()
         overall_statuses = [result.normalized_status for result in cluster_results]
         all_clusters_have_incumbent = bool(cluster_results) and all(result.incumbent_value is not None for result in cluster_results)
+        any_time_limited_cluster = any(
+            bool(dict(result.diagnostics).get("time_limit_reached")) or result.normalized_status == "feasible_time_limit"
+            for result in cluster_results
+        )
+        all_clusters_optimality_proven = bool(cluster_results) and all(
+            bool(dict(result.diagnostics).get("optimality_proven"))
+            for result in cluster_results
+        )
 
         # Here the path has been solved for each cluster. 
-        if overall_statuses and all(status == "optimal" for status in overall_statuses):
+        if overall_statuses and all(status == "optimal" for status in overall_statuses) and all_clusters_optimality_proven:
             normalized_status = "optimal"
             raw_status = "Optimal"
 
-        elif overall_statuses and all(status in {"optimal", "feasible"} for status in overall_statuses):
+        elif overall_statuses and all(status in {"optimal", "feasible"} for status in overall_statuses) and not any_time_limited_cluster:
             normalized_status = "feasible"
             raw_status = "Feasible"
 
         elif overall_statuses and all(status in {"optimal", "feasible", "feasible_time_limit"} for status in overall_statuses):
-            normalized_status = "feasible" if all_clusters_have_incumbent else "feasible_time_limit"
-            raw_status = "Feasible" if all_clusters_have_incumbent else "Not Solved"
+            normalized_status = "feasible_time_limit" if any_time_limited_cluster else "feasible"
+            raw_status = "Not Solved" if any_time_limited_cluster else ("Feasible" if all_clusters_have_incumbent else "Not Solved")
 
         else:
             normalized_status = "error"
@@ -558,6 +568,13 @@ class Builder(MVMTSPConfig):
     def apply_runtime_configuration(self, runtime_config: Dict[str, Any]) -> None:
         self.stage_solution = int(runtime_config.get("stage_solution", self.stage_solution))
         self.ga_generations = int(runtime_config.get("ga_generations", self.ga_generations))
+        self.max_battery = float(runtime_config.get("max_battery", self.max_battery))
+        self.original_battery_capacity_wh = float(
+            runtime_config.get("original_battery_capacity_wh", self.original_battery_capacity_wh)
+        )
+        self.recharge_battery_capacity_wh = float(
+            runtime_config.get("recharge_battery_capacity_wh", runtime_config.get("max_battery", self.recharge_battery_capacity_wh))
+        )
         self.solver_time_limit_seconds = runtime_config.get(
             "solver_time_limit_seconds",
             runtime_config.get("time_limit_seconds", self.solver_time_limit_seconds),
@@ -936,7 +953,9 @@ class Builder(MVMTSPConfig):
         agent_next_available_times = {}
         for agent_id in cluster_input.assigned_agents:
             energy_spent = float(results.get(agent_id, {}).get("energy", 0.0))
-            recharge_steps = float(common.calculate_recharge_steps(self.max_battery, energy_spent=energy_spent))
+            recharge_steps = float(
+                common.calculate_recharge_steps(self.recharge_battery_capacity_wh, energy_spent=energy_spent)
+            )
             finish_time = float(agent_finish_times.get(agent_id, 0.0))
             next_available_time = finish_time + recharge_steps
             agent_next_available_times[agent_id] = next_available_time
@@ -1354,7 +1373,10 @@ class Builder(MVMTSPConfig):
             recharge_times[agent] = float(
                 problem_results[agent].get(
                     'recharge_steps',
-                    common.calculate_recharge_steps(self.max_battery, energy_spent=problem_results[agent]['energy']),
+                    common.calculate_recharge_steps(
+                        self.recharge_battery_capacity_wh,
+                        energy_spent=problem_results[agent]['energy'],
+                    ),
                 )
             )
             agent_end_times[agent] = paths[agent][-1][2] + recharge_times[agent] if paths[agent] else -1 

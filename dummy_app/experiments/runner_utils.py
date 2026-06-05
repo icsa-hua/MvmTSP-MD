@@ -289,6 +289,29 @@ def _sum_dfj_metric(run_result: Any, key: str) -> int:
     return int(total)
 
 
+def _count_dfj_violated_subtours(run_result: Any) -> int:
+    total = 0
+    for cluster_result in getattr(run_result, "cluster_results", []):
+        diagnostics = dict(getattr(cluster_result, "diagnostics", {}))
+        total += len(list(diagnostics.get("violated_subtours", [])))
+    return int(total)
+
+
+def _all_clusters_optimality_proven(run_result: Any) -> bool:
+    cluster_results = list(getattr(run_result, "cluster_results", []))
+    return bool(cluster_results) and all(
+        bool(dict(getattr(cluster_result, "diagnostics", {})).get("optimality_proven"))
+        for cluster_result in cluster_results
+    )
+
+
+def _any_cluster_time_limit_reached(run_result: Any) -> bool:
+    return any(
+        bool(dict(getattr(cluster_result, "diagnostics", {})).get("time_limit_reached"))
+        for cluster_result in getattr(run_result, "cluster_results", [])
+    )
+
+
 def _failure_category_flags(error_message: str, status_history: Iterable[Mapping[str, Any]]) -> Dict[str, bool]:
     records = list(status_history)
     time_limit_feasible = any(
@@ -335,6 +358,10 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
             "memory_usage_mb": None,
             "subtour_cuts_added": None,
             "dfj_iterations": None,
+            "dfj_solve_passes": None,
+            "violated_subtours_detected": None,
+            "optimality_proven": False,
+            "time_limit_reached": False,
             **flags,
         }
 
@@ -377,6 +404,10 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
         "memory_usage_mb": float(getattr(builder.metrics, "memory_usage", 0.0) or 0.0) if getattr(builder, "metrics", None) else None,
         "subtour_cuts_added": int(sum(int(record.get("dfj_cuts_added", 0) or 0) for record in status_history)) if status_history else None,
         "dfj_iterations": int(sum(int(record.get("dfj_rounds", 0) or 0) for record in status_history)) if status_history else None,
+        "dfj_solve_passes": int(sum(int(record.get("dfj_solve_passes", 0) or 0) for record in status_history)) if status_history else None,
+        "violated_subtours_detected": int(sum(len(list(record.get("violated_subtours", []))) for record in status_history)) if status_history else None,
+        "optimality_proven": bool(status_history) and all(bool(record.get("optimality_proven")) for record in status_history),
+        "time_limit_reached": any(bool(record.get("time_limit_reached")) for record in status_history),
         **flags,
     }
 
@@ -445,11 +476,15 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         "num_constraints": summary.get("num_constraints"),
         "subtour_cuts_added": _sum_dfj_metric(run_result, "dfj_cuts_added"),
         "dfj_iterations": _sum_dfj_metric(run_result, "dfj_rounds"),
+        "dfj_solve_passes": _sum_dfj_metric(run_result, "dfj_solve_passes"),
+        "violated_subtours_detected": _count_dfj_violated_subtours(run_result),
+        "optimality_proven": _all_clusters_optimality_proven(run_result),
+        "time_limit_reached": _any_cluster_time_limit_reached(run_result),
         "time_limit_feasible": time_limit_feasible,
         "time_limit_no_solution": time_limit_no_solution,
         "model_build_error": model_build_error,
         "solver_error": solver_error,
-        "status": run_result.normalized_status,
+        "normalized_status": run_result.normalized_status,
         "distance_per_uav": json.dumps(distance_per_uav, sort_keys=True),
         "energy_per_uav": json.dumps(energy_per_uav, sort_keys=True),
     }
