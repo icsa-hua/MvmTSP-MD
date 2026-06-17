@@ -20,6 +20,10 @@ def normalize_warm_start_mode(mode: Any) -> str:
         return "ga"
     if normalized in {"alns", "alns_only", "alns_plus_time_windows"}:
         return "alns"
+    if normalized in {"greedy_nn", "gnn_ntw", "global_greedy_nn"}:
+        return "greedy_nn"
+    if normalized in {"greedy_partition_nn", "static_partition_greedy_nn"}:
+        return "greedy_partition_nn"
     return normalized
 
 

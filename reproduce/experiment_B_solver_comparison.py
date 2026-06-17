@@ -36,6 +36,14 @@ EMPTY_FIELDS = {
     "solver_error": False,
     "artifact_dir": "",
     "error_message": "",
+    "total_data_rate_mbps": None,
+    "data_rate_per_hour_mbps": None,
+    "data_rate_per_kwh_mbps": None,
+    "avg_data_rate_per_cluster_mbps": None,
+    "mean_sinr_db": None,
+    "coverage_prob_at_0db": None,
+    "coverage_prob_at_10db": None,
+    "coverage_prob_at_20db": None,
 }
 
 
@@ -111,6 +119,14 @@ def main() -> None:
                             "solver_error": result.get("metrics", {}).get("solver_error", False),
                             "artifact_dir": result.get("artifact_dir", ""),
                             "error_message": result.get("error_message", ""),
+                            "total_data_rate_mbps": result.get("metrics", {}).get("total_data_rate_mbps"),
+                            "data_rate_per_hour_mbps": result.get("metrics", {}).get("data_rate_per_hour_mbps"),
+                            "data_rate_per_kwh_mbps": result.get("metrics", {}).get("data_rate_per_kwh_mbps"),
+                            "avg_data_rate_per_cluster_mbps": result.get("metrics", {}).get("avg_data_rate_per_cluster_mbps"),
+                            "mean_sinr_db": result.get("metrics", {}).get("mean_sinr_db"),
+                            "coverage_prob_at_0db": result.get("metrics", {}).get("coverage_prob_at_0db"),
+                            "coverage_prob_at_10db": result.get("metrics", {}).get("coverage_prob_at_10db"),
+                            "coverage_prob_at_20db": result.get("metrics", {}).get("coverage_prob_at_20db"),
                         }
                     )
                     row = format_result_row(

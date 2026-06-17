@@ -29,6 +29,7 @@ from dummy_app.program_config import (
     EXPERIMENT_DEFAULT_PRIORITY,
     EXPERIMENT_DEFAULT_SCENARIO,
     EXPERIMENT_DEFAULT_SEEDS,
+    EXPERIMENT_DEFAULT_RUN_TIME_LIMIT_SECONDS,
     EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
     EXPERIMENT_RESULTS_DIR,
     HORIZONTAL_VELOCITY,
@@ -231,6 +232,7 @@ def _run_constraint_stress_case(
             fairness_tolerance=int(fairness_tolerance),
             time_step_sec=600,
             time_limit_seconds=enforce_time_limit(EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS),
+            run_time_limit_seconds=enforce_time_limit(EXPERIMENT_DEFAULT_RUN_TIME_LIMIT_SECONDS),
             priority=EXPERIMENT_DEFAULT_PRIORITY,
         )
         config["max_battery"] = float(usable_battery_capacity_wh)
@@ -385,6 +387,14 @@ def _build_row(
             "solver_error": metrics.get("solver_error", False),
             "artifact_dir": result.get("artifact_dir", ""),
             "error_message": result.get("error_message", ""),
+            "total_data_rate_mbps": metrics.get("total_data_rate_mbps"),
+            "data_rate_per_hour_mbps": metrics.get("data_rate_per_hour_mbps"),
+            "data_rate_per_kwh_mbps": metrics.get("data_rate_per_kwh_mbps"),
+            "avg_data_rate_per_cluster_mbps": metrics.get("avg_data_rate_per_cluster_mbps"),
+            "mean_sinr_db": metrics.get("mean_sinr_db"),
+            "coverage_prob_at_0db": metrics.get("coverage_prob_at_0db"),
+            "coverage_prob_at_10db": metrics.get("coverage_prob_at_10db"),
+            "coverage_prob_at_20db": metrics.get("coverage_prob_at_20db"),
         },
     )
 

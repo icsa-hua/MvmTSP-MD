@@ -32,6 +32,7 @@ from dummy_app.program_config import (
     EXPERIMENT_DEFAULT_OBJECTIVE,
     EXPERIMENT_DEFAULT_PRIORITY,
     EXPERIMENT_DEFAULT_SCENARIO,
+    EXPERIMENT_DEFAULT_RUN_TIME_LIMIT_SECONDS,
     EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
     EXPERIMENT_OBJECTIVE_WEIGHT_PROFILES,
     HIGH_BOUND,
@@ -164,6 +165,7 @@ def _build_runtime_config(
     fairness_tolerance: int,
     time_step_sec: int,
     time_limit_seconds: int | None,
+    run_time_limit_seconds: int | None,
     priority: str,
     bridge_node_required_visits_override: int | None = None,
 ) -> Dict[str, Any]:
@@ -185,6 +187,7 @@ def _build_runtime_config(
         "objective_strategy": OBJECTIVE_STRATEGY,
         "scenario_constraint_set": SCENARIO_CONSTRAINT_SET,
         "solver_time_limit_seconds": time_limit_seconds,
+        "run_time_limit_seconds": run_time_limit_seconds,
         "warm_start_mode": warm_start_mode,
         "random_seed": int(scenario_payload["seed"]),
         "solver_seed": int(scenario_payload["seed"]),
@@ -314,18 +317,28 @@ def _any_cluster_time_limit_reached(run_result: Any) -> bool:
 
 def _failure_category_flags(error_message: str, status_history: Iterable[Mapping[str, Any]]) -> Dict[str, bool]:
     records = list(status_history)
+    normalized_error = str(error_message or "").lower()
+    timeout_error = any(
+        marker in normalized_error
+        for marker in (
+            "timeouterror",
+            "timed out",
+            "solver time limit",
+            "time limit exceeded",
+            "wall_clock_time_limit_exceeded",
+        )
+    )
     time_limit_feasible = any(
         bool(record.get("time_limit_reached")) and record.get("incumbent_value") is not None for record in records
     )
-    time_limit_no_solution = any(
+    time_limit_no_solution = timeout_error or any(
         bool(record.get("time_limit_reached")) and record.get("incumbent_value") is None for record in records
     )
-    normalized_error = str(error_message or "")
-    model_build_error = any(
+    model_build_error = (not timeout_error) and any(
         marker in normalized_error
         for marker in (
-            "Error in creating the problem for Cluster",
-            "Error processing cluster",
+            "error in creating the problem for cluster",
+            "error processing cluster",
         )
     )
     solver_error = bool(normalized_error) and not (time_limit_feasible or time_limit_no_solution or model_build_error)
@@ -362,6 +375,14 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
             "violated_subtours_detected": None,
             "optimality_proven": False,
             "time_limit_reached": False,
+            "total_data_rate_mbps": None,
+            "data_rate_per_hour_mbps": None,
+            "data_rate_per_kwh_mbps": None,
+            "avg_data_rate_per_cluster_mbps": None,
+            "mean_sinr_db": None,
+            "coverage_prob_at_0db": None,
+            "coverage_prob_at_10db": None,
+            "coverage_prob_at_20db": None,
             **flags,
         }
 
@@ -408,6 +429,14 @@ def _extract_failure_metrics(builder: Any, error_message: str) -> Dict[str, Any]
         "violated_subtours_detected": int(sum(len(list(record.get("violated_subtours", []))) for record in status_history)) if status_history else None,
         "optimality_proven": bool(status_history) and all(bool(record.get("optimality_proven")) for record in status_history),
         "time_limit_reached": any(bool(record.get("time_limit_reached")) for record in status_history),
+        "total_data_rate_mbps": None,
+        "data_rate_per_hour_mbps": None,
+        "data_rate_per_kwh_mbps": None,
+        "avg_data_rate_per_cluster_mbps": None,
+        "mean_sinr_db": None,
+        "coverage_prob_at_0db": None,
+        "coverage_prob_at_10db": None,
+        "coverage_prob_at_20db": None,
         **flags,
     }
 
@@ -487,6 +516,14 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         "normalized_status": run_result.normalized_status,
         "distance_per_uav": json.dumps(distance_per_uav, sort_keys=True),
         "energy_per_uav": json.dumps(energy_per_uav, sort_keys=True),
+        "total_data_rate_mbps": summary.get("total_data_rate"),
+        "data_rate_per_hour_mbps": summary.get("data_rate_per_hour"),
+        "data_rate_per_kwh_mbps": summary.get("data_rate_per_kwh"),
+        "avg_data_rate_per_cluster_mbps": summary.get("average_data_rate_per_cluster"),
+        "mean_sinr_db": summary.get("mean_sinr_db"),
+        "coverage_prob_at_0db": summary["coverage_prob_curve"][1] if summary.get("coverage_prob_curve") else None,
+        "coverage_prob_at_10db": summary["coverage_prob_curve"][7] if summary.get("coverage_prob_curve") else None,
+        "coverage_prob_at_20db": summary["coverage_prob_curve"][13] if summary.get("coverage_prob_curve") else None,
     }
 
 
@@ -503,6 +540,7 @@ def run_method(
     fairness_tolerance: int = 2,
     time_step_sec: int = 600,
     time_limit_seconds: int | None = EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
+    run_time_limit_seconds: int | None = EXPERIMENT_DEFAULT_RUN_TIME_LIMIT_SECONDS,
     memory_limit_bytes: int | None = EXPERIMENT_DEFAULT_MEMORY_LIMIT,
     priority: str = PRIORITY,
     bridge_node_required_visits_override: int | None = None,
@@ -523,6 +561,7 @@ def run_method(
             fairness_tolerance=fairness_tolerance,
             time_step_sec=time_step_sec,
             time_limit_seconds=enforce_time_limit(time_limit_seconds),
+            run_time_limit_seconds=enforce_time_limit(run_time_limit_seconds),
             priority=priority,
             bridge_node_required_visits_override=bridge_node_required_visits_override,
         )

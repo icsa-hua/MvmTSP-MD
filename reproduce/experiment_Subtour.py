@@ -56,6 +56,14 @@ EMPTY_FIELDS = {
     "time_limit_no_solution": False,
     "artifact_dir": "",
     "error_message": "",
+    "total_data_rate_mbps": None,
+    "data_rate_per_hour_mbps": None,
+    "data_rate_per_kwh_mbps": None,
+    "avg_data_rate_per_cluster_mbps": None,
+    "mean_sinr_db": None,
+    "coverage_prob_at_0db": None,
+    "coverage_prob_at_10db": None,
+    "coverage_prob_at_20db": None,
 }
 
 

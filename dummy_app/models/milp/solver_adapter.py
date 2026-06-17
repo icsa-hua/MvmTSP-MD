@@ -130,9 +130,10 @@ def _make_progress_event(
     relative_gap_percent: float | None = None,
     raw_line: str,
 ) -> Dict[str, Any]:
-    computed_gap = relative_gap_percent
+    # Normalize progress gaps across solvers from the parsed incumbent and bound.
+    computed_gap = compute_relative_gap_percent(incumbent_value, best_bound)
     if computed_gap is None:
-        computed_gap = compute_relative_gap_percent(incumbent_value, best_bound)
+        computed_gap = relative_gap_percent
     return {
         "elapsed_time_seconds": float(elapsed_time_seconds),
         "incumbent_value": float(incumbent_value) if incumbent_value is not None else None,
@@ -308,10 +309,9 @@ def _parse_glpk_progress(log_path: str, objective_value: float | None, raw_statu
         final_elapsed = progress_events[-1]["elapsed_time_seconds"] if progress_events else 0.0
         final_bound = progress_events[-1]["best_bound"] if progress_events else None
         final_gap_percent = progress_events[-1]["relative_gap_percent"] if progress_events else None
-        if raw_status == "Optimal":
+        if raw_status == "Optimal" and optimality_proven:
             final_bound = objective_value
             final_gap_percent = 0.0
-            optimality_proven = True
         progress_events.append(
             _make_progress_event(
                 elapsed_time_seconds=float(final_elapsed),
@@ -429,11 +429,10 @@ def _parse_cbc_progress(log_path: str, objective_value: float | None, raw_status
                     final_incumbent = _parse_incumbent_token(objective_match.group("incumbent"))
                     feasible_solution_found = feasible_solution_found or final_incumbent is not None
 
-    if raw_status == "Optimal" and objective_value is not None:
+    if raw_status == "Optimal" and objective_value is not None and optimality_proven:
         final_incumbent = float(objective_value)
         final_bound = float(objective_value)
         final_gap_percent = 0.0
-        optimality_proven = True
         status_hint = "Optimal"
     elif final_incumbent is None and feasible_solution_found and objective_value is not None:
         final_incumbent = float(objective_value)
@@ -481,6 +480,8 @@ def _parse_gurobi_progress(log_path: str, objective_value: float | None, raw_sta
                 if "Optimal solution found" in line:
                     optimality_proven = True
                     status_hint = "Optimal"
+                elif "Model is infeasible" in line:
+                    status_hint = "Infeasible"
                 elif "Time limit reached" in line:
                     time_limit_reached = True
                     status_hint = "Feasible" if feasible_solution_found else "Not Solved"
@@ -862,7 +863,14 @@ def _solve_cluster_problem_once(
             logPath=log_path,
             options=[("Seed", int(solver_seed))],
         )
-        cluster.problem.solve(solver_command)
+        try:
+            cluster.problem.solve(solver_command)
+        except TypeError:
+            # PuLP bug (gurobi_api.py): when Gurobi finds no feasible solution it
+            # writes no .sol file; PuLP then calls assignVarsVals(None) which raises
+            # TypeError.  cluster.problem.status is already LpStatusNotSolved (0)
+            # at this point, so just let the rest of the function handle it.
+            pass
 
     elif solver_backend == "cbc":
         log_path = _create_solver_log_path("cbc", cluster.id)
@@ -945,10 +953,9 @@ def _solve_cluster_problem_once(
     if progress_summary.get("optimality_proven") and incumbent_value is not None:
         best_bound = float(incumbent_value)
 
-    if progress_summary.get("final_relative_gap_percent") is not None:
+    relative_gap_percent = compute_relative_gap_percent(incumbent_value, best_bound)
+    if relative_gap_percent is None and progress_summary.get("final_relative_gap_percent") is not None:
         relative_gap_percent = float(progress_summary["final_relative_gap_percent"])
-    else:
-        relative_gap_percent = compute_relative_gap_percent(incumbent_value, best_bound)
 
     absolute_gap = compute_absolute_gap(incumbent_value, best_bound)
     relative_gap = compute_relative_gap(incumbent_value, best_bound)

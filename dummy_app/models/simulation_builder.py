@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import asdict
+from pathlib import Path
 
 from dummy_app.core.exceptions import ValidationOptimalityConfirmed
 from dummy_app.designs.mvmtsp_config import MVMTSPConfig 
@@ -16,8 +17,11 @@ from dummy_app.models.heuristics.genetic_algorithm_solver import (
     GeneticAlgorithmOptimizationModel,
     solve_genetic_algorithm_baseline,
 )
-from dummy_app.models.heuristics.global_greedy_nn import GlobalGreedyNNOptimizationModel
-from dummy_app.models.heuristics.static_partition_greedy_nn import StaticPartitionGreedyNNOptimizationModel
+from dummy_app.models.heuristics.global_greedy_nn import GlobalGreedyNNOptimizationModel, solve_global_greedy_nn
+from dummy_app.models.heuristics.static_partition_greedy_nn import (
+    StaticPartitionGreedyNNOptimizationModel,
+    solve_static_partition_greedy_nn,
+)
 from dummy_app.models.milp.model import MILPOptimizationModel
 from dummy_app.models.milp.solver_adapter import solve_cluster_problem
 from dummy_app.models.milp.subtour.strategies import normalize_subtour_mode
@@ -128,6 +132,8 @@ class Builder(MVMTSPConfig):
         self.enable_ga = self.base_enable_ga
         self.ga_generations = int(config.get("ga_generations", 100))
         self.solver_time_limit_seconds = config.get("solver_time_limit_seconds")
+        self.run_time_limit_seconds = config.get("run_time_limit_seconds")
+        self._run_started_at: float | None = None
         self.original_battery_capacity_wh = float(config.get("original_battery_capacity_wh", self.max_battery))
         self.recharge_battery_capacity_wh = float(config.get("recharge_battery_capacity_wh", self.max_battery))
         self.objective_weights = config.get("objective_weights", self.objective_weights)
@@ -264,6 +270,38 @@ class Builder(MVMTSPConfig):
             cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
+        if self.warm_start_mode in {"greedy_nn", "gnn_ntw"}:
+            generation_started_at = time.perf_counter()
+            heuristic_solution = solve_global_greedy_nn(cluster, self)
+            generation_time_sec = time.perf_counter() - generation_started_at
+            summary, payload = build_warm_start_payload(
+                builder=self,
+                cluster=cluster,
+                heuristic_solution=heuristic_solution,
+                strategy_name="greedy_nn",
+                generation_time_sec=generation_time_sec,
+            )
+            cluster.warm_start_solution = payload
+            cluster.warm_start_summary = summary
+            cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
+            return
+
+        if self.warm_start_mode in {"greedy_partition_nn", "static_partition_greedy_nn"}:
+            generation_started_at = time.perf_counter()
+            heuristic_solution = solve_static_partition_greedy_nn(cluster, self)
+            generation_time_sec = time.perf_counter() - generation_started_at
+            summary, payload = build_warm_start_payload(
+                builder=self,
+                cluster=cluster,
+                heuristic_solution=heuristic_solution,
+                strategy_name="greedy_partition_nn",
+                generation_time_sec=generation_time_sec,
+            )
+            cluster.warm_start_solution = payload
+            cluster.warm_start_summary = summary
+            cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
+            return
+
         raise ValueError(f"Unsupported warm_start_mode '{self.warm_start_mode}'")
     
 
@@ -364,18 +402,74 @@ class Builder(MVMTSPConfig):
         return assignments 
 
 
-    @timeout_decorator.timeout(1800)
     def solve_problem(self, cluster:Any):
         self.capture_cluster_model_build(cluster, build_mode="solve")
         default_limit = 500 if self.objective_function == "coverage" else None
         time_limit = self.solver_time_limit_seconds if self.solver_time_limit_seconds is not None else default_limit
-        solve_metadata = solve_cluster_problem(
-            cluster=cluster,
-            builder=self,
-            time_limit_seconds=time_limit,
-            solver_backend=self.solver_backend,
-            solver_seed=self.solver_seed,
-        )
+
+        # Cap against the remaining total wall-clock budget for this run.
+        if self.run_time_limit_seconds is not None and self._run_started_at is not None:
+            elapsed = time.perf_counter() - self._run_started_at
+            remaining = max(5.0, self.run_time_limit_seconds - elapsed)
+            time_limit = min(time_limit, remaining) if time_limit is not None else remaining
+
+        # Watchdog fires 5 s after the solver's own limit so the solver can
+        # always return gracefully with its best feasible solution first.
+        _WATCHDOG_BUFFER = 5
+
+        def _run_solver() -> Dict[str, Any]:
+            return solve_cluster_problem(
+                cluster=cluster,
+                builder=self,
+                time_limit_seconds=time_limit,
+                solver_backend=self.solver_backend,
+                solver_seed=self.solver_seed,
+            )
+
+        try:
+            if time_limit is not None:
+                solve_metadata = timeout_decorator.timeout(
+                    seconds=float(time_limit + _WATCHDOG_BUFFER),
+                    timeout_exception=timeout_decorator.TimeoutError,
+                    exception_message=(
+                        f"Solver time limit of {float(time_limit):.0f} seconds exceeded for cluster {cluster.id}"
+                    ),
+                )(_run_solver)()
+            else:
+                solve_metadata = _run_solver()
+        except timeout_decorator.TimeoutError:
+            solve_metadata = {
+                "solver_backend": self.solver_backend,
+                "solver_seed": self.solver_seed,
+                "raw_status": "Not Solved",
+                "normalized_status": "feasible_time_limit",
+                "status_code": None,
+                "objective_value": None,
+                "incumbent_value": None,
+                "best_bound": None,
+                "absolute_gap": None,
+                "relative_gap": None,
+                "time_limit_seconds": float(time_limit) if time_limit is not None else None,
+                "elapsed_time_seconds": float(time_limit or 0.0),
+                "termination_reason": "solver_time_limit_exceeded",
+                "first_feasible_time_seconds": None,
+                "first_optimality_gap_percent": None,
+                "explored_bnb_nodes": None,
+                "active_bnb_nodes": None,
+                "feasible_solution_found": False,
+                "time_limit_reached": True,
+                "optimality_proven": False,
+                "dfj_rounds": 0,
+                "dfj_solve_passes": 0,
+                "dfj_cuts_added": 0,
+                "dfj_round_history": [],
+                "violated_subtours": [],
+                "progress_events": [],
+                "solver_log_path": "",
+            }
+            cluster.solve_metadata = solve_metadata
+            self.solve_status_history.append({"cluster_id": cluster.id, **solve_metadata})
+            raise
         cluster.solve_metadata = solve_metadata
         self.solve_status_history.append({"cluster_id": cluster.id, **solve_metadata})
 
@@ -440,21 +534,23 @@ class Builder(MVMTSPConfig):
         self.current_problem_instance = build_problem_instance(self, distance_matrix, data, cue_groups)
         self.total_number_cluster = len(self.current_problem_instance.prepared_clusters)
 
+        self._run_started_at = time.perf_counter()
         cluster_results: List[ClusterSolveResult] = []
-        with tqdm(total=len(self.current_problem_instance.prepared_clusters), desc="Solving problem ", unit="cluster") as pbar:
-            for cluster_solve_order, prepared_cluster in enumerate(self.current_problem_instance.prepared_clusters):
-                prepared_cluster.metadata["cluster_solve_order"] = int(cluster_solve_order)
-                cluster_result = self.optimization_model.solve_cluster(
-                    self.current_problem_instance,
-                    prepared_cluster,
-                    self.run_request,
-                )
-                cluster_results.append(cluster_result)
-                pbar.update(1)
-                logger.debug(f"✅ Cluster {prepared_cluster.cluster_id} solved successfully...")
-        
-        self.metrics.end_performance_timer() 
-        self.metrics.get_memory_usage()
+        try:
+            with tqdm(total=len(self.current_problem_instance.prepared_clusters), desc="Solving problem ", unit="cluster") as pbar:
+                for cluster_solve_order, prepared_cluster in enumerate(self.current_problem_instance.prepared_clusters):
+                    prepared_cluster.metadata["cluster_solve_order"] = int(cluster_solve_order)
+                    cluster_result = self.optimization_model.solve_cluster(
+                        self.current_problem_instance,
+                        prepared_cluster,
+                        self.run_request,
+                    )
+                    cluster_results.append(cluster_result)
+                    pbar.update(1)
+                    logger.debug(f"✅ Cluster {prepared_cluster.cluster_id} solved successfully...")
+        finally:
+            self.metrics.end_performance_timer()
+            self.metrics.get_memory_usage()
 
         logger.info("Total Number of Constraints : {}".format(self.num_constraints))
         logger.info("Total Number of Variables : {}".format(self.variables_count))
@@ -1272,6 +1368,21 @@ class Builder(MVMTSPConfig):
             logger.debug(f"✅ Problem created for cluster {cluster_input.cluster_id} successfully...")
         except ValidationOptimalityConfirmed:
             raise
+        except timeout_decorator.TimeoutError:
+            if getattr(cluster_object, "model_build_record", None) is None and getattr(cluster_object, "problem", None) is not None:
+                try:
+                    self.capture_cluster_model_build(cluster_object, build_mode="solve")
+                except Exception:
+                    pass
+            self.latest_failed_cluster_context = dict(
+                getattr(cluster_object, "model_build_record", {}) or self._build_cluster_failure_context(cluster_object, cluster_input)
+            )
+            logger.warning(
+                "Solver time limit exceeded for cluster %s after %.2f seconds.",
+                cluster_input.cluster_id,
+                float(self.solver_time_limit_seconds or 0.0),
+            )
+            raise
         except Exception as exc:
             if getattr(cluster_object, "model_build_record", None) is None and getattr(cluster_object, "problem", None) is not None:
                 try:
@@ -1742,6 +1853,25 @@ class Builder(MVMTSPConfig):
         )
         idle_ratio = total_service_time / max(total_mission_time, 1e-6)
         coverage_diagnostics = self.build_average_coverage_diagnostics()
+
+        # Aggregate coverage probability curve and mean SINR from per-cluster records.
+        _cov_prob_arrays = [
+            record.get("coverage_probability", {}).get("coverage_PR")
+            for record in self.metrics.coverage_records
+            if record.get("coverage_probability", {}).get("coverage_PR") is not None
+        ]
+        coverage_prob_curve: Optional[List[float]] = None
+        if _cov_prob_arrays:
+            import numpy as _np
+            coverage_prob_curve = _np.mean(_cov_prob_arrays, axis=0).tolist()
+        _all_sinr = [
+            v
+            for record in self.metrics.coverage_records
+            for v in record.get("avg_sinr_db_by_node", {}).values()
+            if v is not None
+        ]
+        mean_sinr_db: Optional[float] = float(np.mean(_all_sinr)) if _all_sinr else None
+
         node_counts = list(nodes_per_uav.values())
         plan_coverage_ratio = float(total_covered_nodes) / float(total_target_nodes) if total_target_nodes else 0.0
 
@@ -1793,6 +1923,8 @@ class Builder(MVMTSPConfig):
             "nodes_per_uav": nodes_per_uav,
             "route_distance_per_uav": route_distance_per_uav,
             "coverage_diagnostics": coverage_diagnostics,
+            "coverage_prob_curve": coverage_prob_curve,
+            "mean_sinr_db": mean_sinr_db,
             "num_clusters": self.total_number_cluster,
             "largest_cluster_size": max((record["node_count"] for record in self.cluster_status_records), default=0),
             "num_constraints": self.num_constraints,
@@ -1838,6 +1970,8 @@ class Builder(MVMTSPConfig):
             "data_rate_per_kwh": 0.0,
             "covered_nodes": 0,
             "coverage_ratio": 0.0,
+            "coverage_prob_curve": None,
+            "mean_sinr_db": None,
             "num_uavs_used": 0,
             "max_route_distance_per_uav": 0.0,
             "workload_imbalance": 0,

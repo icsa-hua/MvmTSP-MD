@@ -26,7 +26,7 @@ HIGH_BOUND = 120 # Considered in meters
 # --- UAV Config --- # 
 MAX_BATTERY = 362 #Wh 
 MAX_COVERAGE_TIME = 3
-MASS = 6.4 # In kg with payload for coverage
+MASS = 5.4 # In kg with payload for coverage
 
 HORIZONTAL_VELOCITY = 10 # m/s 
 VERTICAL_VELOCITY = 2.5 # m/s 
@@ -37,13 +37,14 @@ MODEL_NAME = "milp"
 OBJECTIVE_OPTIONS = ['energy', 'coverage', 'sum_of_times', 'pareto' ]
 ENVIRONMENT_OPTIONS = ['urban', 'rural', 'forest']
 STAGE_OPTIONS = [1, 2, 3] 
-AGENTS_OPTIONS = [3, 4, 5, 6, 7, 8] 
+AGENTS_OPTIONS = [3, 4, 5, 6, 7, 8, 12, 15] 
 FAIRNESS_TOLERANCE = [0, 1, 2, 3, 5]
 TIME_STEP_SEC = [30, 60, 120, 300, 600]
 
-# --- Performance Admissions --- # 
+# --- Performance Admissions --- #
 MAX_MEMORY = 2 * 1024 * 1024 * 1024 # 2GB
-SOLVER_TIME_LIMIT = 30 # Considered in mins
+SOLVER_TIME_LIMIT = 7200  # seconds — per-cluster ceiling for interactive (execution_script) runs
+RUN_TIME_LIMIT_SECONDS = 7200  # seconds — total wall-clock cap across all clusters in one run
 
 # --- Mechanisms Enabled --- # 
 ENABLE_GA = 'yes'
@@ -75,7 +76,8 @@ EXPERIMENT_DEFAULT_OBJECTIVE = "energy"
 EXPERIMENT_DEFAULT_ENV = ENVIRONMENT_OPTIONS[0]
 EXPERIMENT_DEFAULT_PRIORITY = PRIORITY
 EXPERIMENT_DEFAULT_MEMORY_LIMIT = MAX_MEMORY
-EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS = SOLVER_TIME_LIMIT
+EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS = 450  # seconds — per-cluster ceiling for experiment runs
+EXPERIMENT_DEFAULT_RUN_TIME_LIMIT_SECONDS = RUN_TIME_LIMIT_SECONDS  # total wall-clock cap per experiment run
 
 EXPERIMENT_COVERAGE_TIME_PROFILES = {
     "low": 1,
@@ -92,7 +94,7 @@ EXPERIMENT_OBJECTIVE_WEIGHT_PROFILES = {
 
 EXPERIMENT_A_GRID = {
     "areas": [25, 50, 100, 150, 200],
-    "users_per_area": [1, 3, 5],
+    "users_per_area": [1, 5, 10],
     "uavs": [3, 4, 6, 8],
     "coverage_time_profile": ["low", "medium", "high"],
 }
@@ -108,20 +110,20 @@ EXPERIMENT_C_GRID = {
     "uavs": [3, 4, 6, 8],
 }
 
-EXPERIMENT_C_WARM_STARTS = ["none", "ga", "alns"]
+EXPERIMENT_C_WARM_STARTS = ["none", "ga", "alns", "greedy_nn", "greedy_partition_nn"]
 
 EXPERIMENT_D_GRID = {
     "areas": [50, 100, 150, 200],
     "uavs": [3, 4, 6, 8],
-
 }
+
 EXPERIMENT_D_FORMULATIONS = {
     "single_stage_milp": 1,
     "two_stage_milp": 2,
 }
 
 EXPERIMENT_SUBTOUR_AREAS = [50, 100, 150, 200]
-EXPERIMENT_SUBTOUR_UAVS = [6]
+EXPERIMENT_SUBTOUR_UAVS = [3, 5]
 EXPERIMENT_SUBTOUR_MODES = ["mtz", "dfj_iter", "flow"]
 EXPERIMENT_SUBTOUR_SOLVER = "cplex"
 
@@ -131,6 +133,7 @@ EXPERIMENT_E_BASELINE = {
     "uavs": 4,
     "coverage_time_profile": "medium",
 }
+
 EXPERIMENT_E_FAIRNESS_THRESHOLDS = [1, 2, 3, 4]
 EXPERIMENT_E_TIME_STEP_SEC = [30, 60, 120]
 EXPERIMENT_E_OBJECTIVE_WEIGHT_PROFILES = [
@@ -149,7 +152,7 @@ EXPERIMENT_H_BASELINE = {
 EXPERIMENT_H_REQUIRED_VISITS = [1, 2, 3, 4, 5]
 
 # --- Energy configuration --- # 
-ROTOR_AREA = 0.2 # Rotor disk area in m 
+ROTOR_AREA = 0.45 # Rotor disk area in m 
 LAMBDA_COEF = 0.08 # Coeff for the drag profile depending on the type of UAV 
 ASCENT_FACTOR = 1.0 
 DESCENT_FACTOR = [0.2, 0.4, 0.6, 0.8]
