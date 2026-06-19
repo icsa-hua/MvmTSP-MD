@@ -36,6 +36,7 @@ from dummy_app.program_config import (
     MAX_BATTERY,
     SUBTOUR_MODE,
     VERTICAL_VELOCITY,
+    WARM_START_MODE,
 )
 from dummy_app.tools.common import call_builder
 
@@ -226,7 +227,7 @@ def _run_constraint_stress_case(
             model_name="milp",
             solver_backend="cplex",
             subtour_mode=SUBTOUR_MODE,
-            warm_start_mode="none",
+            warm_start_mode=WARM_START_MODE,
             stage_solution=1,
             objective_weights=None,
             fairness_tolerance=int(fairness_tolerance),

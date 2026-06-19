@@ -49,6 +49,9 @@ from dummy_app.program_config import (
     SUBTOUR_MODE,
     SUBTOUR_STRATEGY,
     VERTICAL_VELOCITY,
+    WARM_START_MODE,
+    SOLVER_FALLBACK_GAP_REL,
+    SOLVER_WATCHDOG_GRACE_SECONDS,
 )
 
 
@@ -188,6 +191,8 @@ def _build_runtime_config(
         "scenario_constraint_set": SCENARIO_CONSTRAINT_SET,
         "solver_time_limit_seconds": time_limit_seconds,
         "run_time_limit_seconds": run_time_limit_seconds,
+        "solver_fallback_gap_rel": SOLVER_FALLBACK_GAP_REL,
+        "solver_watchdog_grace_seconds": SOLVER_WATCHDOG_GRACE_SECONDS,
         "warm_start_mode": warm_start_mode,
         "random_seed": int(scenario_payload["seed"]),
         "solver_seed": int(scenario_payload["seed"]),
@@ -466,6 +471,10 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         bool(dict(cluster_result.diagnostics).get("time_limit_reached")) and cluster_result.incumbent_value is None
         for cluster_result in run_result.cluster_results
     )
+    relative_gap_fallback_accepted = any(
+        bool(dict(cluster_result.diagnostics).get("relative_gap_fallback_accepted"))
+        for cluster_result in run_result.cluster_results
+    )
     model_build_error = False
     solver_error = any(
         getattr(cluster_result, "termination_reason", "") == "solver_error"
@@ -511,6 +520,7 @@ def extract_common_run_metrics(run_result: Any, scenario_payload: Mapping[str, A
         "time_limit_reached": _any_cluster_time_limit_reached(run_result),
         "time_limit_feasible": time_limit_feasible,
         "time_limit_no_solution": time_limit_no_solution,
+        "relative_gap_fallback_accepted": relative_gap_fallback_accepted,
         "model_build_error": model_build_error,
         "solver_error": solver_error,
         "normalized_status": run_result.normalized_status,
@@ -534,7 +544,7 @@ def run_method(
     model_name: str | None = None,
     solver_backend: str = SOLVER_BACKEND,
     subtour_mode: str = SUBTOUR_MODE,
-    warm_start_mode: str = "none",
+    warm_start_mode: str = WARM_START_MODE,
     stage_solution: int = 1,
     objective_weights: Optional[Dict[str, float]] = None,
     fairness_tolerance: int = 2,

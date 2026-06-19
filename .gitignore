@@ -39,3 +39,13 @@ DATASET_PLAN.md
 __pycache__
 ALNS.md
 tests
+Analytical Module Implementation.md 
+Equations.md 
+PIPELINE_TIME_LIMIT_CHANGES.md 
+Scenario_conf.md 
+compare_solver_baselines.sh 
+diagrams/ 
+execution_script.py 
+exported_problems 
+reproduce/exported_problems 
+results  

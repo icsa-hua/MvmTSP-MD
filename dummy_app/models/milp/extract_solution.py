@@ -24,9 +24,19 @@ def get_node_visits(cluster, builder: Any, node, dc) -> None:
 
 def extract_cluster_solution(cluster, builder: Any):
     logger.debug(f"Cluster Time Frame is {cluster.timeframe}")
-    if pl.LpStatus[cluster.problem.status] != "Optimal":
-        logger.info("Problem did not terminate as Optimal; extracting structured failure state.")
-        raise RuntimeError(f"Cluster {cluster.id} ended with status {pl.LpStatus[cluster.problem.status]}")
+    solve_metadata = dict(getattr(cluster, "solve_metadata", {}))
+    feasible_solution_found = bool(
+        solve_metadata.get("accepted_solution")
+        or solve_metadata.get("feasible_solution_found")
+        or solve_metadata.get("incumbent_value") is not None
+        or pl.LpStatus[cluster.problem.status] == "Optimal"
+    )
+    if not feasible_solution_found:
+        logger.info("No feasible incumbent is available for route extraction.")
+        raise RuntimeError(
+            f"Cluster {cluster.id} ended without a feasible solution "
+            f"(status={solve_metadata.get('raw_status', pl.LpStatus[cluster.problem.status])})"
+        )
 
     V_nodes = list(cluster.nodes_dict.keys())
     reverse_dict = {v: k for k, v in cluster.nodes_dict.items()}
@@ -38,10 +48,13 @@ def extract_cluster_solution(cluster, builder: Any):
     for k in cluster.employed_agents:
         start_node = -1
         start_offset = float(getattr(cluster.start_step[k], "varValue", 0.0) or 0.0)
-        for j in NODES:
-            if cluster.x[depot_ind, j, k].varValue > 0.5:
-                start_node = j
-                break
+        start_candidates = [
+            (float(cluster.x[depot_ind, j, k].varValue or 0.0), j)
+            for j in NODES
+            if float(cluster.x[depot_ind, j, k].varValue or 0.0) > 0.5
+        ]
+        if start_candidates:
+            _, start_node = max(start_candidates)
 
         if start_node == -1:
             continue
@@ -53,13 +66,16 @@ def extract_cluster_solution(cluster, builder: Any):
 
         get_node_visits(cluster, builder, start_node, dc)
         current_node = start_node
+        traversed_arcs = set()
         while current_node != depot_ind:
             real_current_node = cluster.virtual_nodes.get(dc[current_node], dc[current_node])
-            next_node_in_path = -1
-            for next_node in V_nodes:
-                if cluster.x[current_node, next_node, k].varValue > 0.5:
-                    next_node_in_path = next_node
-                    break
+            successor_candidates = [
+                (float(cluster.x[current_node, next_node, k].varValue or 0.0), next_node)
+                for next_node in V_nodes
+                if next_node != current_node
+                and float(cluster.x[current_node, next_node, k].varValue or 0.0) > 0.5
+            ]
+            next_node_in_path = max(successor_candidates)[1] if successor_candidates else -1
 
             if next_node_in_path == -1:
                 logger.error(
@@ -67,6 +83,12 @@ def extract_cluster_solution(cluster, builder: Any):
                     f"Could not find a next step."
                 )
                 break
+            selected_arc = (current_node, next_node_in_path)
+            if selected_arc in traversed_arcs:
+                raise RuntimeError(
+                    f"Cycle detected while extracting cluster {cluster.id}, agent {k}, arc {selected_arc}"
+                )
+            traversed_arcs.add(selected_arc)
 
             real_next_node = cluster.virtual_nodes.get(dc[next_node_in_path], dc[next_node_in_path])
             arrival_at_current = float(cluster.t[current_node, k].varValue) - start_offset
@@ -81,9 +103,10 @@ def extract_cluster_solution(cluster, builder: Any):
             else:
                 arrival_at_next = float(cluster.t[next_node_in_path, k].varValue) - start_offset
 
-            end_t_move = round(arrival_at_next)
-            if start_t_move >= end_t_move and arrival_at_next >= departure_from_current:
-                end_t_move = start_t_move + 1
+            # A selected discrete arc must always appear in the rendered route.
+            # Solver tolerances and rounded continuous times can otherwise erase
+            # the final return arc and create a false "does not return" failure.
+            end_t_move = max(round(arrival_at_next), start_t_move + 1)
 
             for t_step in range(start_t_move, end_t_move):
                 detailed_log[k].append((real_current_node, real_next_node, t_step))

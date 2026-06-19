@@ -45,6 +45,7 @@ from dummy_app.program_config import (
     HORIZONTAL_VELOCITY,
     VERTICAL_VELOCITY,
     SUBTOUR_MODE,
+    WARM_START_MODE,
 )
 from dummy_app.tools.common import call_builder
 
@@ -518,7 +519,7 @@ def _run_scalability_preflight(
             model_name="milp",
             solver_backend=solver_name,
             subtour_mode=SUBTOUR_MODE,
-            warm_start_mode="none",
+            warm_start_mode=WARM_START_MODE,
             stage_solution=1,
             objective_weights=None,
             fairness_tolerance=int(fairness_tolerance),
@@ -610,7 +611,7 @@ def _run_scalability_case(
             model_name="milp",
             solver_backend=solver_name,
             subtour_mode=SUBTOUR_MODE,
-            warm_start_mode="none",
+            warm_start_mode=WARM_START_MODE,
             stage_solution=1,
             objective_weights=None,
             fairness_tolerance=int(fairness_tolerance),

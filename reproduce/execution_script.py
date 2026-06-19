@@ -47,15 +47,15 @@ def parse_csv_strings(raw_value):
 
 
 def build_runtime_config(args):
-    warm_start_mode = args.warm_start_mode if args.warm_start_mode else ("ga" if args.enable_ga == "yes" else "none")
+    warm_start_mode = args.warm_start_mode if args.warm_start_mode else WARM_START_MODE
     return {
         "model_name": args.model_name,
-        "genetic_algorithm": True if args.enable_ga=='yes' else False, 
+        "genetic_algorithm": warm_start_mode == "ga",
         "env_type": args.env, 
         "max_battery":args.max_battery, 
         "max_coverage_time":args.max_coverage_time,
         "scenario":args.scenario, 
-        "enable_ga":args.enable_ga,
+        "enable_ga": "yes" if warm_start_mode == "ga" else "no",
         "objective_function":args.objective,
         "stage_solution":args.stage_solution, 
         "priority":args.priority,
@@ -67,6 +67,8 @@ def build_runtime_config(args):
         "scenario_constraint_set": args.scenario_constraint_set,
         "warm_start_mode": warm_start_mode,
         "solver_time_limit_seconds": None if args.solver_time_limit_seconds == 0 else args.solver_time_limit_seconds,
+        "solver_fallback_gap_rel": SOLVER_FALLBACK_GAP_REL,
+        "solver_watchdog_grace_seconds": SOLVER_WATCHDOG_GRACE_SECONDS,
         "random_seed": args.seed,
         "solver_seed": args.seed,
         "NUMBER_OF_AGENTS":args.num_agents,
@@ -260,7 +262,12 @@ def main():
     parser.add_argument("--animation_fps", type=int, default=10, help="Frames per second when saving animation.")
     parser.add_argument("--animation_interval_ms", type=int, default=100, help="Playback interval between frames in milliseconds.")
     parser.add_argument("--enable_ga", type=str, default=ENABLE_GA, help="Initialize solver with Genetic Algorithm")
-    parser.add_argument("--warm_start_mode", type=str, default="", help="MILP initializer to use: none, ga, alns.")
+    parser.add_argument(
+        "--warm_start_mode",
+        type=str,
+        default=WARM_START_MODE,
+        help="MILP initializer: auto, none, ga, alns, greedy_nn, or greedy_partition_nn.",
+    )
     parser.add_argument("--num_agents", type=int, default=NUMBER_OF_AGENTS, help="Number of agents to simulate.")
     parser.add_argument("--num_users", type=int, default=NUMBER_OF_USERS, help="Number of users to simulate.")
     parser.add_argument("--max_battery", type=int, default=MAX_BATTERY, help="Maximum battery capacity.")

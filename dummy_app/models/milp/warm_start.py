@@ -14,6 +14,8 @@ from dummy_app.tools.graphs import is_eulerian_digraph
 
 def normalize_warm_start_mode(mode: Any) -> str:
     normalized = str(mode or "none").strip().lower()
+    if normalized in {"auto", "automatic", "default"}:
+        return "auto"
     if normalized in {"", "none", "off", "disabled", "false"}:
         return "none"
     if normalized in {"ga", "ga_only", "ga_plus_time_windows", "genetic_algorithm"}:

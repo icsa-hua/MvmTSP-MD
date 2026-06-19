@@ -133,6 +133,8 @@ class Builder(MVMTSPConfig):
         self.ga_generations = int(config.get("ga_generations", 100))
         self.solver_time_limit_seconds = config.get("solver_time_limit_seconds")
         self.run_time_limit_seconds = config.get("run_time_limit_seconds")
+        self.solver_fallback_gap_rel = float(config.get("solver_fallback_gap_rel", 0.02))
+        self.solver_watchdog_grace_seconds = int(config.get("solver_watchdog_grace_seconds", 60))
         self._run_started_at: float | None = None
         self.original_battery_capacity_wh = float(config.get("original_battery_capacity_wh", self.max_battery))
         self.recharge_battery_capacity_wh = float(config.get("recharge_battery_capacity_wh", self.max_battery))
@@ -219,11 +221,18 @@ class Builder(MVMTSPConfig):
 
 
     def build_cluster_initializer(self, cluster: Cluster) -> None:
+        selected_warm_start_mode = self.warm_start_mode
+        if selected_warm_start_mode == "auto":
+            selected_warm_start_mode = (
+                "greedy_nn" if self.scenario == "individual" else "greedy_partition_nn"
+            )
+
         cluster.initial_population = {}
         cluster.initializer_timeframe_estimate = None
         cluster.warm_start_solution = {}
         cluster.warm_start_summary = {
-            "strategy": self.warm_start_mode,
+            "strategy": selected_warm_start_mode,
+            "requested_strategy": self.warm_start_mode,
             "available": False,
             "provided_to_solver": False,
             "accepted_by_solver": None,
@@ -235,10 +244,10 @@ class Builder(MVMTSPConfig):
             "timeframe_estimate": None,
         }
 
-        if self.warm_start_mode == "none":
+        if selected_warm_start_mode == "none":
             return
 
-        if self.warm_start_mode == "ga":
+        if selected_warm_start_mode == "ga":
             generation_started_at = time.perf_counter()
             heuristic_solution = solve_genetic_algorithm_baseline(cluster, self)
             generation_time_sec = time.perf_counter() - generation_started_at
@@ -249,12 +258,13 @@ class Builder(MVMTSPConfig):
                 strategy_name="ga",
                 generation_time_sec=generation_time_sec,
             )
+            summary["requested_strategy"] = self.warm_start_mode
             cluster.warm_start_solution = payload
             cluster.warm_start_summary = summary
             cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
-        if self.warm_start_mode == "alns":
+        if selected_warm_start_mode == "alns":
             generation_started_at = time.perf_counter()
             heuristic_solution = solve_alns_baseline(cluster, self)
             generation_time_sec = time.perf_counter() - generation_started_at
@@ -265,12 +275,13 @@ class Builder(MVMTSPConfig):
                 strategy_name="alns",
                 generation_time_sec=generation_time_sec,
             )
+            summary["requested_strategy"] = self.warm_start_mode
             cluster.warm_start_solution = payload
             cluster.warm_start_summary = summary
             cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
-        if self.warm_start_mode in {"greedy_nn", "gnn_ntw"}:
+        if selected_warm_start_mode in {"greedy_nn", "gnn_ntw"}:
             generation_started_at = time.perf_counter()
             heuristic_solution = solve_global_greedy_nn(cluster, self)
             generation_time_sec = time.perf_counter() - generation_started_at
@@ -281,12 +292,13 @@ class Builder(MVMTSPConfig):
                 strategy_name="greedy_nn",
                 generation_time_sec=generation_time_sec,
             )
+            summary["requested_strategy"] = self.warm_start_mode
             cluster.warm_start_solution = payload
             cluster.warm_start_summary = summary
             cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
-        if self.warm_start_mode in {"greedy_partition_nn", "static_partition_greedy_nn"}:
+        if selected_warm_start_mode in {"greedy_partition_nn", "static_partition_greedy_nn"}:
             generation_started_at = time.perf_counter()
             heuristic_solution = solve_static_partition_greedy_nn(cluster, self)
             generation_time_sec = time.perf_counter() - generation_started_at
@@ -297,12 +309,13 @@ class Builder(MVMTSPConfig):
                 strategy_name="greedy_partition_nn",
                 generation_time_sec=generation_time_sec,
             )
+            summary["requested_strategy"] = self.warm_start_mode
             cluster.warm_start_solution = payload
             cluster.warm_start_summary = summary
             cluster.initializer_timeframe_estimate = summary.get("timeframe_estimate")
             return
 
-        raise ValueError(f"Unsupported warm_start_mode '{self.warm_start_mode}'")
+        raise ValueError(f"Unsupported warm_start_mode '{selected_warm_start_mode}'")
     
 
     def assign_agents_to_areas(self, plethos, depots:Any)->Dict[int,int]:
@@ -413,9 +426,9 @@ class Builder(MVMTSPConfig):
             remaining = max(5.0, self.run_time_limit_seconds - elapsed)
             time_limit = min(time_limit, remaining) if time_limit is not None else remaining
 
-        # Watchdog fires 5 s after the solver's own limit so the solver can
-        # always return gracefully with its best feasible solution first.
-        _WATCHDOG_BUFFER = 5
+        # The native solver limit is authoritative. The watchdog only handles a
+        # solver process that fails to return after writing its incumbent.
+        watchdog_buffer = max(int(self.solver_watchdog_grace_seconds), 5)
 
         def _run_solver() -> Dict[str, Any]:
             return solve_cluster_problem(
@@ -429,7 +442,7 @@ class Builder(MVMTSPConfig):
         try:
             if time_limit is not None:
                 solve_metadata = timeout_decorator.timeout(
-                    seconds=float(time_limit + _WATCHDOG_BUFFER),
+                    seconds=float(time_limit + watchdog_buffer),
                     timeout_exception=timeout_decorator.TimeoutError,
                     exception_message=(
                         f"Solver time limit of {float(time_limit):.0f} seconds exceeded for cluster {cluster.id}"
@@ -459,6 +472,9 @@ class Builder(MVMTSPConfig):
                 "feasible_solution_found": False,
                 "time_limit_reached": True,
                 "optimality_proven": False,
+                "accepted_solution": False,
+                "relative_gap_fallback_accepted": False,
+                "fallback_gap_rel": float(self.solver_fallback_gap_rel),
                 "dfj_rounds": 0,
                 "dfj_solve_passes": 0,
                 "dfj_cuts_added": 0,
@@ -711,6 +727,16 @@ class Builder(MVMTSPConfig):
             "solver_time_limit_seconds",
             runtime_config.get("time_limit_seconds", self.solver_time_limit_seconds),
         )
+        self.run_time_limit_seconds = runtime_config.get(
+            "run_time_limit_seconds",
+            self.run_time_limit_seconds,
+        )
+        self.solver_fallback_gap_rel = float(
+            runtime_config.get("solver_fallback_gap_rel", self.solver_fallback_gap_rel)
+        )
+        self.solver_watchdog_grace_seconds = int(
+            runtime_config.get("solver_watchdog_grace_seconds", self.solver_watchdog_grace_seconds)
+        )
         self.random_seed = int(runtime_config.get("random_seed", runtime_config.get("seed", self.random_seed)))
         self.solver_seed = int(runtime_config.get("solver_seed", runtime_config.get("seed", self.solver_seed)))
         self.fairness_tolerance = int(runtime_config.get("fairness_tolerance", self.fairness_tolerance))
@@ -876,6 +902,8 @@ class Builder(MVMTSPConfig):
                 "fairness_tolerance": self.fairness_tolerance,
                 "time_step_sec": self.time_step_sec,
                 "bridge_node_required_visits_override": self.bridge_node_required_visits_override,
+                "solver_fallback_gap_rel": self.solver_fallback_gap_rel,
+                "solver_watchdog_grace_seconds": self.solver_watchdog_grace_seconds,
             },
         )
     
@@ -1395,8 +1423,11 @@ class Builder(MVMTSPConfig):
             logger.exception(f"❌ Error creating problem for cluster {cluster_input.cluster_id}: {exc}")
             raise ValueError(f"Error in creating the problem for Cluster {cluster_input.cluster_id}") from exc
 
-        raw_status = pl.LpStatus.get(cluster_object.problem.status, "Unknown")
         solve_metadata = dict(getattr(cluster_object, "solve_metadata", {}))
+        raw_status = str(
+            solve_metadata.get("raw_status")
+            or pl.LpStatus.get(cluster_object.problem.status, "Unknown")
+        )
         agent_finish_times = {
             int(agent_id): float(getattr(cluster_object.return_step[agent_id], "varValue", 0.0) or 0.0)
             for agent_id in cluster_input.assigned_agents
@@ -1425,6 +1456,9 @@ class Builder(MVMTSPConfig):
                 "feasible_solution_found": solve_metadata.get("feasible_solution_found"),
                 "time_limit_reached": solve_metadata.get("time_limit_reached"),
                 "optimality_proven": solve_metadata.get("optimality_proven"),
+                "accepted_solution": solve_metadata.get("accepted_solution"),
+                "relative_gap_fallback_accepted": solve_metadata.get("relative_gap_fallback_accepted"),
+                "fallback_gap_rel": solve_metadata.get("fallback_gap_rel"),
                 "subtour_mode": request.subtour_mode,
                 "dfj_rounds": solve_metadata.get("dfj_rounds"),
                 "dfj_solve_passes": solve_metadata.get("dfj_solve_passes"),
@@ -1853,6 +1887,16 @@ class Builder(MVMTSPConfig):
         )
         idle_ratio = total_service_time / max(total_mission_time, 1e-6)
         coverage_diagnostics = self.build_average_coverage_diagnostics()
+        fallback_gap_clusters = sum(
+            1
+            for record in self.solve_status_history
+            if bool(record.get("relative_gap_fallback_accepted"))
+        )
+        accepted_incumbent_clusters = sum(
+            1
+            for record in self.solve_status_history
+            if bool(record.get("accepted_solution"))
+        )
 
         # Aggregate coverage probability curve and mean SINR from per-cluster records.
         _cov_prob_arrays = [
@@ -1932,6 +1976,9 @@ class Builder(MVMTSPConfig):
             "num_binary_variables": self.num_binary_variables,
             "num_continuous_variables": self.num_continuous_variables,
             "time_limit_seconds": float(self.solver_time_limit_seconds or 0.0),
+            "fallback_gap_rel": float(self.solver_fallback_gap_rel),
+            "relative_gap_fallback_solve_count": int(fallback_gap_clusters),
+            "accepted_incumbent_solve_count": int(accepted_incumbent_clusters),
             "cluster_solve_order": [int(record.get("cluster_id", -1)) for record in self.cluster_model_build_records],
             "failed_cluster_id": failed_cluster_context.get("cluster_id"),
             "failed_cluster_order_index": failed_cluster_context.get("cluster_solve_order"),

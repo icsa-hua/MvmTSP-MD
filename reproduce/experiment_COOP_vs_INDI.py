@@ -15,6 +15,7 @@ from dummy_app.program_config import (
     EXPERIMENT_DEFAULT_SEEDS,
     EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS,
     EXPERIMENT_RESULTS_DIR,
+    WARM_START_MODE,
 )
 from tqdm import tqdm
 
@@ -27,7 +28,6 @@ OBJECTIVES = ["energy", "coverage"]
 SCENARIOS = ["cooperative", "individual"]
 
 SOLVER_BACKEND = "cplex"
-WARM_START_MODE = "ga"
 STAGE_SOLUTION = 1
 SUBTOUR_MODE = "mtz"
 COVERAGE_TIME_PROFILE = "medium"

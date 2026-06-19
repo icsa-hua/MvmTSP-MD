@@ -76,6 +76,16 @@ class Cluster:
         )
 
         return context 
+
+
+    def has_feasible_incumbent(self) -> bool:
+        metadata = dict(getattr(self, "solve_metadata", {}))
+        return bool(
+            metadata.get("accepted_solution")
+            or metadata.get("feasible_solution_found")
+            or metadata.get("incumbent_value") is not None
+            or self.problem.status == pl.LpStatusOptimal
+        )
     
 
     def prepare_context(self, context:Dict, builder:Any): 
@@ -312,8 +322,8 @@ class Cluster:
 
                 builder.solve_problem(self) 
 
-                if self.problem.status != pl.LpStatusOptimal:
-                    raise Exception("Could not solve for the initial bound in Stage 1.")
+                if not self.has_feasible_incumbent():
+                    raise Exception("Stage 1 ended without a feasible incumbent.")
 
                 feasible_makespan = self.makespan.varValue
                 C_optimal = self.total_cost.value()
@@ -341,8 +351,8 @@ class Cluster:
 
                 builder.solve_problem(self)
 
-                if self.problem.status != pl.LpStatusOptimal:
-                    raise Exception("Could not solve for the initial bound in Stage 2.")
+                if not self.has_feasible_incumbent():
+                    raise Exception("Coverage stage ended without a feasible incumbent.")
 
                 max_possible_data = self.total_data_collected_main.value()
                 feasible_makespan = self.makespan.varValue

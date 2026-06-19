@@ -27,6 +27,9 @@ class _AgentState:
 
 def solve_global_greedy_nn(cluster: Any, builder: Any) -> HeuristicClusterSolution:
     service_nodes = list_service_nodes(cluster)
+    if str(getattr(builder, "scenario", "")).strip().lower() == "individual":
+        return _solve_individual_global_greedy_nn(cluster, builder, service_nodes)
+
     remaining_nodes = set(service_nodes)
     reward_by_task = build_data_reward_map(builder, cluster)
     states = {
@@ -105,6 +108,108 @@ def solve_global_greedy_nn(cluster: Any, builder: Any) -> HeuristicClusterSoluti
         diagnostics={
             "heuristic_strategy": "global_greedy_nn",
             "covered_nodes": covered_nodes,
+            "uncovered_physical_nodes": build_uncovered_physical_nodes(cluster, uncovered_task_nodes),
+        },
+    )
+
+
+def _solve_individual_global_greedy_nn(
+    cluster: Any,
+    builder: Any,
+    service_nodes: List[int],
+) -> HeuristicClusterSolution:
+    reward_by_task = build_data_reward_map(builder, cluster)
+    sorted_nodes = sorted(int(node_id) for node_id in service_nodes)
+    task_sequences: Dict[int, List[int]] = {}
+    agent_paths: Dict[int, List[tuple[int, int, int]]] = {}
+    agent_finish_times: Dict[int, float] = {}
+    uncovered_by_agent: Dict[int, List[int]] = {}
+    total_data_transfer = 0.0
+
+    for agent_offset, agent_id in enumerate(sorted(int(agent_id) for agent_id in cluster.employed_agents)):
+        remaining_nodes = set(sorted_nodes)
+        route_nodes: List[int] = []
+        current_node = int(cluster.depot_id)
+        energy_used = 0.0
+
+        # Different seeds avoid giving every UAV an identical route, which
+        # provides the collision-ordering constraints with a better MIP start.
+        if remaining_nodes:
+            rotated_nodes = sorted_nodes[agent_offset % len(sorted_nodes):] + sorted_nodes[:agent_offset % len(sorted_nodes)]
+            seed_node = next(
+                (
+                    node_id
+                    for node_id in rotated_nodes
+                    if is_candidate_feasible(builder, cluster, current_node, node_id, energy_used)
+                ),
+                None,
+            )
+            if seed_node is not None:
+                route_nodes.append(int(seed_node))
+                energy_used += (
+                    builder.move_energy[resolve_task_node(cluster, current_node)][resolve_task_node(cluster, seed_node)]
+                    + float(builder.average_coverage_energy) * float(builder.coverage_time)
+                )
+                current_node = int(seed_node)
+                remaining_nodes.remove(int(seed_node))
+
+        while remaining_nodes:
+            feasible_candidates = [
+                node_id
+                for node_id in remaining_nodes
+                if is_candidate_feasible(builder, cluster, current_node, node_id, energy_used)
+            ]
+            if not feasible_candidates:
+                break
+            next_node = select_nearest_candidate(builder, cluster, current_node, feasible_candidates)
+            if next_node is None:
+                break
+            route_nodes.append(int(next_node))
+            energy_used += (
+                builder.move_energy[resolve_task_node(cluster, current_node)][resolve_task_node(cluster, next_node)]
+                + float(builder.average_coverage_energy) * float(builder.coverage_time)
+            )
+            current_node = int(next_node)
+            remaining_nodes.remove(int(next_node))
+
+        task_sequences[agent_id] = route_nodes
+        uncovered_by_agent[agent_id] = sorted(int(node_id) for node_id in remaining_nodes)
+        path, finish_time = build_detailed_path(builder, cluster, route_nodes)
+        agent_paths[agent_id] = path
+        agent_finish_times[agent_id] = finish_time
+        total_data_transfer += sum(reward_by_task.get(int(node_id), 0.0) for node_id in route_nodes)
+
+    uncovered_task_nodes = sorted(
+        {
+            int(node_id)
+            for agent_uncovered in uncovered_by_agent.values()
+            for node_id in agent_uncovered
+        }
+    )
+    covered_nodes = sorted(
+        {
+            resolve_task_node(cluster, node_id)
+            for route_nodes in task_sequences.values()
+            for node_id in route_nodes
+        }
+    )
+    all_agents_complete = bool(task_sequences) and all(
+        bool(task_sequences.get(agent_id)) and not uncovered_by_agent.get(agent_id)
+        for agent_id in task_sequences
+    )
+    return HeuristicClusterSolution(
+        raw_status="Feasible" if all_agents_complete else "Infeasible",
+        status_code=1 if all_agents_complete else -1,
+        agent_paths=agent_paths,
+        task_sequences=task_sequences,
+        agent_finish_times=agent_finish_times,
+        total_data_transfer=float(total_data_transfer),
+        makespan=float(max(agent_finish_times.values(), default=0.0)),
+        uncovered_task_nodes=uncovered_task_nodes,
+        diagnostics={
+            "heuristic_strategy": "individual_global_greedy_nn",
+            "covered_nodes": covered_nodes,
+            "uncovered_by_agent": uncovered_by_agent,
             "uncovered_physical_nodes": build_uncovered_physical_nodes(cluster, uncovered_task_nodes),
         },
     )

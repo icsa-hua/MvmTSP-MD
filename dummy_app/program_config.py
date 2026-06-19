@@ -48,13 +48,26 @@ RUN_TIME_LIMIT_SECONDS = 7200  # seconds — total wall-clock cap across all clu
 
 # --- Mechanisms Enabled --- # 
 ENABLE_GA = 'yes'
+WARM_START_MODE = "auto"
 SCENARIO_CONSTRAINT_SET = "default"
 PRIORITY = 'yes' 
-SOLVER_BACKEND = 'cplex'
+SOLVER_BACKEND = 'gurobi'
 SUBTOUR_MODE = 'mtz'
 SUBTOUR_STRATEGY = SUBTOUR_MODE
 OBJECTIVE_STRATEGY = 'legacy_stage'
 WORKFLOW = 'simulate' 
+
+# The solver still targets certified optimality (0% gap).  If the configured
+# ceiling is reached, a feasible incumbent at or below this gap is explicitly
+# identified as the near-optimal fallback rather than being discarded.
+SOLVER_FALLBACK_GAP_REL = 0.02
+SOLVER_WATCHDOG_GRACE_SECONDS = 60
+
+# Feasibility-oriented search settings. These affect search order, not the
+# mathematical formulation or the configured cluster time ceiling.
+GUROBI_MIP_FOCUS = 1
+GUROBI_HEURISTICS = 0.15
+GUROBI_PRESOLVE = 2
 
 # --- RL Parameters --- # 
 ENABLE_LEARNING = 'no'
@@ -76,7 +89,7 @@ EXPERIMENT_DEFAULT_OBJECTIVE = "energy"
 EXPERIMENT_DEFAULT_ENV = ENVIRONMENT_OPTIONS[0]
 EXPERIMENT_DEFAULT_PRIORITY = PRIORITY
 EXPERIMENT_DEFAULT_MEMORY_LIMIT = MAX_MEMORY
-EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS = 450  # seconds — per-cluster ceiling for experiment runs
+EXPERIMENT_DEFAULT_TIME_LIMIT_SECONDS = 3600  # seconds — per-cluster ceiling for experiment runs
 EXPERIMENT_DEFAULT_RUN_TIME_LIMIT_SECONDS = RUN_TIME_LIMIT_SECONDS  # total wall-clock cap per experiment run
 
 EXPERIMENT_COVERAGE_TIME_PROFILES = {

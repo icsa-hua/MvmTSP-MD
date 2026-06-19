@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional
 
 import pulp as pl
 
+from dummy_app.program_config import (
+    GUROBI_HEURISTICS,
+    GUROBI_MIP_FOCUS,
+    GUROBI_PRESOLVE,
+    SOLVER_FALLBACK_GAP_REL,
+)
 from dummy_app.core.statuses import (
     compute_absolute_gap,
     compute_relative_gap,
@@ -842,7 +848,7 @@ def _solve_cluster_problem_once(
                     path=_wrapper_path(),
                     timeLimit=time_limit_seconds,
                     msg=False,
-                    options=["--mipgap", "0.0", "--seed", str(int(solver_seed))],
+                    options=["--mipgap", "0.0", "--fpump", "--seed", str(int(solver_seed))],
                 )
             )
         finally:
@@ -861,7 +867,12 @@ def _solve_cluster_problem_once(
             msg=False,
             gapRel=0.0,
             logPath=log_path,
-            options=[("Seed", int(solver_seed))],
+            options=[
+                ("Seed", int(solver_seed)),
+                ("MIPFocus", int(getattr(builder, "gurobi_mip_focus", GUROBI_MIP_FOCUS))),
+                ("Heuristics", float(getattr(builder, "gurobi_heuristics", GUROBI_HEURISTICS))),
+                ("Presolve", int(getattr(builder, "gurobi_presolve", GUROBI_PRESOLVE))),
+            ],
         )
         try:
             cluster.problem.solve(solver_command)
@@ -881,7 +892,12 @@ def _solve_cluster_problem_once(
             msg=False,
             gapRel=0.0,
             logPath=log_path,
-            options=[f"randomSeed {int(solver_seed)}"],
+            options=[
+                f"randomSeed {int(solver_seed)}",
+                "feasibilityPump on",
+                "heuristics on",
+                "presolve on",
+            ],
         )
         cluster.problem.solve(solver_command)
 
@@ -895,7 +911,11 @@ def _solve_cluster_problem_once(
             msg=False,
             gapRel=0.0,
             logPath=log_path,
-            options=[f"set randomseed {int(solver_seed)}"],
+            options=[
+                f"set randomseed {int(solver_seed)}",
+                "set emphasis mip 1",
+                "set preprocessing presolve y",
+            ],
         )
         cluster.problem.solve(solver_command)
 
@@ -959,6 +979,22 @@ def _solve_cluster_problem_once(
 
     absolute_gap = compute_absolute_gap(incumbent_value, best_bound)
     relative_gap = compute_relative_gap(incumbent_value, best_bound)
+    fallback_gap_rel = max(
+        0.0,
+        float(getattr(builder, "solver_fallback_gap_rel", SOLVER_FALLBACK_GAP_REL)),
+    )
+    relative_gap_fallback_accepted = bool(
+        feasible_solution_found
+        and not bool(progress_summary.get("optimality_proven"))
+        and relative_gap is not None
+        and float(relative_gap) <= fallback_gap_rel + 1e-12
+    )
+    accepted_solution = bool(
+        feasible_solution_found or progress_summary.get("optimality_proven")
+    )
+    termination_reason = infer_termination_reason(effective_raw_status, time_limit_seconds)
+    if relative_gap_fallback_accepted:
+        termination_reason = "relative_gap_fallback_accepted"
 
     return {
         "status_code": int(cluster.problem.status),
@@ -972,7 +1008,7 @@ def _solve_cluster_problem_once(
         "relative_gap_percent": relative_gap_percent,
         "time_limit_seconds": time_limit_seconds,
         "elapsed_time_seconds": float(elapsed_time_seconds),
-        "termination_reason": infer_termination_reason(effective_raw_status, time_limit_seconds),
+        "termination_reason": termination_reason,
         "first_feasible_time_seconds": progress_summary.get("first_feasible_time_seconds"),
         "first_optimality_gap_percent": progress_summary.get("first_optimality_gap_percent"),
         "explored_bnb_nodes": progress_summary.get("explored_bnb_nodes"),
@@ -980,6 +1016,9 @@ def _solve_cluster_problem_once(
         "feasible_solution_found": feasible_solution_found,
         "time_limit_reached": bool(progress_summary.get("time_limit_reached")),
         "optimality_proven": progress_summary.get("optimality_proven", effective_raw_status == "Optimal"),
+        "accepted_solution": accepted_solution,
+        "relative_gap_fallback_accepted": relative_gap_fallback_accepted,
+        "fallback_gap_rel": fallback_gap_rel,
         "progress_events": progress_summary.get("progress_events", []),
         "solver_log_path": progress_summary.get("log_path", log_path),
         "solver_seed": int(solver_seed),
