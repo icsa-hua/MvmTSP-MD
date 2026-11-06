@@ -21,10 +21,13 @@ This repository accompanies the accepted IEEE Transactions on Vehicular Technolo
 
 The reported experiments use a fixed seed (42), realistic simulation inputs, and a unified Python interface. Results are simulation-based; exact values depend on solver availability, hardware, limits, and generated instance parameters.
 
-- On the method-comparison study, the MILP achieved the lowest mean route energy (797.1 Wh) and distance (8.28 km). The heuristic methods were consistently feasible and much faster, at the cost of approximately 5.1–5.3% more energy and 4.1–6.6% more distance.
-- Exact energy optimization is valuable for tractable instances and certification, but it becomes solver-sensitive as instances grow. In the paper, the MILP found a feasible solution in 92.2% of comparison runs and certified 89 of 180 runs as optimal. Communication-coverage optimization scaled more readily.
-- Across the COOP-UC versus INDI-UC experiments, cooperative scheduling reduced energy, distance, and mission time by about 54–56%, while more than doubling nodes served per unit of energy and time. INDI-UC can yield a larger aggregate data rate through redundant full-map traversals; COOP-UC delivers better data-rate efficiency.
-- Warm starts and alternate subtour formulations can improve individual runs, but neither removes the inherent scaling boundary of exact MVMTSP scheduling.
+| Study | Headline result | Interpretation |
+| --- | --- | --- |
+| MILP vs. heuristics | MILP achieved the lowest mean route energy (797.1 Wh) and distance (8.28 km); heuristics used approximately 5.1–5.3% more energy and 4.1–6.6% more distance, but ran substantially faster. | Use MILP for solution certification and tractable instances; use heuristics when runtime is the priority. |
+| Exact-solver scalability | The MILP found feasible solutions in 92.2% of comparison runs and certified 89 of 180 as optimal. Communication-coverage optimization scaled more readily than energy optimization. | Energy-focused exact optimization becomes solver-sensitive as instance size grows. |
+| COOP-UC vs. INDI-UC | COOP-UC reduced energy, distance, and mission time by approximately 54–56%, while more than doubling nodes served per unit of energy and time. | Cooperative planning avoids redundant traversals and achieves better data-rate efficiency; INDI-UC can produce higher aggregate data rate through repeated full-map coverage. |
+
+Warm starts and alternate subtour formulations can improve individual runs, but neither removes the inherent scaling boundary of exact MVMTSP scheduling.
 
 For methodology, metrics, limits, and complete tables, see the supplied paper PDF and the DOI above.
 
