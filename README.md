@@ -1,233 +1,183 @@
-# Energy-Aware MVMTSP Scheduling for UAV Swarms NTN-stations in Challenging Environments 
+# Many-Visits Multi-Agent TSP for Energy- and Communication-Aware UAV Swarm Mission Scheduling in SAR Operations
 
- An optimization framework to always determine the optimal navigation for all 
- agents in critical environments (Search and Rescue, SAR operations). 
+An auditable Python framework for planning Search-and-Rescue (SAR) UAV-swarm missions in which UAVs act as temporary Non-Terrestrial Network (NTN) base stations. It formulates mission scheduling as an energy- and communication-aware **Many-Visits Multi-Agent Traveling Salesperson Problem (MVMTSP)** and combines realistic map, mobility, energy, and coverage simulation with exact and heuristic solvers.
+
+This repository accompanies the accepted IEEE Transactions on Vehicular Technology paper, [*Many-Visits Multi-Agent TSP for Energy- and Communication-Aware UAV Swarm Mission Scheduling in SAR Operations*](https://doi.org/10.1109/TVT.2026.3750670).
 
 ![License](https://img.shields.io/badge/license-GPL-blue.svg)
-![Version](https://img.shields.io/badge/0.2.0-brightgreen.svg)
+![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)
 
-## Table of Contents
+## Highlights
 
-* [Introduction](#introduction)
-* [Technologies - Requirements](#technologies)
-* [SetUp](#setup)
-* [Usage](#usage)
-* [License](#license)
+- Cooperative coverage (**COOP-UC**), where the swarm jointly covers the map, and individual coverage (**INDI-UC**), where every UAV completes a full traversal.
+- MILP scheduling with battery feasibility, repeated visits through Virtual Node Installation (VNI), service-time synchronization, workload balancing, recharging, and collision-aware coordination.
+- Energy, coverage/data-rate, time, and staged objective strategies.
+- MILP backends for GLPK, CBC, Gurobi, and CPLEX; MTZ, iterative DFJ, and flow-based subtour elimination.
+- Heuristic and metaheuristic baselines: global Greedy Nearest Neighbor, static-partition Greedy NN, Genetic Algorithm, and ALNS; these can also provide MILP warm starts.
+- Reproducible experiment drivers for solver, initializer, subtour, objective, scalability, stress, VNI-growth, and COOP-versus-INDI studies.
+- Persisted JSON/CSV artifacts and optional trajectory playback/animation.
 
-## Introduction
+## Results from the paper
 
-This repository is a Two-Phase solution that simulates and optimizes the deployement 
-of UAV swarms to service areas with ground users that require communication coverage. 
-Simulation includes, map and user generation with world-like movements and locations, 
-whereas the optimization consists of a combinatorial optimization problem formulation
-known as **Many Visits Multi-Agent Travelling Salesman Problem (MVMTSP)**, that 
-respects energy, time synchronization and objective constraints to determine a 
-coordinated plan for all agents. 
+The reported experiments use a fixed seed (42), realistic simulation inputs, and a unified Python interface. Results are simulation-based; exact values depend on solver availability, hardware, limits, and generated instance parameters.
 
-The main contributions of this repository can be summed up as: 
-* Two distinct use cases: Collaborative Plan vs Individual Plan
-* MILP MVMTSP formulation with custom constraints 
-* Single-Stage vs Two-Stage Objective solution 
-* Two core objective functions 
-* Custom offline energy consumption estimation model 
-* Regionalization based on energy limitations
-* Virtual nodes generation and installation 
-* Custom heuristic to initialize paths and estimate the time frame for each cluster
-* Custom coverage estimation model that considers different environment types 
-* Map generation based on real geographical latitude and longitude 
-* Ground user generation with realistic pedestrian mobility
+- On the method-comparison study, the MILP achieved the lowest mean route energy (797.1 Wh) and distance (8.28 km). The heuristic methods were consistently feasible and much faster, at the cost of approximately 5.1–5.3% more energy and 4.1–6.6% more distance.
+- Exact energy optimization is valuable for tractable instances and certification, but it becomes solver-sensitive as instances grow. In the paper, the MILP found a feasible solution in 92.2% of comparison runs and certified 89 of 180 runs as optimal. Communication-coverage optimization scaled more readily.
+- Across the COOP-UC versus INDI-UC experiments, cooperative scheduling reduced energy, distance, and mission time by about 54–56%, while more than doubling nodes served per unit of energy and time. INDI-UC can yield a larger aggregate data rate through redundant full-map traversals; COOP-UC delivers better data-rate efficiency.
+- Warm starts and alternate subtour formulations can improve individual runs, but neither removes the inherent scaling boundary of exact MVMTSP scheduling.
 
-## Technologies - Requirements
-The main technologies used for this project are:
+For methodology, metrics, limits, and complete tables, see the supplied paper PDF and the DOI above.
 
-* Python version: >= 3.9 
-* PuLP version >= 2.8
-* GLPK-utils version >= 5.0-1
-* DEAP version >= 1.4.1
-* K-means constrained >= 0.7.5
-* Geopy >= 2.4.1 
-* Pyproj >= 3.7.1
-* Simpy >= 4.1.1 
+## Requirements
 
-> [!NOTE]
-> This framework has been tested on both Mac OS 
-> and Windows OS through WSL2.  
+- Python 3.9 or newer
+- GNU GLPK (`glpsol`) for the default open-source MILP workflow
+- Python dependencies in [`requirements.txt`](requirements.txt)
 
-> [!IMPORTANT]
-> You will need to install GNU GLPK on the system, and the python package 
-> which enables it. Then PuLP will be available to call it 
+GLPK installation:
 
+```sh
+# Debian/Ubuntu
+sudo apt-get install glpk-utils
 
-## SetUp
+# macOS (Homebrew)
+brew install glpk
+```
 
-1. Clone the repository from the default main branch:
+Gurobi and CPLEX are optional commercial backends. Install and license them separately before selecting either backend. CBC is available when supported by the local PuLP installation.
+
+## Setup
 
 ```sh
 git clone https://github.com/icsa-hua/MvmTSP-MD.git
-```
-
-2. Navigate to the project directory:
-
-```sh
 cd MvmTSP-MD
+python3 -m pip install -e .
 ```
 
-3. Install the repository as a package through the ```setup.py``` file:
+The default runtime settings are in [`dummy_app/program_config.py`](dummy_app/program_config.py). They include a Gurobi default; for an open-source installation, pass `--solver_backend glpk` (or update that setting) when running a scenario.
+
+## Run a scenario
+
+Run the default simulation with GLPK:
 
 ```sh
-pip install -e .
+python3 execution_script.py --solver_backend glpk
 ```
-This installs the MvmTSP-MD as a package with all the dependencies required.  
 
-> Make sure you have the GLPK library installed:
+For a small cooperative, energy-focused example:
 
-* For Windows system follow the guide: https://winglpk.sourceforge.net/. Or Use WSL2.
-* For Linux system use: `sudo apt-get install glpk-utils`
-* For Mac os you can use Homebrew to install it with: ```brew install glpk```
-
-## Usage
-
-The framework can be executed through either the _bash scripts_ or through the 
-execution_script.py. In both cases you can alter the configuration of the simulation 
-and the combinatorial parameters as arguments. We give you the option to experiment 
-with different agent, user, nodes population, environment type, objective function 
-and stage solution. You can also change the coordinates to include your own. 
-
->[!NOTE]
-> To change the coordinates you need to have the in WGS84 or EPSG 32633. 
-> These can be easily obtained with google maps as an example. 
-> We handle the transformation to the UTM coordinate system to handle realistic 
-> movements. If you wanna learn more, take a look into the --designs/voronoi_map.py--
-
-To execute the simulations in an efficient manner we include two bash scripts 
-to represent the two main use cases which you should alter to see how the model 
-behaves with different configuration parameters.
-Use: 
 ```sh
-./experiments.sh
+python3 execution_script.py \
+  --scenario cooperative \
+  --objective energy \
+  --num_areas 21 \
+  --num_agents 3 \
+  --num_users 15 \
+  --env urban \
+  --solver_backend glpk \
+  --subtour_mode mtz \
+  --warm_start_mode auto \
+  --seed 42
 ```
-or: 
+
+| Option | Values |
+| --- | --- |
+| `--scenario` | `cooperative`, `individual` |
+| `--objective` | `energy`, `coverage`, `sum_of_times`, `pareto` |
+| `--solver_backend` | `glpk`, `cbc`, `gurobi`, `cplex` |
+| `--subtour_mode` | `mtz`, `dfj_iter`, `flow` |
+| `--warm_start_mode` | `auto`, `none`, `ga`, `alns`, `greedy_nn`, `greedy_partition_nn` |
+| `--mode` | `solve`, `animate`, `solve_and_animate` |
+
+Use `python3 execution_script.py --help` for all options, including solver/run time limits, animation options, validation, and dataset/RL workflows. Instance generation is stochastic unless a seed is supplied.
+
+### Artifacts and animation
+
+Each solve persists a replayable run under `assets/runs/<run-id>/`:
+
+- `instance.json`, `run_request.json`, and `run_result.json`
+- `paths.csv` with per-agent path steps
+- `cluster_metrics.csv` with status, objective, bound, gap, and timing data
+
+Use `--mode solve_and_animate --save_animation` to solve and save an MP4, or replay a persisted artifact:
+
 ```sh
-./experiments_indi.sh
-```
-Finally use: ```python3 execution_script.py --args ... --args``` to execute a single 
-scenario. 
-
-### Code Structure 
-The core is located inside dummy_app directory. 
-There are three main sub-directories: **designs**, **models**, **tools**
->1. *designs* -> core classes to represent agents, users, map generation and the problem 
->   builder interface. Also has the _constraints.py_ which holds all of the constraints that
->   create the combinatorial problem. 
-
->2. *models* -> This holds the _simulation_builder.py_ which combines regionalization, cluster 
->   management, agent allocation and proglem solution with post-processing (interpolation, 
->   synchronization and node transformation into coordinates). This sub-directory also 
->   includes the energy and coverage models, and the TOPSIS and GA formulations. 
-
->3. *tools* -> This sub-directory creates the logger and the common functions that are 
->   used inside multiple files. We also include a class generation to instantiate 
->   performance metrics, to interface it with the problem builder. 
-
-
-### Assets 
-Inside the _assets_ directory once the problem is executed, you will see a couple of sub-directories.
-These include results, logs and scalers. We also save the distance, energy and time cost that are 
-produced after the voronoi map generation. 
-
-A) ```/animations``` has the .mp4 files showing the simulation with the paths for the **first** problem 
-solution 
-B) ```/data``` has the cost after map generation 
-C) ```/logs``` has the log after an execution 
-D) ```/results``` .csv and .png results captured during simulation 
-E) ```/scalers``` the scalers used to normalize the data. You can use them to inverse transform the data 
-and use them how you want. 
-
-
-
-# Docker Execution Guide
-
-This section explains how to run the **MvmTSP-MD** project using Docker and retrieve the generated CSV output from the dummy application.
-
----
-
-## Prerequisites
-
-Make sure you have installed:
-
-* Docker Desktop (and it is running)
-* Git
-
-You can verify Docker is installed with:
-
-```bash
-docker --version
+python3 execution_script.py \
+  --mode animate \
+  --artifact_dir assets/runs/<run-id> \
+  --save_animation
 ```
 
----
+## Reproduce paper experiments
 
-## Installation & Execution Steps
+The scripts in [`reproduce/`](reproduce) write CSV outputs to `results/` by default. They use the experiment grids and limits in `dummy_app/program_config.py`; some studies can take hours and commercial-solvers scripts require the applicable local installation.
 
-### 1. Start Docker
+```sh
+# Main comparison: MILP, GA, Greedy NN, static-partition Greedy NN, and ALNS
+python3 reproduce/experiment_A_main_comparison.py
 
-Open **Docker Desktop** and ensure it is running before continuing.
+# MILP backend comparison
+python3 reproduce/experiment_B_solver_comparison.py
 
----
+# Warm starts, objective staging, sensitivity, scalability, stress, and VNI growth
+python3 reproduce/experiment_C_warm_start.py
+python3 reproduce/experiment_D_objective_staging.py
+python3 reproduce/experiment_E_sensitivity.py
+python3 reproduce/experiment_F_scalability.py
+python3 reproduce/experiment_G_extreme_constraint_stress.py
+python3 reproduce/experiment_H_vni_growth.py
 
-### 2. Clone the Repository
+# Objective and cooperative-versus-individual comparisons
+python3 reproduce/experiment_I_objective_comparison.py
+python3 reproduce/experiment_COOP_vs_INDI.py
 
-```bash
-git clone https://github.com/icsa-hua/MvmTSP-MD.git
+# Subtour study and path visualizations
+python3 reproduce/experiment_Subtour.py
+python3 reproduce/experiment_J_path_objectives.py
+
+# Create plots from available result CSVs
+python3 -m dummy_app.experiments.plot_results
 ```
 
-Move into the project directory:
+Each experiment accepts `--help`; most accept `--output` and `--append`. The scalability driver additionally exposes hard memory and wall-clock caps.
 
-```bash
-cd MvmTSP-MD
+## Project layout
+
+```text
+dummy_app/
+  designs/         Scenario, UAV, mobility, map, and configuration models
+  models/          Simulation pipeline, energy/coverage models, MILP, heuristics, and RL
+  pipeline/        Typed instance/run contracts and persistent artifacts
+  experiments/     Metrics and result plotting
+  visualization/   Playback and Gantt/trajectory visualizations
+  tools/           Logging, solver reporting, and utility scripts
+reproduce/         Paper experiment drivers and batch scripts
+assets/            Generated run artifacts, logs, animations, and data (created at runtime)
+results/           Experiment CSVs and figures (created at runtime)
 ```
 
----
+## Docker
 
-### 3. Pull the Required Docker Image
+Docker provides a Linux environment with GLPK. From the repository root:
 
-```bash
-docker pull dgeorgiadishua/glpk-python3:mvmtsp
+```sh
+docker compose run --rm mvmtsp-app python3 execution_script.py --solver_backend glpk
 ```
 
----
+The first run creates a named virtual environment and installs the package. Generated artifacts remain available on the host through the bind-mounted repository, primarily in `assets/runs/` (and in `results/` for experiment scripts).
 
-### 4. Run the Application
+## Citation
 
-From inside the repository folder, execute:
-
-```bash
-docker compose run --rm mvmtsp-app
+```bibtex
+@article{georgiadis2026mvmtsp,
+  title={Many-Visits Multi-Agent TSP for Energy- and Communication-Aware UAV Swarm Mission Scheduling in SAR Operations},
+  author={Georgiadis, Dimitrios and Vamvakari, Malvina and Politi, Elena and Dimitrakopoulos, George},
+  journal={IEEE Transactions on Vehicular Technology},
+  year={2026},
+  doi={10.1109/TVT.2026.3750670}
+}
 ```
 
-The container will execute the optimization process.
+## License
 
-The `--rm` flag ensures the container is automatically removed after execution.
-
----
-
-## Output File
-
-After the execution completes, the generated CSV file is located at:
-
-```
-dummy_app/drone_centroids_path.csv
-```
-
-This is the final output file produced by the application.
-
----
-
-## Expected CSV Structure
-
-The CSV follows this format:
-
-```
-agent,from_x,from_y,to_x,to_y,time_step
-```
-
-Each row corresponds to a movement step for a specific drone agent.
+This project is distributed under the GPL license. See the repository license information for details.
