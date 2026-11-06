@@ -45,7 +45,6 @@ PIPELINE_TIME_LIMIT_CHANGES.md
 Scenario_conf.md 
 compare_solver_baselines.sh 
 diagrams/ 
-execution_script.py 
 exported_problems 
 reproduce/exported_problems 
 results  
