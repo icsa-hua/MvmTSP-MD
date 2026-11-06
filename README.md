@@ -201,6 +201,8 @@ This project is distributed under the GPL license. See the repository license in
 
 ## Citation
 To use this work please consider using the following citation: 
+
+
 @ARTICLE{11775034,
   author={Georgiadis, Dimitrios and Vamvakari, Malvina and Politi, Elena and Dimitrakopoulos, George},
   journal={IEEE Transactions on Vehicular Technology}, 
