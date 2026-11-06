@@ -200,5 +200,15 @@ The first run creates a named virtual environment and installs the package. Gene
 This project is distributed under the GPL license. See the repository license information for details.
 
 ## Citation
+To use this work please consider using the following citation: 
+@ARTICLE{11775034,
+  author={Georgiadis, Dimitrios and Vamvakari, Malvina and Politi, Elena and Dimitrakopoulos, George},
+  journal={IEEE Transactions on Vehicular Technology}, 
+  title={Many-Visits Multi-Agent TSP for Energy- and Communication-Aware UAV Swarm Mission Scheduling in SAR Operations}, 
+  year={2026},
+  volume={},
+  number={},
+  pages={1-15},
+  keywords={Energy;Optimization;Timing;Autonomous aerial vehicles;Modeling;Distance measurement;Traveling salesman problems;Runtime;Costing;Scheduling;MVMTSP;optimization;swarms;coordinated plan},
+  doi={10.1109/TVT.2026.3750670}}
 
-Citation details will be added here.
