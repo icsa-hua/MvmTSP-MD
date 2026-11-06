@@ -1736,7 +1736,7 @@ class Builder(MVMTSPConfig):
                 continue 
 
             if agent_id not in master_paths or not master_paths[agent_id]: 
-                master_paths[agent_id] = new_path 
+                master_paths[agent_id] = list(new_path)
 
             else: 
                 last_global_time = master_paths[agent_id][-1][-1] 

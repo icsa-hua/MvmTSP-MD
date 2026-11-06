@@ -53,39 +53,152 @@ def _normalize_cluster_results(cluster_results: Sequence[Any]) -> List[Dict[str,
     return normalized
 
 
-def _build_cluster_depot_lookup(cluster_results: Sequence[Any]) -> Dict[int, int]:
-    depot_by_cluster: Dict[int, int] = {}
-    for cluster_result in _normalize_cluster_results(cluster_results):
-        cluster_id = int(cluster_result.get("cluster_id", -1))
-        agent_paths = _normalize_mapping(cluster_result.get("agent_paths"))
-        for path in agent_paths.values():
-            if not path:
-                continue
-            first_step = list(path)[0]
-            depot_by_cluster[cluster_id] = int(first_step[0])
+def _as_int_time(value: Any, default: int = 0) -> int:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _step_time(step: Sequence[Any]) -> int:
+    return int(step[-1])
+
+
+def _step_source_target(step: Sequence[Any]) -> tuple[int, int]:
+    return int(step[0]), int(step[1])
+
+
+def _metric_local_end_exclusive(metrics: Mapping[str, Any]) -> int:
+    start_step = _as_int_time(metrics.get("scheduled_start_time", 0.0))
+    finish_step = _as_int_time(metrics.get("scheduled_finish_time", 0.0))
+    next_available_step = _as_int_time(metrics.get("next_available_time", 0.0))
+    recharge_steps = max(_as_int_time(metrics.get("recharge_steps", 0.0)), 0)
+
+    if next_available_step >= start_step:
+        return max(next_available_step - start_step, 0)
+    if finish_step >= start_step:
+        return max(finish_step - start_step + recharge_steps, 0)
+    if next_available_step > 0:
+        return max(next_available_step, 0)
+    return max(finish_step + recharge_steps, 0)
+
+
+def _cluster_local_duration(
+    agent_metrics: Mapping[str, Mapping[str, Any]],
+    agent_paths: Mapping[str, Sequence[Sequence[Any]]],
+) -> int:
+    metric_durations = [
+        _metric_local_end_exclusive(metrics)
+        for metrics in agent_metrics.values()
+        if metrics
+    ]
+    if metric_durations:
+        return max(metric_durations)
+    return max(
+        (
+            _step_time(step) + 1
+            for path in agent_paths.values()
+            for step in path
+        ),
+        default=0,
+    )
+
+
+def _trim_path_to_local_duration(
+    path: Sequence[Sequence[Any]],
+    local_duration: int,
+) -> List[tuple[Any, ...]]:
+    normalized_path = [tuple(step) for step in path]
+    if local_duration <= 0:
+        return normalized_path
+    return [step for step in normalized_path if _step_time(step) < int(local_duration)]
+
+
+def _infer_final_depot_wait(
+    local_path: Sequence[Sequence[Any]],
+) -> tuple[int | None, int | None]:
+    last_wait_index: int | None = None
+    depot_node: int | None = None
+    for index in range(len(local_path) - 1, -1, -1):
+        source_node, target_node = _step_source_target(local_path[index])
+        if source_node == target_node:
+            last_wait_index = index
+            depot_node = source_node
             break
-    return depot_by_cluster
+
+    if last_wait_index is None or depot_node is None:
+        if local_path:
+            return int(local_path[-1][1]), None
+        return None, None
+
+    wait_start_index = last_wait_index
+    while wait_start_index > 0:
+        previous_source, previous_target = _step_source_target(local_path[wait_start_index - 1])
+        current_time = _step_time(local_path[wait_start_index])
+        previous_time = _step_time(local_path[wait_start_index - 1])
+        if (
+            previous_source == previous_target == depot_node
+            and previous_time + 1 == current_time
+        ):
+            wait_start_index -= 1
+            continue
+        break
+
+    return int(depot_node), _step_time(local_path[wait_start_index])
 
 
-def build_cluster_windows(cluster_results: Sequence[Any]) -> List[Dict[str, int]]:
+def build_cluster_windows(
+    cluster_results: Sequence[Any],
+    plan_with_nodes: Mapping[Any, Sequence[Sequence[Any]]] | None = None,
+) -> List[Dict[str, int]]:
+    if plan_with_nodes is not None:
+        assignments = build_agent_assignments(plan_with_nodes, cluster_results)
+        windows_by_cluster: Dict[int, Dict[str, int]] = {}
+        for agent_windows in assignments.values():
+            for agent_window in agent_windows:
+                cluster_id = int(agent_window["cluster_id"])
+                start_step = int(agent_window["start_step"])
+                end_step = int(agent_window["segment_end_step"])
+                if cluster_id not in windows_by_cluster:
+                    windows_by_cluster[cluster_id] = {
+                        "cluster_id": cluster_id,
+                        "start_step": start_step,
+                        "end_step": end_step,
+                    }
+                else:
+                    windows_by_cluster[cluster_id]["start_step"] = min(
+                        windows_by_cluster[cluster_id]["start_step"],
+                        start_step,
+                    )
+                    windows_by_cluster[cluster_id]["end_step"] = max(
+                        windows_by_cluster[cluster_id]["end_step"],
+                        end_step,
+                    )
+        return sorted(windows_by_cluster.values(), key=lambda window: (window["start_step"], window["cluster_id"]))
+
     windows: List[Dict[str, int]] = []
     for cluster_result in _normalize_cluster_results(cluster_results):
         agent_metrics = {
             str(agent_id): dict(metrics)
             for agent_id, metrics in _normalize_mapping(cluster_result.get("agent_metrics")).items()
         }
+        agent_paths = _normalize_mapping(cluster_result.get("agent_paths"))
         if not agent_metrics:
             continue
-        absolute_starts = [
-            int(round(float(metrics.get("scheduled_start_time", 0.0) or 0.0)))
-            for metrics in agent_metrics.values()
-        ]
-        absolute_ends = [
-            int(round(float(metrics.get("scheduled_start_time", 0.0) or 0.0)))
-            + int(round(float(metrics.get("next_available_time", 0.0) or 0.0)))
-            - 1
-            for metrics in agent_metrics.values()
-        ]
+        absolute_starts = [_as_int_time(metrics.get("scheduled_start_time", 0.0)) for metrics in agent_metrics.values()]
+        absolute_ends = []
+        local_duration = _cluster_local_duration(agent_metrics, agent_paths)
+        for metrics in agent_metrics.values():
+            start_step = _as_int_time(metrics.get("scheduled_start_time", 0.0))
+            next_available_step = _as_int_time(metrics.get("next_available_time", 0.0))
+            finish_step = _as_int_time(metrics.get("scheduled_finish_time", 0.0))
+            recharge_steps = max(_as_int_time(metrics.get("recharge_steps", 0.0)), 0)
+            if next_available_step >= start_step:
+                absolute_ends.append(max(next_available_step - 1, start_step))
+            elif finish_step >= start_step:
+                absolute_ends.append(max(finish_step + recharge_steps - 1, start_step))
+            else:
+                absolute_ends.append(start_step + max(local_duration - 1, 0))
         if not absolute_starts or not absolute_ends:
             continue
         windows.append(
@@ -102,12 +215,12 @@ def build_agent_assignments(
     plan_with_nodes: Mapping[Any, Sequence[Sequence[Any]]],
     cluster_results: Sequence[Any],
 ) -> Dict[str, List[Dict[str, int]]]:
-    path_end_by_agent = {
-        str(agent_id): int(max((int(step[2]) for step in raw_path), default=-1))
+    global_paths_by_agent = {
+        str(agent_id): [tuple(step) for step in raw_path]
         for agent_id, raw_path in plan_with_nodes.items()
     }
-    depot_by_cluster = _build_cluster_depot_lookup(cluster_results)
     assignments: Dict[str, List[Dict[str, int]]] = {}
+    global_index_by_agent: Dict[str, int] = {agent_id: 0 for agent_id in global_paths_by_agent}
 
     for cluster_result in _normalize_cluster_results(cluster_results):
         cluster_id = int(cluster_result.get("cluster_id", -1))
@@ -115,28 +228,67 @@ def build_agent_assignments(
             str(agent_id): dict(metrics)
             for agent_id, metrics in _normalize_mapping(cluster_result.get("agent_metrics")).items()
         }
-        for agent_id, metrics in agent_metrics.items():
-            scheduled_start_step = int(round(float(metrics.get("scheduled_start_time", 0.0) or 0.0)))
-            scheduled_finish_step = int(round(float(metrics.get("scheduled_finish_time", 0.0) or 0.0)))
+        raw_agent_paths = {
+            str(agent_id): [tuple(step) for step in path]
+            for agent_id, path in _normalize_mapping(cluster_result.get("agent_paths")).items()
+            if path
+        }
+        local_duration = _cluster_local_duration(agent_metrics, raw_agent_paths)
+        agent_paths = {
+            agent_id: _trim_path_to_local_duration(path, local_duration)
+            for agent_id, path in raw_agent_paths.items()
+        }
+        for agent_id in sorted(set(agent_metrics) | set(agent_paths), key=int):
+            metrics = agent_metrics.get(agent_id, {})
+            local_path = agent_paths.get(agent_id, [])
+            depot_node, depot_wait_start_local = _infer_final_depot_wait(local_path)
+            global_path = global_paths_by_agent.get(agent_id, [])
+            global_index = int(global_index_by_agent.get(agent_id, 0))
+
+            if local_path and global_index < len(global_path):
+                path_length = len(local_path)
+                global_slice = global_path[global_index : global_index + path_length]
+                if global_slice:
+                    start_step = _step_time(global_slice[0])
+                    segment_end_step = _step_time(global_slice[-1])
+                    local_start_step = _step_time(local_path[0])
+                    global_offset = start_step - local_start_step
+                else:
+                    start_step = _as_int_time(metrics.get("scheduled_start_time", 0.0))
+                    segment_end_step = start_step
+                    global_offset = start_step
+                global_index_by_agent[agent_id] = global_index + path_length
+            else:
+                start_step = _as_int_time(metrics.get("scheduled_start_time", 0.0))
+                next_available_step = _as_int_time(metrics.get("next_available_time", 0.0))
+                recharge_steps = max(_as_int_time(metrics.get("recharge_steps", 0.0)), 0)
+                finish_step = _as_int_time(metrics.get("scheduled_finish_time", 0.0))
+                if next_available_step >= start_step:
+                    segment_end_step = max(next_available_step - 1, start_step)
+                else:
+                    segment_end_step = start_step + max(finish_step + recharge_steps - 1, 0)
+                global_offset = start_step
+
+            recharge_steps = max(_as_int_time(metrics.get("recharge_steps", 0.0)), 0)
+            own_local_duration = _metric_local_end_exclusive(metrics) if metrics else local_duration
+            if depot_wait_start_local is not None:
+                recharge_start_local = int(depot_wait_start_local)
+            else:
+                recharge_start_local = max(own_local_duration - recharge_steps, 0)
+            recharge_start_step = int(recharge_start_local + global_offset)
+
+            recharge_end_step = recharge_start_step + recharge_steps - 1
             assignments.setdefault(agent_id, []).append(
                 {
                     "cluster_id": cluster_id,
-                    "depot_node": int(depot_by_cluster.get(cluster_id, -1)),
-                    "start_step": scheduled_start_step,
-                    "active_end_step": scheduled_start_step + max(scheduled_finish_step - 1, 0),
-                    "recharge_start_step": scheduled_start_step + scheduled_finish_step,
-                    "segment_end_step": -1,
+                    "depot_node": int(depot_node) if depot_node is not None else -1,
+                    "start_step": int(start_step),
+                    "active_end_step": int(min(recharge_start_step - 1, segment_end_step)),
+                    "recharge_start_step": int(recharge_start_step),
+                    "recharge_end_step": int(min(recharge_end_step, segment_end_step)),
+                    "segment_end_step": int(segment_end_step),
                 }
             )
-
-    for agent_id, windows in assignments.items():
-        windows.sort(key=lambda window: (window["start_step"], window["cluster_id"]))
-        path_end_step = int(path_end_by_agent.get(agent_id, -1))
-        for index, window in enumerate(windows):
-            if index + 1 < len(windows):
-                window["segment_end_step"] = int(windows[index + 1]["start_step"] - 1)
-            else:
-                window["segment_end_step"] = path_end_step
 
     return assignments
 
@@ -170,7 +322,6 @@ def build_gantt_segments(
     max_service_steps: int = 3,
 ) -> List[GanttSegment]:
     assignments = build_agent_assignments(plan_with_nodes, cluster_results)
-    cluster_windows = build_cluster_windows(cluster_results)
     segments: List[GanttSegment] = []
 
     for raw_agent_id, raw_path in sorted(plan_with_nodes.items(), key=lambda item: int(item[0])):
@@ -180,10 +331,6 @@ def build_gantt_segments(
             continue
 
         current_segment: GanttSegment | None = None
-        recharge_active = False
-        recharge_depot_node: int | None = None
-        previous_step: tuple[int, int, int] | None = None
-
         for source_node, target_node, time_step in path:
             assignment = _lookup_assignment(agent_id, int(time_step), assignments)
             cluster_id = _lookup_cluster_id(agent_id, int(time_step), assignments)
@@ -194,29 +341,12 @@ def build_gantt_segments(
             if int(source_node) != int(target_node):
                 segment_type = "move"
                 label = f"Move N{int(source_node)}->N{int(target_node)}"
-                recharge_active = False
-                recharge_depot_node = None
             else:
                 stationary_node = int(source_node)
-                returned_to_depot = (
-                    previous_step is not None
-                    and int(previous_step[0]) != int(previous_step[1])
-                    and int(previous_step[1]) == stationary_node
-                )
-                departed_from_depot = (
-                    previous_step is not None
-                    and int(previous_step[0]) == stationary_node
-                    and int(previous_step[1]) != stationary_node
-                )
-                if departed_from_depot:
-                    recharge_active = False
-                    recharge_depot_node = None
-
                 if depot_node is not None and stationary_node == depot_node:
-                    if returned_to_depot:
-                        recharge_active = True
-                        recharge_depot_node = stationary_node
-                    if recharge_active and recharge_depot_node == stationary_node:
+                    recharge_start_step = int(assignment.get("recharge_start_step", 1 << 60)) if assignment else 1 << 60
+                    recharge_end_step = int(assignment.get("recharge_end_step", -1)) if assignment else -1
+                    if recharge_start_step <= int(time_step) <= recharge_end_step:
                         segment_type = "recharge"
                         label = f"Recharge @ N{stationary_node}"
                     else:
@@ -225,8 +355,6 @@ def build_gantt_segments(
                 else:
                     segment_type = "service"
                     label = f"Service @ N{stationary_node}"
-                    recharge_active = False
-                    recharge_depot_node = None
 
             service_chunk_exhausted = (
                 current_segment is not None
@@ -250,12 +378,10 @@ def build_gantt_segments(
                 and not service_chunk_exhausted
             ):
                 current_segment.end_step = int(time_step)
-                previous_step = (int(source_node), int(target_node), int(time_step))
                 continue
 
             if merge_recharge_across_cluster_boundary:
                 current_segment.end_step = int(time_step)
-                previous_step = (int(source_node), int(target_node), int(time_step))
                 continue
 
             if current_segment is not None:
@@ -268,7 +394,6 @@ def build_gantt_segments(
                 start_step=int(time_step),
                 end_step=int(time_step),
             )
-            previous_step = (int(source_node), int(target_node), int(time_step))
 
         if current_segment is not None:
             segments.append(current_segment)

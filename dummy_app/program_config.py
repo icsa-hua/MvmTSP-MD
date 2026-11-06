@@ -14,7 +14,7 @@ TRIALS = 1
 
 NUMBER_OF_AGENTS = 3 # Number of UAVs 
 NUMBER_OF_AREAS = 21 # Areas used for Voronoi map genertion
-NUMBER_OF_USERS = 1 # Users to cover per Area
+NUMBER_OF_USERS = 15 # Users to cover per Area
 
 LATITUDE_COORDS = 37.961322948559
 LONGITUDE_COORDS = 23.708232317542667
@@ -85,7 +85,7 @@ ACTION_IDS = "all"
 EXPERIMENT_RESULTS_DIR = f"{PROJECT_DIR}/results"
 EXPERIMENT_DEFAULT_SEEDS = [SEED_COUNT]
 EXPERIMENT_DEFAULT_SCENARIO = "cooperative"
-EXPERIMENT_DEFAULT_OBJECTIVE = "energy"
+EXPERIMENT_DEFAULT_OBJECTIVE = "coverage"
 EXPERIMENT_DEFAULT_ENV = ENVIRONMENT_OPTIONS[0]
 EXPERIMENT_DEFAULT_PRIORITY = PRIORITY
 EXPERIMENT_DEFAULT_MEMORY_LIMIT = MAX_MEMORY
@@ -107,15 +107,16 @@ EXPERIMENT_OBJECTIVE_WEIGHT_PROFILES = {
 
 EXPERIMENT_A_GRID = {
     "areas": [25, 50, 100, 150, 200],
-    "users_per_area": [1, 5, 10],
-    "uavs": [3, 4, 6, 8],
+    "users_per_area": [10, 20],
+    "uavs": [3, 6, 9, 12],
     "coverage_time_profile": ["low", "medium", "high"],
 }
 
 EXPERIMENT_B_GRID = {
-    "areas": [25, 50, 100, 200],
-    "uavs": [3, 4, 6, 8],
+    "areas": [50, 100, 200, 500, 1000],
+    "uavs": [3, 4, 6, 8, 12],
 }
+
 EXPERIMENT_B_SOLVERS = ["glpk", "cbc", "gurobi", "cplex"]
 
 EXPERIMENT_C_GRID = {
