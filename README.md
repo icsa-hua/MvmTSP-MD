@@ -46,6 +46,35 @@ brew install glpk
 
 Gurobi and CPLEX are optional commercial backends. Install and license them separately before selecting either backend. CBC is available when supported by the local PuLP installation.
 
+## Quick Start
+
+Install GLPK and the package, then run the default cooperative scenario with the open-source solver:
+
+```sh
+git clone https://github.com/icsa-hua/MvmTSP-MD.git
+cd MvmTSP-MD
+
+# macOS
+brew install glpk
+
+# Debian/Ubuntu: sudo apt-get install glpk-utils
+python3 -m pip install -e .
+python3 execution_script.py --solver_backend glpk
+```
+
+The completed run is saved under `assets/runs/<run-id>/`.
+
+## Common workflows
+
+| Goal | Command | Output |
+| --- | --- | --- |
+| Run a cooperative energy-minimization mission | `python3 execution_script.py --solver_backend glpk` | Run artifacts in `assets/runs/` |
+| Run individual full coverage | `python3 execution_script.py --scenario individual --solver_backend glpk` | Run artifacts in `assets/runs/` |
+| Prioritize communication coverage | `python3 execution_script.py --objective coverage --solver_backend glpk` | Run artifacts in `assets/runs/` |
+| Compare methods from the paper | `python3 reproduce/experiment_A_main_comparison.py` | `results/experiment_A_main_comparison.csv` |
+| Reproduce COOP-UC vs INDI-UC | `python3 reproduce/experiment_COOP_vs_INDI.py` | `results/experiment_COOP_vs_INDI*.csv` |
+| Replay a saved mission | `python3 execution_script.py --mode animate --artifact_dir assets/runs/<run-id>` | Interactive playback; add `--save_animation` for MP4 |
+
 ## Setup
 
 ```sh
@@ -166,18 +195,10 @@ docker compose run --rm mvmtsp-app python3 execution_script.py --solver_backend 
 
 The first run creates a named virtual environment and installs the package. Generated artifacts remain available on the host through the bind-mounted repository, primarily in `assets/runs/` (and in `results/` for experiment scripts).
 
-## Citation
-
-```bibtex
-@article{georgiadis2026mvmtsp,
-  title={Many-Visits Multi-Agent TSP for Energy- and Communication-Aware UAV Swarm Mission Scheduling in SAR Operations},
-  author={Georgiadis, Dimitrios and Vamvakari, Malvina and Politi, Elena and Dimitrakopoulos, George},
-  journal={IEEE Transactions on Vehicular Technology},
-  year={2026},
-  doi={10.1109/TVT.2026.3750670}
-}
-```
-
 ## License
 
 This project is distributed under the GPL license. See the repository license information for details.
+
+## Citation
+
+Citation details will be added here.
